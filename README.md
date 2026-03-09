@@ -8,6 +8,7 @@ Workspace local en Python para construir una **aplicación de escritorio geostat
 
 - `geostatspy/` se mantiene como **submódulo Git** (fuente upstream de GeostatsPy).
 - `app/` contiene la arquitectura inicial de la aplicación de escritorio con CustomTkinter.
+- Ya está implementado el primer caso de uso real: **carga de CSV end-to-end** desde la GUI.
 - Existe una separación explícita entre:
   - UI (`app/ui`)
   - lógica de aplicación (`app/services`)
@@ -50,15 +51,19 @@ Con el entorno activado y desde la raíz del repo:
 python -m app.main
 ```
 
-La aplicación abre una ventana de escritorio con:
-- encabezado del proyecto
-- panel principal
-- botones placeholder para:
-  - Cargar CSV
-  - Análisis variográfico
-  - Kriging
-  - Simulación SGS
-  - Visualización
+## Probar la carga de CSV en la GUI
+
+1. Ejecuta `python -m app.main`.
+2. Haz clic en **Cargar CSV**.
+3. Selecciona un archivo `.csv` local.
+4. Verás en pantalla:
+   - estado de carga
+   - nombre y ruta del archivo
+   - filas y columnas
+   - nombres de columnas
+   - preview de las primeras 5 filas
+
+Si cancelas el diálogo o hay error de lectura, la app no se cierra y muestra un mensaje amigable.
 
 ## Estructura del proyecto
 
@@ -75,23 +80,21 @@ GeoStat_py/
 ├─ workflows/                  # documentación/guías de flujos geostatísticos
 ├─ data/                       # datasets locales de trabajo
 ├─ notebooks/                  # notebooks exploratorios
-├─ tests/                      # smoke tests iniciales
+├─ tests/                      # tests mínimos y smoke tests
 ├─ environment.yml             # entorno reproducible (Conda)
 └─ README.md
 ```
 
-## Prueba rápida (smoke test)
+## Correr tests
 
 ```bash
-python -m unittest tests/test_imports.py
+python -m unittest tests/test_imports.py tests/test_csv_loading.py
 ```
 
 ## Roadmap técnico sugerido
 
-1. **Carga CSV real**
-   - Selector de archivo en UI.
-   - Validación de columnas y tipos.
-   - Creación de `DatasetModel` desde `pandas.DataFrame`.
+1. **Validación de schema CSV**
+   - Validar columnas requeridas por workflow geostatístico.
 2. **Variografía inicial**
    - Implementar métodos en `GeostatSpyAdapter` para llamadas concretas a GeostatsPy.
    - Exponer casos de uso en `GeostatService`.
