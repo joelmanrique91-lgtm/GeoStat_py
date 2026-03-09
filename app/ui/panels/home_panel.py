@@ -40,6 +40,7 @@ class HomePanel(ctk.CTkFrame):
     def _build_layout(self) -> None:
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
+
         self._build_header().grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         body = ctk.CTkFrame(self)
@@ -50,6 +51,11 @@ class HomePanel(ctk.CTkFrame):
         body.grid_rowconfigure(0, weight=1)
 
         self._build_sidebar(body).grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=8)
+        body.grid_columnconfigure(2, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+
+        self.sidebar = self._build_sidebar(body)
+        self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=8)
 
         self.center_panel = ctk.CTkFrame(body)
         self.center_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 8), pady=8)
