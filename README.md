@@ -2,17 +2,17 @@
 
 Workspace local en Python para construir una **aplicación de escritorio geostatística** sobre la base de **GeostatsPy**.
 
-> Objetivo de esta etapa: dejar una base limpia, reproducible y mantenible para evolucionar una GUI local (no web) en Windows + Anaconda.
+> Objetivo de esta etapa: mantener una base limpia, reproducible y usable para trabajo diario en Windows + Anaconda.
 
 ## Estado actual del proyecto
 
 - `geostatspy/` se mantiene como **submódulo Git** (fuente upstream de GeostatsPy).
-- `app/` contiene la arquitectura inicial de la aplicación de escritorio con CustomTkinter.
-- Ya está implementado el primer caso de uso real: **carga de CSV end-to-end** desde la GUI.
-- Existe una separación explícita entre:
-  - UI (`app/ui`)
-  - lógica de aplicación (`app/services`)
-  - integración externa (`app/adapters`)
+- GUI local con **CustomTkinter**.
+- Funcionalidades ya operativas:
+  - carga de CSV end-to-end
+  - botón **Actualizar repo** desde la GUI (`git pull` + actualización de submódulos)
+  - configuración de columnas **X / Y / Z / target**
+  - EDA inicial del dataset y de la variable objetivo seleccionada
 
 ## Requisitos
 
@@ -21,15 +21,13 @@ Workspace local en Python para construir una **aplicación de escritorio geostat
 
 ## Inicializar el repositorio y submódulos
 
-Desde la raíz del proyecto:
-
 ```bash
 git clone <TU_URL_DEL_REPO>
 cd GeoStat_py
 git submodule update --init --recursive
 ```
 
-Si el submódulo ya existe pero está vacío, corre nuevamente:
+Si el submódulo aparece vacío:
 
 ```bash
 git submodule sync --recursive
@@ -43,27 +41,45 @@ conda env create -f environment.yml
 conda activate geostat-py
 ```
 
-## Lanzar la GUI local
-
-Con el entorno activado y desde la raíz del repo:
+## Comando estándar de arranque
 
 ```bash
 python -m app.main
 ```
 
-## Probar la carga de CSV en la GUI
+## Flujo de uso recomendado
 
-1. Ejecuta `python -m app.main`.
-2. Haz clic en **Cargar CSV**.
-3. Selecciona un archivo `.csv` local.
-4. Verás en pantalla:
-   - estado de carga
-   - nombre y ruta del archivo
-   - filas y columnas
-   - nombres de columnas
-   - preview de las primeras 5 filas
+1. Abrir la app con `python -m app.main`.
+2. (Opcional) Presionar **Actualizar repo**.
+   - Ejecuta `git pull` en la raíz del repo.
+   - Ejecuta `git submodule update --init --recursive`.
+   - Muestra salida en pantalla.
+   - Si hubo cambios, la app sugiere reiniciar.
+3. Presionar **Cargar CSV** y seleccionar archivo `.csv`.
+4. Revisar resumen del dataset:
+   - nombre/ruta
+   - filas/columnas
+   - columnas
+   - preview inicial
+5. Configurar columnas:
+   - **X**
+   - **Y**
+   - **Z**
+   - **Target**
+6. Presionar **Aplicar configuración** para obtener EDA inicial.
 
-Si cancelas el diálogo o hay error de lectura, la app no se cierra y muestra un mensaje amigable.
+## Qué muestra la EDA inicial
+
+- filas y columnas
+- nombres de columnas
+- tipo de dato por columna
+- nulos por columna
+- columnas numéricas detectadas
+- configuración actual X/Y/Z/target
+- estadísticos de target (si es numérico):
+  - count, mean, std, min, 25%, 50%, 75%, max
+
+Si target no es numérico, la app lo informa de forma amigable.
 
 ## Estructura del proyecto
 
@@ -77,38 +93,22 @@ GeoStat_py/
 │  ├─ adapters/                # integración con geostatspy
 │  ├─ models/                  # modelos de datos
 │  └─ utils/                   # utilidades comunes
-├─ workflows/                  # documentación/guías de flujos geostatísticos
-├─ data/                       # datasets locales de trabajo
-├─ notebooks/                  # notebooks exploratorios
 ├─ tests/                      # tests mínimos y smoke tests
-├─ environment.yml             # entorno reproducible (Conda)
+├─ workflows/
+├─ data/
+├─ notebooks/
+├─ environment.yml
 └─ README.md
 ```
 
 ## Correr tests
 
 ```bash
-python -m unittest tests/test_imports.py tests/test_csv_loading.py
+python -m unittest tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
 ```
 
-## Roadmap técnico sugerido
+## Principios de diseño
 
-1. **Validación de schema CSV**
-   - Validar columnas requeridas por workflow geostatístico.
-2. **Variografía inicial**
-   - Implementar métodos en `GeostatSpyAdapter` para llamadas concretas a GeostatsPy.
-   - Exponer casos de uso en `GeostatService`.
-3. **Kriging y SGS**
-   - Encapsular parámetros y resultados en modelos (`app/models`).
-   - Mantener UI desacoplada de la API cruda.
-4. **Visualización local**
-   - Integrar gráficas con `matplotlib` embebidas en CustomTkinter.
-5. **Calidad y trazabilidad**
-   - Expandir tests por capas (adapter/service/ui smoke).
-   - Definir convención de configuración y logging.
-
-## Principios de diseño adoptados
-
-- Mantener `geostatspy` como dependencia base sin alterar innecesariamente su código.
-- Evitar mezclar UI con llamadas directas a librerías externas.
-- Priorizar claridad para iteración incremental, sin sobreingeniería.
+- No mezclar UI con lógica pesada.
+- Mantener `geostatspy` intacto como dependencia base.
+- Evolucionar por iteraciones simples, útiles y mantenibles.
