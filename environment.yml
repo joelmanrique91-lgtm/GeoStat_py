@@ -1,0 +1,15 @@
+name: geostat-py
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - jupyter
+  - pip
+  - pip:
+      - customtkinter
