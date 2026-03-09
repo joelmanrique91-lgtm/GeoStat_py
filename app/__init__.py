@@ -1,0 +1,1 @@
+"""GeoStat desktop application package."""
