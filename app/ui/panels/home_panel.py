@@ -1,4 +1,4 @@
-"""Workflow-oriented dashboard with dominant visual EDA panels."""
+"""Workflow-oriented dashboard with dominant visual geoestatistical panels."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ from tkinter import filedialog
 import threading
 
 import customtkinter as ctk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
 
 from app.services.geostat_service import GeostatService
+from app.ui.panels.dashboard_grid import DashboardGrid
 
 
 class HomePanel(ctk.CTkFrame):
@@ -24,6 +23,11 @@ class HomePanel(ctk.CTkFrame):
         self.step_label = ctk.StringVar(value="Paso actual: Datos")
         self.status_text = ctk.StringVar(value="Listo")
         self.qc_semaphore = ctk.StringVar(value="Semáforo QA/QC: N/A")
+        self.swath_bins_var = ctk.StringVar(value="20")
+        self.variogram_lag_var = ctk.StringVar(value="10")
+        self.variogram_nlags_var = ctk.StringVar(value="12")
+        self.variogram_maxdist_var = ctk.StringVar(value="120")
+        self.variogram_mode_var = ctk.StringVar(value="omnidireccional")
 
         self.x_var = ctk.StringVar(value="")
         self.y_var = ctk.StringVar(value="")
@@ -38,53 +42,48 @@ class HomePanel(ctk.CTkFrame):
         self._render_step("Datos")
 
     def _build_layout(self) -> None:
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self._build_header().grid(row=0, column=0, sticky="ew", pady=(0, 6))
 
         body = ctk.CTkFrame(self)
-        body.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        body.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
         body.grid_columnconfigure(0, weight=0)
         body.grid_columnconfigure(1, weight=1)
-        body.grid_columnconfigure(2, weight=2)
-        body.grid_rowconfigure(0, weight=1)
-
-        self._build_sidebar(body).grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=8)
-        body.grid_columnconfigure(2, weight=1)
+        body.grid_columnconfigure(2, weight=4)
         body.grid_rowconfigure(0, weight=1)
 
         self.sidebar = self._build_sidebar(body)
-        self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=8)
+        self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=6)
 
-        self.center_panel = ctk.CTkFrame(body)
-        self.center_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 8), pady=8)
+        self.center_panel = ctk.CTkFrame(body, width=280)
+        self.center_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 6), pady=6)
 
         self.right_panel = ctk.CTkFrame(body)
-        self.right_panel.grid(row=0, column=2, sticky="nsew", pady=8)
+        self.right_panel.grid(row=0, column=2, sticky="nsew", pady=6)
         self.right_panel.grid_columnconfigure(0, weight=1)
         self.right_panel.grid_rowconfigure(1, weight=1)
 
         self._build_summary_cards(self.right_panel)
         self.eda_tabs = ctk.CTkTabview(self.right_panel)
         self.eda_tabs.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        self.eda_tabs.add("Resumen")
-        self.eda_tabs.add("Univariado")
-        self.eda_tabs.add("Espacial")
+        for tab_name in ["Resumen", "Univariado", "Espacial", "Swath", "Variografía"]:
+            self.eda_tabs.add(tab_name)
 
         self.log_panel = ctk.CTkFrame(self)
         self.log_panel.grid(row=2, column=0, sticky="ew")
-        self.log_panel.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(self.log_panel, text="Ocultar/Mostrar log", width=150, command=self._toggle_log).grid(row=0, column=0, sticky="w", padx=8, pady=4)
-        self.log_box = ctk.CTkTextbox(self.log_panel, height=80)
-        self.log_box.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.log_panel.grid_columnconfigure(1, weight=1)
+        ctk.CTkButton(self.log_panel, text="Ocultar/Mostrar log", width=140, command=self._toggle_log).grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        self.log_box = ctk.CTkTextbox(self.log_panel, height=65)
+        self.log_box.grid(row=0, column=1, sticky="ew", padx=8, pady=4)
         self.log_box.insert("1.0", "Actividad reciente\n")
         self.log_box.configure(state="disabled")
 
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py | Exploración Visual Geoestadística", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
+        ctk.CTkLabel(header, text="GeoStat Py | Dashboard Geoestadístico", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
 
         context = ctk.CTkFrame(header)
         context.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
@@ -100,7 +99,7 @@ class HomePanel(ctk.CTkFrame):
         return header
 
     def _build_sidebar(self, parent: ctk.CTkFrame) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(parent, width=230)
+        frame = ctk.CTkFrame(parent, width=220)
         frame.grid_propagate(False)
         ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(10, 6))
         for idx, (step, state) in enumerate(self.service.get_workflow_step_status(), start=1):
@@ -130,7 +129,7 @@ class HomePanel(ctk.CTkFrame):
             self._render_data_step()
         elif step_name == "QA/QC":
             self._render_qaqc_step()
-        elif step_name in {"EDA", "Espacial"}:
+        elif step_name in {"EDA", "Espacial", "Variografía"}:
             self._render_eda_step(step_name)
         else:
             self._render_future_step(step_name)
@@ -156,7 +155,19 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_eda_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
-        ctk.CTkButton(self.center_panel, text="Actualizar visuales", command=self._render_visuals).pack(fill="x", padx=8, pady=(0, 8))
+        ctk.CTkButton(self.center_panel, text="Actualizar dashboards", command=self._render_visuals).pack(fill="x", padx=8, pady=(0, 8))
+
+        controls = ctk.CTkFrame(self.center_panel)
+        controls.pack(fill="x", padx=8, pady=4)
+        ctk.CTkLabel(controls, text="Swath bins").grid(row=0, column=0, sticky="w")
+        ctk.CTkEntry(controls, textvariable=self.swath_bins_var, width=70).grid(row=0, column=1, padx=4)
+        ctk.CTkLabel(controls, text="Lag").grid(row=1, column=0, sticky="w")
+        ctk.CTkEntry(controls, textvariable=self.variogram_lag_var, width=70).grid(row=1, column=1, padx=4)
+        ctk.CTkLabel(controls, text="# Lags").grid(row=2, column=0, sticky="w")
+        ctk.CTkEntry(controls, textvariable=self.variogram_nlags_var, width=70).grid(row=2, column=1, padx=4)
+        ctk.CTkLabel(controls, text="Dist máx").grid(row=3, column=0, sticky="w")
+        ctk.CTkEntry(controls, textvariable=self.variogram_maxdist_var, width=70).grid(row=3, column=1, padx=4)
+        ctk.CTkOptionMenu(controls, variable=self.variogram_mode_var, values=["omnidireccional"]).grid(row=4, column=0, columnspan=2, pady=4, sticky="ew")
 
     def _render_future_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
@@ -205,47 +216,114 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_visuals(self) -> None:
         result = self.service.prepare_visual_data()
-        if not result.success:
+        if not result.success or result.spatial_data is None:
             self.status_text.set(result.message)
             self._append_activity(result.message)
             self._set_summary_tab_text(result.message)
             return
 
-        self._render_univariate_plots(result.target_values)
-        self._render_spatial_scatter(result.x_values, result.y_values, result.target_values)
+        spatial = result.spatial_data
+        self._render_univariate_plots(spatial.target)
+        self._render_spatial_dashboard(spatial)
+        self._render_swath_dashboard()
+        self._render_variogram_dashboard()
         self._set_summary_tab_text(self.service.build_eda_summary())
 
     def _render_univariate_plots(self, values: list[float]) -> None:
         tab = self.eda_tabs.tab("Univariado")
-        for child in tab.winfo_children():
-            child.destroy()
-        fig = Figure(figsize=(6.5, 3.6), dpi=100)
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122)
+        DashboardGrid.clear(tab)
+        dashboard = DashboardGrid(tab, 1, 2)
+        ax1 = dashboard.axis(0, 0)
+        ax2 = dashboard.axis(0, 1)
         ax1.hist(values, bins=20, color="#4c78a8", edgecolor="white")
         ax1.set_title("Histograma target")
         ax2.boxplot(values, vert=True, patch_artist=True)
         ax2.set_title("Boxplot target")
-        fig.tight_layout()
-        canvas = FigureCanvasTkAgg(fig, master=tab)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+        dashboard.render()
 
-    def _render_spatial_scatter(self, x: list[float], y: list[float], target: list[float]) -> None:
+    def _render_spatial_dashboard(self, spatial_data) -> None:
         tab = self.eda_tabs.tab("Espacial")
-        for child in tab.winfo_children():
-            child.destroy()
-        fig = Figure(figsize=(6.5, 3.8), dpi=100)
-        ax = fig.add_subplot(111)
-        scatter = ax.scatter(x, y, c=target, cmap="viridis", s=16)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_title("Scatter XY coloreado por target")
-        fig.colorbar(scatter, ax=ax, shrink=0.85, label="Target")
-        fig.tight_layout()
-        canvas = FigureCanvasTkAgg(fig, master=tab)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+        DashboardGrid.clear(tab)
+        dashboard = DashboardGrid(tab, 2, 2, figsize=(8.4, 6.2))
+
+        ax_xy = dashboard.axis(0, 0)
+        ax_xz = dashboard.axis(0, 1)
+        ax_yz = dashboard.axis(1, 0)
+        ax_hist = dashboard.axis(1, 1)
+
+        sc1 = ax_xy.scatter(spatial_data.x, spatial_data.y, c=spatial_data.target, cmap="viridis", s=14)
+        ax_xy.set_xlabel("X")
+        ax_xy.set_ylabel("Y")
+        ax_xy.set_title("XY")
+
+        sc2 = ax_xz.scatter(spatial_data.x, spatial_data.z, c=spatial_data.target, cmap="viridis", s=14)
+        ax_xz.set_xlabel("X")
+        ax_xz.set_ylabel("Z")
+        ax_xz.set_title("XZ")
+
+        sc3 = ax_yz.scatter(spatial_data.y, spatial_data.z, c=spatial_data.target, cmap="viridis", s=14)
+        ax_yz.set_xlabel("Y")
+        ax_yz.set_ylabel("Z")
+        ax_yz.set_title("YZ")
+
+        ax_hist.hist(spatial_data.target, bins=20, color="#72b7b2", edgecolor="white")
+        ax_hist.set_title("Distribución target")
+
+        for sc, ax in [(sc1, ax_xy), (sc2, ax_xz), (sc3, ax_yz)]:
+            dashboard.figure.colorbar(sc, ax=ax, shrink=0.75, label="Target")
+        dashboard.render()
+
+    def _render_swath_dashboard(self) -> None:
+        tab = self.eda_tabs.tab("Swath")
+        DashboardGrid.clear(tab)
+        try:
+            bins = int(self.swath_bins_var.get() or "20")
+            swaths = self.service.prepare_swath_data(bins=bins)
+        except Exception as exc:
+            ctk.CTkLabel(tab, text=f"No fue posible renderizar swath: {exc}").pack(anchor="w", padx=8, pady=8)
+            return
+
+        dashboard = DashboardGrid(tab, 3, 1, figsize=(8.2, 7.0))
+        for idx, axis_name in enumerate(["X", "Y", "Z"]):
+            series = swaths[axis_name]
+            ax = dashboard.axis(idx, 0)
+            ax.plot(series.centers, series.means, marker="o", color="#4c78a8", label="Mean target")
+            ax.set_title(f"Swath {axis_name}")
+            ax.set_ylabel("Mean")
+            ax2 = ax.twinx()
+            ax2.bar(series.centers, series.counts, alpha=0.2, color="#f58518", width=(max(series.centers)-min(series.centers))/max(len(series.centers),1))
+            ax2.set_ylabel("N")
+        dashboard.axis(2, 0).set_xlabel("Coordenada")
+        dashboard.render()
+
+    def _render_variogram_dashboard(self) -> None:
+        tab = self.eda_tabs.tab("Variografía")
+        DashboardGrid.clear(tab)
+        try:
+            result = self.service.prepare_variogram_data(
+                lag=float(self.variogram_lag_var.get() or "10"),
+                n_lags=int(self.variogram_nlags_var.get() or "12"),
+                max_distance=float(self.variogram_maxdist_var.get() or "120"),
+                mode=self.variogram_mode_var.get(),
+            )
+        except Exception as exc:
+            ctk.CTkLabel(tab, text=f"Variograma no disponible: {exc}").pack(anchor="w", padx=8, pady=8)
+            return
+
+        dashboard = DashboardGrid(tab, 1, 2, figsize=(8.4, 4.6))
+        ax = dashboard.axis(0, 0)
+        ax.plot(result.lag_centers, result.gamma_values, marker="o", color="#54a24b")
+        ax.set_title("Variograma experimental")
+        ax.set_xlabel("Lag")
+        ax.set_ylabel("γ(h)")
+
+        ax_tbl = dashboard.axis(0, 1)
+        ax_tbl.axis("off")
+        rows = [[f"{h:.2f}", f"{g:.4g}", str(n)] for h, g, n in zip(result.lag_centers, result.gamma_values, result.pair_counts)]
+        table = ax_tbl.table(cellText=rows[:12], colLabels=["Lag", "Gamma", "Pares"], loc="center")
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        dashboard.render()
 
     def _set_summary_tab_text(self, text: str) -> None:
         tab = self.eda_tabs.tab("Resumen")
@@ -255,14 +333,6 @@ class HomePanel(ctk.CTkFrame):
         box.pack(fill="both", expand=True, padx=6, pady=6)
         box.insert("1.0", text)
         box.configure(state="disabled")
-
-        stats = self.service.get_target_statistics_table()
-        if stats:
-            tbl = ctk.CTkFrame(tab)
-            tbl.pack(fill="x", padx=6, pady=(0, 6))
-            for i, (k, v) in enumerate(stats):
-                ctk.CTkLabel(tbl, text=k, width=90, anchor="w").grid(row=i // 4, column=(i % 4) * 2, sticky="w", padx=4, pady=1)
-                ctk.CTkLabel(tbl, text=v, anchor="w").grid(row=i // 4, column=(i % 4) * 2 + 1, sticky="w", padx=4, pady=1)
 
     def _refresh_summary_cards(self) -> None:
         cards = self.service.get_summary_cards()
