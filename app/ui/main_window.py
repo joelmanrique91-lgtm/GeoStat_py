@@ -17,23 +17,15 @@ class MainWindow:
         ctk.set_default_color_theme("blue")
 
         self.root = ctk.CTk()
-        self.root.title("GeoStat Py - Desktop Workspace")
-        self.root.geometry("920x600")
-        self.root.minsize(860, 540)
+        self.root.title("GeoStat Py - Geostatistics Desktop")
+        self.root.geometry("1280x820")
+        self.root.minsize(1100, 720)
 
         self._build_layout()
 
     def _build_layout(self) -> None:
-        header = ctk.CTkLabel(
-            self.root,
-            text="GeoStat Py | Local Geostatistics Desktop Workspace",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            anchor="w",
-        )
-        header.pack(fill="x", padx=20, pady=(16, 8))
-
         home_panel = HomePanel(parent=self.root, service=self.service)
-        home_panel.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        home_panel.pack(fill="both", expand=True, padx=12, pady=12)
 
     def run(self) -> None:
         """Start the Tkinter event loop."""

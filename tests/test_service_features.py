@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+
+try:
+    import pandas  # noqa: F401
+    HAS_PANDAS = True
+except ModuleNotFoundError:
+    HAS_PANDAS = False
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +17,7 @@ from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.services.geostat_service import GeostatService
 
 
+@unittest.skipUnless(HAS_PANDAS, "pandas no disponible en este entorno")
 class ServiceFeatureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = GeostatService(adapter=GeostatSpyAdapter())
@@ -59,6 +66,12 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("actualizado", result.message.lower())
         self.assertFalse(result.restart_recommended)
+
+    def test_module_not_implemented_logs_message(self) -> None:
+        message = self.service.module_not_implemented("Kriging")
+
+        self.assertIn("aún no implementado", message)
+        self.assertIn("Kriging", message)
 
 
 if __name__ == "__main__":

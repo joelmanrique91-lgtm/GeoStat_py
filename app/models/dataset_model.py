@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 @dataclass
@@ -17,11 +19,11 @@ class DatasetModel:
     row_count: int
     column_count: int
     columns: list[str]
-    preview: pd.DataFrame
-    dataframe: pd.DataFrame
+    preview: Any
+    dataframe: Any
 
     @classmethod
-    def from_dataframe(cls, file_path: Path, dataframe: pd.DataFrame, preview_rows: int = 5) -> "DatasetModel":
+    def from_dataframe(cls, file_path: Path, dataframe: Any, preview_rows: int = 5) -> "DatasetModel":
         """Create model from a loaded dataframe and file metadata."""
         normalized_path = file_path.resolve()
         return cls(

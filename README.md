@@ -1,114 +1,85 @@
 # GeoStat_py
 
-Workspace local en Python para construir una **aplicación de escritorio geostatística** sobre la base de **GeostatsPy**.
+Aplicación de escritorio local para workflows geostatísticos en Python, construida sobre GeostatsPy, pensada para uso diario en **Windows + Anaconda**.
 
-> Objetivo de esta etapa: mantener una base limpia, reproducible y usable para trabajo diario en Windows + Anaconda.
-
-## Estado actual del proyecto
-
-- `geostatspy/` se mantiene como **submódulo Git** (fuente upstream de GeostatsPy).
-- GUI local con **CustomTkinter**.
-- Funcionalidades ya operativas:
-  - carga de CSV end-to-end
-  - botón **Actualizar repo** desde la GUI (`git pull` + actualización de submódulos)
-  - configuración de columnas **X / Y / Z / target**
-  - EDA inicial del dataset y de la variable objetivo seleccionada
-
-## Requisitos
-
-- Windows con Anaconda o Miniconda
-- Git
-
-## Inicializar el repositorio y submódulos
+## Arranque estándar (Windows + Anaconda)
 
 ```bash
-git clone <TU_URL_DEL_REPO>
-cd GeoStat_py
-git submodule update --init --recursive
-```
-
-Si el submódulo aparece vacío:
-
-```bash
-git submodule sync --recursive
-git submodule update --init --recursive
-```
-
-## Crear entorno local (Anaconda)
-
-```bash
-conda env create -f environment.yml
 conda activate geostat-py
-```
-
-## Comando estándar de arranque
-
-```bash
+cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
+## Qué incluye esta versión
+
+- UI reorganizada en paneles funcionales:
+  1. Header / toolbar
+  2. Dataset
+  3. Configuración espacial (X/Y/Z/target)
+  4. EDA inicial
+  5. Workflows no implementados + actividad reciente
+- Botón **Actualizar repo** (`git pull` + `git submodule update --init --recursive`).
+- Botón **Exportar log** para guardar la sesión en `.jsonl`.
+- Logging persistente de actividad y errores en JSONL por sesión.
+
 ## Flujo de uso recomendado
 
-1. Abrir la app con `python -m app.main`.
+1. Iniciar app (`python -m app.main`).
 2. (Opcional) Presionar **Actualizar repo**.
-   - Ejecuta `git pull` en la raíz del repo.
-   - Ejecuta `git submodule update --init --recursive`.
-   - Muestra salida en pantalla.
-   - Si hubo cambios, la app sugiere reiniciar.
-3. Presionar **Cargar CSV** y seleccionar archivo `.csv`.
-4. Revisar resumen del dataset:
-   - nombre/ruta
-   - filas/columnas
+3. Presionar **Cargar CSV**.
+4. Revisar resumen del dataset (archivo, ruta, filas, columnas, preview).
+5. Seleccionar **X / Y / Z / target** y presionar **Aplicar configuración**.
+6. Revisar EDA inicial:
    - columnas
-   - preview inicial
-5. Configurar columnas:
-   - **X**
-   - **Y**
-   - **Z**
-   - **Target**
-6. Presionar **Aplicar configuración** para obtener EDA inicial.
+   - dtypes
+   - nulos
+   - columnas numéricas
+   - estadísticos del target (si es numérico)
 
-## Qué muestra la EDA inicial
+## Módulos no implementados
 
-- filas y columnas
-- nombres de columnas
-- tipo de dato por columna
-- nulos por columna
-- columnas numéricas detectadas
-- configuración actual X/Y/Z/target
-- estadísticos de target (si es numérico):
-  - count, mean, std, min, 25%, 50%, 75%, max
+Los módulos de:
+- Análisis variográfico
+- Kriging
+- Simulación SGS
+- Visualización
 
-Si target no es numérico, la app lo informa de forma amigable.
+se muestran como **Próximamente**. Si haces clic, la app muestra un mensaje claro y registra el evento en el log.
 
-## Estructura del proyecto
+## Logs de actividad (JSONL)
 
-```text
-GeoStat_py/
-├─ geostatspy/                 # submódulo GeostatsPy (upstream)
-├─ app/
-│  ├─ main.py                  # entry point GUI
-│  ├─ ui/                      # componentes visuales
-│  ├─ services/                # lógica de aplicación
-│  ├─ adapters/                # integración con geostatspy
-│  ├─ models/                  # modelos de datos
-│  └─ utils/                   # utilidades comunes
-├─ tests/                      # tests mínimos y smoke tests
-├─ workflows/
-├─ data/
-├─ notebooks/
-├─ environment.yml
-└─ README.md
-```
+- Carpeta: `logs/`
+- Formato: 1 evento JSON por línea (`.jsonl`)
+- Se genera un archivo por sesión (`session_YYYYMMDD_HHMMSS.jsonl`)
+- Eventos mínimos registrados:
+  - `app_started`
+  - `repo_update_started`
+  - `repo_update_finished`
+  - `csv_load_started`
+  - `csv_load_cancelled`
+  - `csv_load_succeeded`
+  - `csv_load_failed`
+  - `variable_config_applied`
+  - `placeholder_module_clicked`
+  - `export_log_requested`
+  - `app_error`
 
-## Correr tests
+Esto permite adjuntar el `.jsonl` en ChatGPT para diagnóstico post-sesión.
+
+## Botón Exportar log
+
+- Abre selector de ubicación.
+- Copia el log de la sesión actual a la ruta elegida.
+- Fuerza extensión `.jsonl` si no se especifica.
+
+## Tests
 
 ```bash
-python -m unittest tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
+python -m unittest tests/test_activity_log.py tests/test_service_features.py tests/test_csv_loading.py tests/test_imports.py
 ```
 
-## Principios de diseño
+## Notas de arquitectura
 
-- No mezclar UI con lógica pesada.
-- Mantener `geostatspy` intacto como dependencia base.
-- Evolucionar por iteraciones simples, útiles y mantenibles.
+- Se mantiene separación por capas: `ui/`, `services/`, `models/`, `utils/`.
+- `geostatspy/` se mantiene intacto como submódulo base.
+- No se usa web/streamlit ni Qt.

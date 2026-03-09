@@ -13,7 +13,7 @@ class ImportSmokeTests(unittest.TestCase):
 
         message = service.variogram_placeholder()
         self.assertIsInstance(message, str)
-        self.assertIn("Placeholder", message)
+        self.assertIn("no implementado", message)
 
 
 if __name__ == "__main__":

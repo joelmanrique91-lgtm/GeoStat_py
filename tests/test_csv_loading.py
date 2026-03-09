@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+
+try:
+    import pandas  # noqa: F401
+    HAS_PANDAS = True
+except ModuleNotFoundError:
+    HAS_PANDAS = False
 from pathlib import Path
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.services.geostat_service import GeostatService
 
 
+@unittest.skipUnless(HAS_PANDAS, "pandas no disponible en este entorno")
 class CsvLoadingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = GeostatService(adapter=GeostatSpyAdapter())
