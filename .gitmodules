@@ -1,0 +1,3 @@
+[submodule "geostatspy"]
+	path = geostatspy
+	url = https://github.com/GeostatsGuy/GeostatsPy.git
