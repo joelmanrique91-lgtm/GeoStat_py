@@ -1,4 +1,4 @@
-"""Workflow-oriented dashboard panel for geostatistics."""
+"""Workflow-oriented dashboard with dominant visual EDA panels."""
 
 from __future__ import annotations
 
@@ -6,23 +6,23 @@ from tkinter import filedialog
 import threading
 
 import customtkinter as ctk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from app.services.geostat_service import GeostatService
 
 
 class HomePanel(ctk.CTkFrame):
-    """UI structured as workflow navigation + controls + results."""
-
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent)
         self.service = service
 
-        self.status_text = ctk.StringVar(value="Listo para trabajar.")
         self.dataset_label = ctk.StringVar(value="Dataset: No cargado")
         self.target_label = ctk.StringVar(value="Target: No definido")
         self.domain_label = ctk.StringVar(value="Dominio activo: No definido")
         self.support_label = ctk.StringVar(value="Soporte activo: No definido")
         self.step_label = ctk.StringVar(value="Paso actual: Datos")
+        self.status_text = ctk.StringVar(value="Listo")
         self.qc_semaphore = ctk.StringVar(value="Semáforo QA/QC: N/A")
 
         self.x_var = ctk.StringVar(value="")
@@ -33,8 +33,7 @@ class HomePanel(ctk.CTkFrame):
         self.domain_var = ctk.StringVar(value="")
 
         self.log_visible = True
-        self.step_buttons: dict[str, ctk.CTkButton] = {}
-
+        self.summary_value_labels: dict[str, ctk.CTkLabel] = {}
         self._build_layout()
         self._render_step("Datos")
 
@@ -48,6 +47,10 @@ class HomePanel(ctk.CTkFrame):
         body.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         body.grid_columnconfigure(0, weight=0)
         body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(2, weight=2)
+        body.grid_rowconfigure(0, weight=1)
+
+        self._build_sidebar(body).grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=8)
         body.grid_columnconfigure(2, weight=1)
         body.grid_rowconfigure(0, weight=1)
 
@@ -57,218 +60,223 @@ class HomePanel(ctk.CTkFrame):
         self.center_panel = ctk.CTkFrame(body)
         self.center_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 8), pady=8)
 
-        self.result_panel = ctk.CTkFrame(body)
-        self.result_panel.grid(row=0, column=2, sticky="nsew", pady=8)
-        self.result_panel.grid_rowconfigure(1, weight=1)
-        self.result_panel.grid_columnconfigure(0, weight=1)
+        self.right_panel = ctk.CTkFrame(body)
+        self.right_panel.grid(row=0, column=2, sticky="nsew", pady=8)
+        self.right_panel.grid_columnconfigure(0, weight=1)
+        self.right_panel.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(self.result_panel, text="Resultados y vista previa", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=12, pady=(10, 6)
-        )
-        self.result_box = ctk.CTkTextbox(self.result_panel)
-        self.result_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        self.result_box.insert("1.0", "Selecciona una etapa del workflow para comenzar.")
-        self.result_box.configure(state="disabled")
+        self._build_summary_cards(self.right_panel)
+        self.eda_tabs = ctk.CTkTabview(self.right_panel)
+        self.eda_tabs.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.eda_tabs.add("Resumen")
+        self.eda_tabs.add("Univariado")
+        self.eda_tabs.add("Espacial")
 
         self.log_panel = ctk.CTkFrame(self)
         self.log_panel.grid(row=2, column=0, sticky="ew")
         self.log_panel.grid_columnconfigure(0, weight=1)
-        self.log_panel.grid_rowconfigure(1, weight=1)
-
-        self.toggle_log_button = ctk.CTkButton(
-            self.log_panel,
-            text="Ocultar log técnico",
-            width=160,
-            command=self._toggle_log,
-        )
-        self.toggle_log_button.grid(row=0, column=0, sticky="w", padx=8, pady=(4, 4))
-
-        self.log_box = ctk.CTkTextbox(self.log_panel, height=120)
+        ctk.CTkButton(self.log_panel, text="Ocultar/Mostrar log", width=150, command=self._toggle_log).grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        self.log_box = ctk.CTkTextbox(self.log_panel, height=80)
         self.log_box.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        self.log_box.insert("1.0", "Actividad reciente\n----------------\n")
+        self.log_box.insert("1.0", "Actividad reciente\n")
         self.log_box.configure(state="disabled")
 
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self)
         header.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            header,
-            text="GeoStat Py | Workflow geoestadístico guiado",
-            font=ctk.CTkFont(size=19, weight="bold"),
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
+        ctk.CTkLabel(header, text="GeoStat Py | Exploración Visual Geoestadística", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
 
         context = ctk.CTkFrame(header)
         context.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
-        context.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
-
-        for idx, textvar in enumerate(
-            [self.dataset_label, self.target_label, self.domain_label, self.support_label, self.step_label]
-        ):
-            ctk.CTkLabel(context, textvariable=textvar, anchor="w").grid(row=0, column=idx, sticky="w", padx=4)
+        for idx, tvar in enumerate([self.dataset_label, self.target_label, self.domain_label, self.support_label, self.step_label]):
+            ctk.CTkLabel(context, textvariable=tvar).grid(row=0, column=idx, padx=8, sticky="w")
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8)
-        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=130, command=self._on_update_repo)
+        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=120, command=self._on_update_repo)
         self.update_repo_button.pack(side="left", padx=4)
-        ctk.CTkButton(actions, text="Exportar log", width=120, command=self._on_export_log).pack(side="left", padx=4)
-
+        ctk.CTkButton(actions, text="Exportar log", width=110, command=self._on_export_log).pack(side="left", padx=4)
+        ctk.CTkLabel(actions, textvariable=self.status_text).pack(side="left", padx=6)
         return header
 
     def _build_sidebar(self, parent: ctk.CTkFrame) -> ctk.CTkFrame:
-        sidebar = ctk.CTkFrame(parent, width=220)
-        sidebar.grid_propagate(False)
-
-        ctk.CTkLabel(sidebar, text="Workflow", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(10, 6))
-
+        frame = ctk.CTkFrame(parent, width=230)
+        frame.grid_propagate(False)
+        ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(10, 6))
         for idx, (step, state) in enumerate(self.service.get_workflow_step_status(), start=1):
-            label = f"{idx}. {step} [{state}]"
-            btn = ctk.CTkButton(sidebar, text=label, command=lambda step=step: self._on_change_step(step))
-            btn.pack(fill="x", padx=10, pady=3)
-            self.step_buttons[step] = btn
-        return sidebar
+            ctk.CTkButton(frame, text=f"{idx}. {step} [{state}]", command=lambda s=step: self._on_change_step(s)).pack(fill="x", padx=8, pady=3)
+        return frame
+
+    def _build_summary_cards(self, parent: ctk.CTkFrame) -> None:
+        cards = ctk.CTkFrame(parent)
+        cards.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        keys = ["Dataset", "Muestras", "Columnas", "Target", "Estado", "Dominio", "Soporte", "Mean", "Std", "CV"]
+        for i, key in enumerate(keys):
+            ctk.CTkLabel(cards, text=f"{key}:", font=ctk.CTkFont(weight="bold")).grid(row=i // 5, column=(i % 5) * 2, sticky="e", padx=(6, 2), pady=2)
+            lbl = ctk.CTkLabel(cards, text="-")
+            lbl.grid(row=i // 5, column=(i % 5) * 2 + 1, sticky="w", padx=(0, 6), pady=2)
+            self.summary_value_labels[key] = lbl
 
     def _on_change_step(self, step_name: str) -> None:
-        message = self.service.set_workflow_step(step_name)
+        self.status_text.set(self.service.set_workflow_step(step_name))
         self.step_label.set(f"Paso actual: {step_name}")
-        self.status_text.set(message)
-        self._append_activity(message)
+        self._append_activity(self.status_text.get())
         self._render_step(step_name)
 
     def _render_step(self, step_name: str) -> None:
-        for child in self.center_panel.winfo_children():
-            child.destroy()
-
+        for c in self.center_panel.winfo_children():
+            c.destroy()
         if step_name == "Datos":
-            self._build_data_step(self.center_panel)
+            self._render_data_step()
         elif step_name == "QA/QC":
-            self._build_qaqc_step(self.center_panel)
-        elif step_name == "EDA":
-            self._build_eda_step(self.center_panel)
-        elif step_name == "Espacial":
-            self._build_partial_step(self.center_panel, step_name, "Vista espacial preliminar (XY/sections/swath) será implementada en siguiente iteración.")
-        elif step_name == "Exportación":
-            self._build_partial_step(self.center_panel, step_name, "Exportación de resultados geostatísticos se habilitará al completar variografía/estimación.")
+            self._render_qaqc_step()
+        elif step_name in {"EDA", "Espacial"}:
+            self._render_eda_step(step_name)
         else:
-            self._build_future_step(self.center_panel, step_name)
+            self._render_future_step(step_name)
 
-    def _build_data_step(self, parent: ctk.CTkFrame) -> None:
-        parent.grid_columnconfigure((0, 1), weight=1)
-        ctk.CTkLabel(parent, text="Etapa 1: Datos", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
-        ctk.CTkButton(parent, text="Cargar CSV", command=self._on_load_csv).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
+    def _render_data_step(self) -> None:
+        self.center_panel.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkLabel(self.center_panel, text="Etapa Datos", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 4))
+        ctk.CTkButton(self.center_panel, text="Cargar CSV", command=self._on_load_csv).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
 
-        columns = self.service.get_available_columns() or [""]
-        self._make_selector(parent, "X", self.x_var, columns, 2, 0)
-        self._make_selector(parent, "Y", self.y_var, columns, 2, 1)
-        self._make_selector(parent, "Z", self.z_var, columns, 4, 0)
-        self._make_selector(parent, "Target", self.target_var, columns, 4, 1)
-        self._make_selector(parent, "Hole ID", self.hole_var, columns, 6, 0)
-        self._make_selector(parent, "Dominio/Litología", self.domain_var, columns, 6, 1)
+        cols = self.service.get_available_columns() or [""]
+        self._selector("X", self.x_var, cols, 2, 0)
+        self._selector("Y", self.y_var, cols, 2, 1)
+        self._selector("Z", self.z_var, cols, 4, 0)
+        self._selector("Target", self.target_var, cols, 4, 1)
+        self._selector("Hole ID", self.hole_var, cols, 6, 0)
+        self._selector("Dominio", self.domain_var, cols, 6, 1)
+        ctk.CTkButton(self.center_panel, text="Aplicar configuración", command=self._on_apply_config).grid(row=8, column=0, columnspan=2, sticky="ew", padx=8, pady=8)
 
-        if columns and columns[0]:
-            for var in [self.x_var, self.y_var, self.z_var, self.target_var]:
-                if not var.get():
-                    var.set(columns[0])
+    def _render_qaqc_step(self) -> None:
+        ctk.CTkLabel(self.center_panel, text="Etapa QA/QC", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        ctk.CTkButton(self.center_panel, text="Evaluar calidad", command=self._on_evaluate_quality).pack(fill="x", padx=8, pady=(0, 8))
+        ctk.CTkLabel(self.center_panel, textvariable=self.qc_semaphore).pack(anchor="w", padx=8)
 
-        ctk.CTkButton(parent, text="Aplicar configuración espacial", command=self._on_apply_variable_config).grid(
-            row=8, column=0, columnspan=2, sticky="ew", padx=12, pady=(8, 6)
-        )
-        ctk.CTkLabel(parent, textvariable=self.qc_semaphore, anchor="w").grid(row=9, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 10))
+    def _render_eda_step(self, step_name: str) -> None:
+        ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        ctk.CTkButton(self.center_panel, text="Actualizar visuales", command=self._render_visuals).pack(fill="x", padx=8, pady=(0, 8))
 
-    def _build_qaqc_step(self, parent: ctk.CTkFrame) -> None:
-        parent.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(parent, text="Etapa 2: QA/QC", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
-        ctk.CTkLabel(
-            parent,
-            text="Controles actuales: duplicados, nulos en coordenadas/target, numéricas y semáforo de riesgo.\nTratamiento de extremos (top-cut/capping) visible para próxima etapa.",
-            justify="left",
-        ).grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
-        ctk.CTkButton(parent, text="Evaluar calidad", command=self._on_evaluate_quality).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+    def _render_future_step(self, step_name: str) -> None:
+        ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        ctk.CTkLabel(self.center_panel, text="Etapa futura. Se registra intento en log.").pack(anchor="w", padx=8)
+        ctk.CTkButton(self.center_panel, text="Registrar intento", command=lambda: self._on_future_step(step_name)).pack(fill="x", padx=8, pady=8)
 
-    def _build_eda_step(self, parent: ctk.CTkFrame) -> None:
-        parent.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(parent, text="Etapa 3: EDA", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
-        ctk.CTkLabel(parent, text="Submódulos: Univariado | Bivariado | Multivariado (futuro)", anchor="w").grid(
-            row=1, column=0, sticky="w", padx=12, pady=(0, 8)
-        )
-        ctk.CTkButton(parent, text="Actualizar vista EDA", command=self._on_show_eda).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
-
-    def _build_partial_step(self, parent: ctk.CTkFrame, step_name: str, message: str) -> None:
-        parent.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(parent, text=f"Etapa: {step_name}", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=12, pady=(10, 6)
-        )
-        ctk.CTkLabel(parent, text=message, justify="left").grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
-        ctk.CTkButton(parent, text="Registrar intento", command=lambda: self._on_future_step_action(step_name)).grid(
-            row=2, column=0, sticky="ew", padx=12, pady=(0, 10)
-        )
-
-    def _build_future_step(self, parent: ctk.CTkFrame, step_name: str) -> None:
-        self._build_partial_step(parent, step_name, "Etapa planificada, aún no implementada. Se registrará el intento en el log.")
-
-    def _make_selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
-        ctk.CTkLabel(parent, text=label).grid(row=row, column=col, sticky="w", padx=12)
+    def _selector(self, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
+        ctk.CTkLabel(self.center_panel, text=label).grid(row=row, column=col, sticky="w", padx=8)
         state = "normal" if values and values[0] else "disabled"
-        menu = ctk.CTkOptionMenu(parent, variable=variable, values=values, state=state)
-        menu.grid(row=row + 1, column=col, sticky="ew", padx=12, pady=(0, 6))
+        menu = ctk.CTkOptionMenu(self.center_panel, variable=variable, values=values, state=state)
+        menu.grid(row=row + 1, column=col, sticky="ew", padx=8, pady=(0, 6))
 
     def _on_load_csv(self) -> None:
-        file_path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
-        if not file_path:
-            self.service.activity_log.log("csv_load_cancelled", "info", "Carga cancelada por usuario.", {})
-            self.status_text.set("Carga cancelada por usuario.")
-            self._append_activity("Carga CSV cancelada.")
+        path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
+        if not path:
+            self.service.activity_log.log("csv_load_cancelled", "info", "Carga cancelada.", {})
             return
-
-        result = self.service.load_csv(file_path)
+        result = self.service.load_csv(path)
         self.status_text.set(result.message)
-        self._set_result_text(result.details)
         self._append_activity(result.message)
-        if result.success:
+        if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
-            self.qc_semaphore.set("Semáforo QA/QC: pendiente evaluación")
             self._render_step("Datos")
+            self._refresh_summary_cards()
+            self._set_summary_tab_text(result.details)
 
-    def _on_apply_variable_config(self) -> None:
+    def _on_apply_config(self) -> None:
         result = self.service.set_variable_config(
-            x_column=self.x_var.get(),
-            y_column=self.y_var.get(),
-            z_column=self.z_var.get(),
-            target_column=self.target_var.get(),
-            hole_id_column=self.hole_var.get() or None,
-            domain_column=self.domain_var.get() or None,
+            self.x_var.get(), self.y_var.get(), self.z_var.get(), self.target_var.get(), self.hole_var.get() or None, self.domain_var.get() or None
         )
         self.status_text.set(result.message)
-        self._set_result_text(result.eda_summary)
         self._append_activity(result.message)
-
         if result.success:
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio activo: {self.service.workflow_state.active_domain}")
             self.support_label.set(f"Soporte activo: {self.service.workflow_state.active_support}")
+            self._refresh_summary_cards()
+            self._set_summary_tab_text(result.eda_summary)
+            self._render_visuals()
 
     def _on_evaluate_quality(self) -> None:
         semaphore, summary = self.service.evaluate_data_quality()
         self.qc_semaphore.set(f"Semáforo QA/QC: {semaphore.upper()}")
-        self._set_result_text(summary)
-        self.status_text.set("QA/QC evaluado.")
-        self._append_activity(f"QA/QC evaluado ({semaphore}).")
+        self._set_summary_tab_text(summary)
+        self._append_activity(f"QA/QC evaluado: {semaphore}")
 
-    def _on_show_eda(self) -> None:
-        summary = self.service.build_eda_summary()
-        self._set_result_text(summary)
-        self.status_text.set("Vista EDA actualizada.")
-        self._append_activity("EDA abierta/actualizada.")
+    def _render_visuals(self) -> None:
+        result = self.service.prepare_visual_data()
+        if not result.success:
+            self.status_text.set(result.message)
+            self._append_activity(result.message)
+            self._set_summary_tab_text(result.message)
+            return
 
-    def _on_future_step_action(self, step_name: str) -> None:
-        message = self.service.module_not_implemented(step_name)
-        self.status_text.set(message)
-        self._append_activity(message)
+        self._render_univariate_plots(result.target_values)
+        self._render_spatial_scatter(result.x_values, result.y_values, result.target_values)
+        self._set_summary_tab_text(self.service.build_eda_summary())
+
+    def _render_univariate_plots(self, values: list[float]) -> None:
+        tab = self.eda_tabs.tab("Univariado")
+        for child in tab.winfo_children():
+            child.destroy()
+        fig = Figure(figsize=(6.5, 3.6), dpi=100)
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        ax1.hist(values, bins=20, color="#4c78a8", edgecolor="white")
+        ax1.set_title("Histograma target")
+        ax2.boxplot(values, vert=True, patch_artist=True)
+        ax2.set_title("Boxplot target")
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=tab)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+
+    def _render_spatial_scatter(self, x: list[float], y: list[float], target: list[float]) -> None:
+        tab = self.eda_tabs.tab("Espacial")
+        for child in tab.winfo_children():
+            child.destroy()
+        fig = Figure(figsize=(6.5, 3.8), dpi=100)
+        ax = fig.add_subplot(111)
+        scatter = ax.scatter(x, y, c=target, cmap="viridis", s=16)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_title("Scatter XY coloreado por target")
+        fig.colorbar(scatter, ax=ax, shrink=0.85, label="Target")
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=tab)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+
+    def _set_summary_tab_text(self, text: str) -> None:
+        tab = self.eda_tabs.tab("Resumen")
+        for child in tab.winfo_children():
+            child.destroy()
+        box = ctk.CTkTextbox(tab)
+        box.pack(fill="both", expand=True, padx=6, pady=6)
+        box.insert("1.0", text)
+        box.configure(state="disabled")
+
+        stats = self.service.get_target_statistics_table()
+        if stats:
+            tbl = ctk.CTkFrame(tab)
+            tbl.pack(fill="x", padx=6, pady=(0, 6))
+            for i, (k, v) in enumerate(stats):
+                ctk.CTkLabel(tbl, text=k, width=90, anchor="w").grid(row=i // 4, column=(i % 4) * 2, sticky="w", padx=4, pady=1)
+                ctk.CTkLabel(tbl, text=v, anchor="w").grid(row=i // 4, column=(i % 4) * 2 + 1, sticky="w", padx=4, pady=1)
+
+    def _refresh_summary_cards(self) -> None:
+        cards = self.service.get_summary_cards()
+        for key, label in self.summary_value_labels.items():
+            label.configure(text=cards.get(key, "-"))
+
+    def _on_future_step(self, step_name: str) -> None:
+        msg = self.service.module_not_implemented(step_name)
+        self.status_text.set(msg)
+        self._append_activity(msg)
 
     def _on_update_repo(self) -> None:
-        self.status_text.set("Actualizando repositorio...")
         self.update_repo_button.configure(state="disabled")
+        self.status_text.set("Actualizando repo...")
 
         def worker() -> None:
             result = self.service.update_repository()
@@ -277,30 +285,18 @@ class HomePanel(ctk.CTkFrame):
         threading.Thread(target=worker, daemon=True).start()
 
     def _finish_repo_update(self, message: str, details: str) -> None:
+        self.update_repo_button.configure(state="normal")
         self.status_text.set(message)
         self._append_activity(message)
         self._append_activity(details)
-        self.update_repo_button.configure(state="normal")
 
     def _on_export_log(self) -> None:
-        destination = filedialog.asksaveasfilename(
-            title="Exportar log",
-            defaultextension=".jsonl",
-            filetypes=[("JSONL", "*.jsonl")],
-        )
+        destination = filedialog.asksaveasfilename(title="Exportar log", defaultextension=".jsonl", filetypes=[("JSONL", "*.jsonl")])
         if not destination:
-            self.status_text.set("Exportación de log cancelada.")
             return
-
-        exported_path = self.service.export_activity_log(destination)
-        self.status_text.set(f"Log exportado: {exported_path}")
-        self._append_activity(f"Log exportado: {exported_path}")
-
-    def _set_result_text(self, text: str) -> None:
-        self.result_box.configure(state="normal")
-        self.result_box.delete("1.0", "end")
-        self.result_box.insert("1.0", text)
-        self.result_box.configure(state="disabled")
+        path = self.service.export_activity_log(destination)
+        self.status_text.set(f"Log exportado: {path}")
+        self._append_activity(self.status_text.get())
 
     def _append_activity(self, text: str) -> None:
         self.log_box.configure(state="normal")
@@ -312,7 +308,5 @@ class HomePanel(ctk.CTkFrame):
         self.log_visible = not self.log_visible
         if self.log_visible:
             self.log_box.grid()
-            self.toggle_log_button.configure(text="Ocultar log técnico")
         else:
             self.log_box.grid_remove()
-            self.toggle_log_button.configure(text="Mostrar log técnico")

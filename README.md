@@ -1,8 +1,6 @@
 # GeoStat_py
 
-Aplicación de escritorio local (CustomTkinter) orientada a workflow geoestadístico real:
-
-**preparar datos → QA/QC → EDA → dominios/compositado → espacial → variografía → kriging → simulación → validación → exportación**.
+App de escritorio local (CustomTkinter) para workflow geoestadístico con foco en **exploración visual**.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -12,73 +10,84 @@ cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
-## Nuevo diseño por workflow
+## Qué cambió en esta iteración
 
-La interfaz quedó organizada en 3 zonas permanentes:
+La app dejó de priorizar texto y ahora prioriza panel visual:
+- Sidebar izquierda: workflow por etapas.
+- Centro: controles del paso actual.
+- Derecha (dominante): panel visual con tabs EDA.
+- Log técnico: secundario y colapsable.
 
-1. **Izquierda**: navegación por etapas del workflow.
-2. **Centro**: parámetros y acción principal del paso actual.
-3. **Derecha**: resultados, resumen y vista previa.
+## Workflow visible
 
-Además:
-- Encabezado con contexto persistente: dataset, target, dominio activo, soporte activo, paso actual.
-- Log técnico secundario y colapsable.
+1. Datos (funcional)
+2. QA/QC (parcial)
+3. EDA (funcional)
+4. Espacial (funcional inicial)
+5. Variografía (futuro)
+6. Kriging (futuro)
+7. Simulación (futuro)
+8. Validación (futuro)
+9. Exportación (parcial)
 
-## Etapas del workflow y estado actual
+## Feedback visual automático
 
-1. **Datos** → funcional
-   - Cargar CSV
-   - mapping de X/Y/Z/target + Hole ID + Dominio/Litología
-   - resumen de dataset
-2. **QA/QC** → parcial
-   - quality gate inicial
-   - semáforo verde/amarillo/rojo
-   - duplicados, nulos, coordenadas faltantes, columnas numéricas
-   - tratamiento de extremos (top-cut/capping) visible como siguiente paso
-3. **EDA** → funcional
-   - resumen estructurado (univariado/bivariado base)
-   - estadísticas del target
-4. **Dominios y compositado** → futuro
-5. **Espacial** → parcial (estructura lista, implementación detallada futura)
-6. **Variografía** → futuro
-7. **Kriging** → futuro
-8. **Simulación** → futuro
-9. **Validación** → futuro
-10. **Exportación** → parcial
+Después de:
+1) cargar CSV,
+2) seleccionar X/Y/Z/target,
+3) aplicar configuración,
+
+la app renderiza automáticamente:
+- Histograma del target
+- Boxplot del target
+- Scatter XY coloreado por target
+
+Si target no es numérico o faltan datos válidos, se muestra mensaje claro y se registra en JSONL.
+
+## EDA visual por tabs
+
+- **Resumen**: resumen textual compacto + tabla corta de estadísticas (n, mean, std, min, p10, p25, p50, p75, p90, max, skewness).
+- **Univariado**: histograma + boxplot.
+- **Espacial**: scatter XY con color por target.
+
+## Tarjetas compactas (parte superior del panel visual)
+
+- Dataset
+- Muestras
+- Columnas
+- Target
+- Estado
+- Dominio
+- Soporte
+- Mean / Std / CV (si target numérico)
 
 ## Botones globales
 
-- **Actualizar repo**: ejecuta `git pull` + `git submodule update --init --recursive`.
-- **Exportar log**: copia el log de la sesión actual a un `.jsonl` elegido por el usuario.
+- **Actualizar repo**: `git pull` + `git submodule update --init --recursive`.
+- **Exportar log**: exporta log JSONL de sesión.
 
-## Logging JSONL de actividad
+## Logging JSONL
 
 - Carpeta: `logs/`
 - Archivo por sesión: `session_YYYYMMDD_HHMMSS.jsonl`
-- Formato: 1 evento JSON por línea
 - Eventos relevantes incluyen:
-  - `app_started`
+  - `visuals_auto_rendered`
+  - `histogram_rendered`
+  - `boxplot_rendered`
+  - `spatial_view_rendered`
+  - `visual_render_failed`
   - `workflow_step_changed`
-  - `data_quality_evaluated`
-  - `csv_load_*`
-  - `variable_config_applied`
-  - `placeholder_module_clicked`
-  - `repo_update_*`
-  - `export_log_requested`
-  - `app_error`
-
-Esto permite análisis posterior en ChatGPT o scripts.
+  - `csv_load_*`, `repo_update_*`, `export_log_requested`
 
 ## Tests
 
 ```bash
-python -m unittest tests/test_activity_log.py tests/test_workflow_state.py tests/test_module_placeholders.py tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
+python -m unittest tests/test_activity_log.py tests/test_workflow_state.py tests/test_visual_preparation.py tests/test_module_placeholders.py tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
 ```
 
-## Evolución esperada
+## Próxima iteración sugerida
 
-Próximas iteraciones recomendadas:
-- EDA visual embebida (histograma target + scatter XY coloreado por target)
-- módulo espacial 2D (planta + secciones)
-- dominios/compositado con soporte activo real
-- variografía y estimación/simulación reales
+- selector de vista espacial XY/XZ/YZ
+- probability plot en Univariado
+- secciones y swath plots
+- variografía experimental
