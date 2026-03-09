@@ -11,3 +11,5 @@ class VariableConfigModel:
     y_column: str
     z_column: str
     target_column: str
+    hole_id_column: str | None = None
+    domain_column: str | None = None

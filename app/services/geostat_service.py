@@ -9,28 +9,36 @@ import subprocess
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
+from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
 from app.utils.paths import PROJECT_ROOT
 
 
-def _read_csv(path: Path):
-    import pandas as pd
-    return pd.read_csv(path)
+WORKFLOW_STEPS = [
+    "Datos",
+    "QA/QC",
+    "EDA",
+    "Dominios y compositado",
+    "Espacial",
+    "Variografía",
+    "Kriging",
+    "Simulación",
+    "Validación",
+    "Exportación",
+]
 
-
-def _read_csv_with_encoding(path: Path, encoding: str):
-    import pandas as pd
-    return pd.read_csv(path, encoding=encoding)
-
-
-def _csv_errors():
-    from pandas.errors import EmptyDataError, ParserError
-    return EmptyDataError, ParserError
-
-
-def _is_numeric_dtype(series) -> bool:
-    from pandas.api.types import is_numeric_dtype
-    return bool(is_numeric_dtype(series))
+FUNCTIONAL_STATUS = {
+    "Datos": "funcional",
+    "QA/QC": "parcial",
+    "EDA": "funcional",
+    "Dominios y compositado": "futuro",
+    "Espacial": "parcial",
+    "Variografía": "futuro",
+    "Kriging": "futuro",
+    "Simulación": "futuro",
+    "Validación": "futuro",
+    "Exportación": "parcial",
+}
 
 
 @dataclass
@@ -56,6 +64,30 @@ class ColumnSelectionResult:
     eda_summary: str
 
 
+def _read_csv(path: Path):
+    import pandas as pd
+
+    return pd.read_csv(path)
+
+
+def _read_csv_with_encoding(path: Path, encoding: str):
+    import pandas as pd
+
+    return pd.read_csv(path, encoding=encoding)
+
+
+def _csv_errors():
+    from pandas.errors import EmptyDataError, ParserError
+
+    return EmptyDataError, ParserError
+
+
+def _is_numeric_dtype(series) -> bool:
+    from pandas.api.types import is_numeric_dtype
+
+    return bool(is_numeric_dtype(series))
+
+
 class GeostatService:
     """Mediates between UI actions and adapter calls."""
 
@@ -64,6 +96,19 @@ class GeostatService:
         self.activity_log = activity_log or ActivityLogService()
         self.current_dataset: DatasetModel | None = None
         self.variable_config: VariableConfigModel | None = None
+        self.workflow_state = WorkflowStateModel()
+
+    def set_workflow_step(self, step_name: str) -> str:
+        if step_name not in WORKFLOW_STEPS:
+            return "Paso de workflow no válido."
+        self.workflow_state.current_step = step_name
+        event_name = f"{step_name.lower().replace(' ', '_').replace('/', '_')}_opened"
+        self.activity_log.log("workflow_step_changed", "info", f"Paso activo: {step_name}", {"step": step_name})
+        self.activity_log.log(event_name, "info", f"Se abrió el paso {step_name}.", {"step": step_name})
+        return f"Paso activo: {step_name} ({FUNCTIONAL_STATUS.get(step_name, 'futuro')})."
+
+    def get_workflow_step_status(self) -> list[tuple[str, str]]:
+        return [(step, FUNCTIONAL_STATUS.get(step, "futuro")) for step in WORKFLOW_STEPS]
 
     def load_csv(self, file_path: str) -> LoadCsvResult:
         self.activity_log.log("csv_load_started", "info", "Iniciando carga de CSV.", {"file_path": file_path})
@@ -124,6 +169,68 @@ class GeostatService:
             },
         )
         return LoadCsvResult(success=True, message="CSV cargado correctamente.", details=details, dataset=dataset)
+
+    def evaluate_data_quality(self) -> tuple[str, str]:
+        if self.current_dataset is None:
+            return "rojo", "No hay dataset cargado para evaluar calidad."
+
+        df = self.current_dataset.dataframe
+        target_col = self.variable_config.target_column if self.variable_config else None
+        required = [c for c in ["x", "y", "z", target_col] if c and c in df.columns]
+        n_rows = len(df.index) if len(df.index) else 1
+
+        missing_pct = float(df.isna().sum().sum()) / float(df.size) * 100.0 if df.size else 0.0
+        duplicated_rows = int(df.duplicated().sum())
+
+        coord_nulls = 0
+        for c in ["x", "y", "z"]:
+            if c in df.columns:
+                coord_nulls += int(df[c].isna().sum())
+
+        critical = []
+        warnings = []
+        if coord_nulls > 0:
+            critical.append(f"Coordenadas nulas detectadas: {coord_nulls}")
+        if target_col and target_col in df.columns and int(df[target_col].isna().sum()) > 0:
+            critical.append("Target con valores nulos.")
+        if duplicated_rows > 0:
+            warnings.append(f"Filas duplicadas: {duplicated_rows}")
+        if missing_pct > 5:
+            warnings.append(f"% faltantes alto: {missing_pct:.2f}%")
+
+        semaphore = "verde"
+        if critical:
+            semaphore = "rojo"
+        elif warnings:
+            semaphore = "amarillo"
+
+        numeric_cols = [str(col) for col in df.columns if _is_numeric_dtype(df[col])]
+        summary = (
+            "QUALITY GATE INICIAL\n"
+            f"Semáforo: {semaphore.upper()}\n"
+            f"Filas: {len(df.index)} | Columnas: {len(df.columns)}\n"
+            f"% faltantes: {missing_pct:.2f}%\n"
+            f"Duplicados: {duplicated_rows}\n"
+            f"Coordenadas nulas (x/y/z): {coord_nulls}\n"
+            f"Columnas numéricas: {', '.join(numeric_cols) if numeric_cols else '(ninguna)'}\n"
+            f"Checks requeridos presentes: {', '.join(required) if required else '(sin mapping explícito)'}\n"
+            f"Advertencias: {('; '.join(warnings)) if warnings else 'Ninguna'}\n"
+            f"Críticos: {('; '.join(critical)) if critical else 'Ninguno'}\n\n"
+            "Tratamiento de extremos (top-cut/capping): etapa prevista en QA/QC."
+        )
+
+        self.activity_log.log(
+            "data_quality_evaluated",
+            "success",
+            "Evaluación de calidad ejecutada.",
+            {
+                "semaphore": semaphore,
+                "missing_pct": missing_pct,
+                "duplicates": duplicated_rows,
+                "coord_nulls": coord_nulls,
+            },
+        )
+        return semaphore, summary
 
     def update_repository(self) -> RepoUpdateResult:
         self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
@@ -190,7 +297,15 @@ class GeostatService:
     def get_available_columns(self) -> list[str]:
         return [] if self.current_dataset is None else self.current_dataset.columns
 
-    def set_variable_config(self, x_column: str, y_column: str, z_column: str, target_column: str) -> ColumnSelectionResult:
+    def set_variable_config(
+        self,
+        x_column: str,
+        y_column: str,
+        z_column: str,
+        target_column: str,
+        hole_id_column: str | None = None,
+        domain_column: str | None = None,
+    ) -> ColumnSelectionResult:
         if self.current_dataset is None:
             return ColumnSelectionResult(False, "Primero debes cargar un CSV.", "No hay dataset cargado.")
 
@@ -206,12 +321,29 @@ class GeostatService:
                 f"Columnas inválidas: {', '.join(invalid)}",
             )
 
-        self.variable_config = VariableConfigModel(x_column=x_column, y_column=y_column, z_column=z_column, target_column=target_column)
+        self.variable_config = VariableConfigModel(
+            x_column=x_column,
+            y_column=y_column,
+            z_column=z_column,
+            target_column=target_column,
+            hole_id_column=hole_id_column,
+            domain_column=domain_column,
+        )
+        self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
+        self.workflow_state.active_support = "Muestra original"
+
         self.activity_log.log(
             "variable_config_applied",
             "success",
             "Configuración de variables aplicada.",
-            {"x": x_column, "y": y_column, "z": z_column, "target": target_column},
+            {
+                "x": x_column,
+                "y": y_column,
+                "z": z_column,
+                "target": target_column,
+                "hole_id": hole_id_column,
+                "domain": domain_column,
+            },
         )
         eda_summary = self.build_eda_summary()
         return ColumnSelectionResult(True, "Configuración de variables guardada.", eda_summary)
@@ -228,8 +360,9 @@ class GeostatService:
         numeric_text = ", ".join(str(col) for col in numeric_columns) if numeric_columns else "(ninguna)"
 
         summary = (
-            "RESUMEN EDA\n"
-            "-----------\n"
+            "MÓDULO EDA\n"
+            "----------\n"
+            "Subsecciones: Univariado | Bivariado | Multivariado (futuro)\n\n"
             f"Filas: {self.current_dataset.row_count}\n"
             f"Columnas: {self.current_dataset.column_count}\n"
             f"Columnas disponibles: {columns}\n\n"
@@ -251,6 +384,8 @@ class GeostatService:
             f"• Y: {self.variable_config.y_column}\n"
             f"• Z: {self.variable_config.z_column}\n"
             f"• Target: {target}\n"
+            f"• Hole ID: {self.variable_config.hole_id_column or 'No definido'}\n"
+            f"• Dominio/Litología: {self.variable_config.domain_column or 'No definido'}\n"
         )
 
         if not _is_numeric_dtype(target_series):
@@ -267,40 +402,39 @@ class GeostatService:
             f"• 25%: {stats.get('25%', float('nan')):.6g}\n"
             f"• 50%: {stats.get('50%', float('nan')):.6g}\n"
             f"• 75%: {stats.get('75%', float('nan')):.6g}\n"
-            f"• max: {stats.get('max', float('nan')):.6g}"
+            f"• max: {stats.get('max', float('nan')):.6g}\n\n"
+            "EDA visual (histograma/scatter) será el siguiente paso de implementación."
         )
 
     def module_not_implemented(self, module_name: str) -> str:
-        message = f"{module_name}: módulo aún no implementado. Esta acción fue registrada."
-        self.activity_log.log(
-            "placeholder_module_clicked",
-            "info",
-            message,
-            {"module": module_name},
-        )
+        message = f"{module_name}: etapa aún no implementada. Esta acción fue registrada."
+        self.activity_log.log("placeholder_module_clicked", "info", message, {"module": module_name})
         return message
 
     def variogram_placeholder(self) -> str:
-        return self.module_not_implemented("Análisis variográfico")
+        return self.module_not_implemented("Variografía")
 
     def kriging_placeholder(self) -> str:
         return self.module_not_implemented("Kriging")
 
     def sgs_placeholder(self) -> str:
-        return self.module_not_implemented("Simulación SGS")
+        return self.module_not_implemented("Simulación")
 
     def visualization_placeholder(self) -> str:
-        return self.module_not_implemented("Visualización")
+        return self.module_not_implemented("Espacial")
 
     def _build_dataset_summary(self, dataset: DatasetModel) -> str:
-        columns_text = ", ".join(dataset.columns)
+        dtypes = dataset.dataframe.dtypes.astype(str).to_dict()
+        dtypes_text = "\n".join(f"• {k}: {v}" for k, v in dtypes.items())
         return (
-            "DATASET CARGADO\n"
-            "--------------\n"
+            "ETAPA DATOS\n"
+            "-----------\n"
             f"Archivo: {dataset.file_name}\n"
             f"Ruta: {dataset.file_path}\n"
             f"Filas: {dataset.row_count} | Columnas: {dataset.column_count}\n"
-            f"Nombres de columnas: {columns_text}\n\n"
+            f"Nombres de columnas: {', '.join(dataset.columns)}\n\n"
+            "Tipos de datos:\n"
+            f"{dtypes_text}\n\n"
             "Preview (primeras 5 filas):\n"
             f"{dataset.preview_as_text()}"
         )

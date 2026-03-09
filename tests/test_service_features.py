@@ -1,4 +1,4 @@
-"""Tests for repository update, variable selection and EDA logic."""
+"""Tests for repository update, workflow, variable selection and EDA logic."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import unittest
 
 try:
     import pandas  # noqa: F401
+
     HAS_PANDAS = True
 except ModuleNotFoundError:
     HAS_PANDAS = False
@@ -33,19 +34,20 @@ class ServiceFeatureTests(unittest.TestCase):
         self._load_sample_dataset()
         summary = self.service.build_eda_summary()
 
-        self.assertIn("Filas: 2", summary)
+        self.assertIn("MÓDULO EDA", summary)
         self.assertIn("Tipos de datos", summary)
         self.assertIn("Nulos por columna", summary)
-        self.assertIn("Columnas numéricas detectadas", summary)
+        self.assertIn("Columnas numéricas", summary)
 
     def test_set_variable_config_success(self) -> None:
         self._load_sample_dataset()
-        result = self.service.set_variable_config("x", "y", "z", "target")
+        result = self.service.set_variable_config("x", "y", "z", "target", "cat", "cat")
 
         self.assertTrue(result.success)
         self.assertIn("Configuración de variables guardada", result.message)
-        self.assertIn("Estadísticos de la variable objetivo", result.eda_summary)
+        self.assertIn("Estadísticos del target", result.eda_summary)
         self.assertIsNotNone(self.service.variable_config)
+        self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
 
     def test_set_variable_config_invalid_column(self) -> None:
         self._load_sample_dataset()
@@ -53,6 +55,12 @@ class ServiceFeatureTests(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("columnas no válidas", result.message)
+
+    def test_evaluate_data_quality_returns_semaphore(self) -> None:
+        self._load_sample_dataset()
+        semaphore, summary = self.service.evaluate_data_quality()
+        self.assertIn(semaphore, {"verde", "amarillo", "rojo"})
+        self.assertIn("QUALITY GATE INICIAL", summary)
 
     @patch("app.services.geostat_service.subprocess.run")
     def test_update_repository_success(self, mock_run) -> None:
@@ -70,7 +78,7 @@ class ServiceFeatureTests(unittest.TestCase):
     def test_module_not_implemented_logs_message(self) -> None:
         message = self.service.module_not_implemented("Kriging")
 
-        self.assertIn("aún no implementado", message)
+        self.assertIn("aún no implementada", message)
         self.assertIn("Kriging", message)
 
 

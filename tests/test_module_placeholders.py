@@ -19,7 +19,7 @@ class ModulePlaceholderTests(unittest.TestCase):
             service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=logger)
 
             message = service.module_not_implemented("Kriging")
-            self.assertIn("no implementado", message)
+            self.assertIn("no implementada", message)
 
             entries = logger.session_log_path.read_text(encoding="utf-8").strip().splitlines()
             event = json.loads(entries[-1])
