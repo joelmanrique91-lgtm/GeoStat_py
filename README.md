@@ -1,6 +1,6 @@
 # GeoStat_py
 
-App de escritorio local (CustomTkinter) para workflow geoestadístico con foco en **exploración visual**.
+App de escritorio local (CustomTkinter) para análisis geoestadístico visual con separación clara por etapa.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -10,84 +10,63 @@ cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
-## Qué cambió en esta iteración
+## Flujo visible actual
 
-La app dejó de priorizar texto y ahora prioriza panel visual:
-- Sidebar izquierda: workflow por etapas.
-- Centro: controles del paso actual.
-- Derecha (dominante): panel visual con tabs EDA.
-- Log técnico: secundario y colapsable.
+1. **Datos**
+2. **EDA**
+3. **Espacial**
 
-## Workflow visible
+## Separación de lógica visual por etapa
 
-1. Datos (funcional)
-2. QA/QC (parcial)
-3. EDA (funcional)
-4. Espacial (funcional inicial)
-5. Variografía (futuro)
-6. Kriging (futuro)
-7. Simulación (futuro)
-8. Validación (futuro)
-9. Exportación (parcial)
+### Datos
+- Carga de CSV.
+- Autodetección de columnas (X/Y/Z/target/Hole ID/Dominio).
+- Configuración editable y panel colapsable.
+- Resumen compacto de configuración activa.
 
-## Feedback visual automático
+### EDA
+- Subtabs: **Resumen** y **Univariado**.
+- **Resumen**: tabla de estadísticos completos del target.
+- **Univariado**:
+  - histograma,
+  - boxplot general,
+  - probability plot,
+  - boxplot por dominio/categoría (si hay dominio válido).
 
-Después de:
-1) cargar CSV,
-2) seleccionar X/Y/Z/target,
-3) aplicar configuración,
+Univariado ahora intenta renderizar cada gráfico de forma independiente; si uno falla, los demás siguen visibles y se informa en pantalla/log (sin panel vacío silencioso).
 
-la app renderiza automáticamente:
-- Histograma del target
-- Boxplot del target
-- Scatter XY coloreado por target
+Cuando hay muchas categorías en dominio, la vista se simplifica a top-N por frecuencia y se informa en actividad/log.
 
-Si target no es numérico o faltan datos válidos, se muestra mensaje claro y se registra en JSONL.
+### Espacial
+- Vista principal centrada en secciones 2D útiles:
+  - XY (planta),
+  - XZ (sección),
+  - YZ (sección).
+- La vista 3D deja de ser el foco principal en esta iteración.
 
-## EDA visual por tabs
+## Logging JSONL relevante
 
-- **Resumen**: resumen textual compacto + tabla corta de estadísticas (n, mean, std, min, p10, p25, p50, p75, p90, max, skewness).
-- **Univariado**: histograma + boxplot.
-- **Espacial**: scatter XY con color por target.
-
-## Tarjetas compactas (parte superior del panel visual)
-
-- Dataset
-- Muestras
-- Columnas
-- Target
-- Estado
-- Dominio
-- Soporte
-- Mean / Std / CV (si target numérico)
-
-## Botones globales
-
-- **Actualizar repo**: `git pull` + `git submodule update --init --recursive`.
-- **Exportar log**: exporta log JSONL de sesión.
-
-## Logging JSONL
-
-- Carpeta: `logs/`
-- Archivo por sesión: `session_YYYYMMDD_HHMMSS.jsonl`
-- Eventos relevantes incluyen:
-  - `visuals_auto_rendered`
-  - `histogram_rendered`
-  - `boxplot_rendered`
-  - `spatial_view_rendered`
-  - `visual_render_failed`
-  - `workflow_step_changed`
-  - `csv_load_*`, `repo_update_*`, `export_log_requested`
+Se mantiene logging por sesión en `logs/` con eventos como:
+- `workflow_step_data_opened`
+- `workflow_step_eda_opened`
+- `workflow_step_spatial_opened`
+- `eda_univariate_render_started`
+- `eda_univariate_payload_prepared`
+- `eda_univariate_payload_empty`
+- `eda_univariate_render_partial`
+- `eda_univariate_render_finished`
+- `eda_univariate_render_failed`
+- `domain_boxplot_rendered`
+- `domain_boxplot_simplified`
+- `domain_boxplot_failed`
+- `probability_plot_rendered`
+- `probability_plot_failed`
+- `spatial_2d_rendered`
+- `spatial_3d_disabled_or_hidden`
+- `empty_state_shown`
 
 ## Tests
 
 ```bash
-python -m unittest tests/test_activity_log.py tests/test_workflow_state.py tests/test_visual_preparation.py tests/test_module_placeholders.py tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
+python -m unittest
 ```
-
-## Próxima iteración sugerida
-
-- selector de vista espacial XY/XZ/YZ
-- probability plot en Univariado
-- secciones y swath plots
-- variografía experimental
