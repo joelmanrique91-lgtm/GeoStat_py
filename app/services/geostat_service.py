@@ -226,6 +226,36 @@ class GeostatService:
             self.activity_log.log("univariate_payload_empty", "warning", message, {})
             raise ValueError(message)
 
+        try:
+            spatial = prepare_spatial_sections(
+                self.current_dataset.dataframe,
+                self.variable_config.x_column,
+                self.variable_config.y_column,
+                self.variable_config.z_column,
+                self.variable_config.target_column,
+            )
+        except ValueError as exc:
+            self.activity_log.log("graph_render_failed", "error", str(exc), {"view": "Espacial"})
+            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
+            return VisualPreparationResult(False, str(exc), None)
+
+        if spatial.downsampled:
+            self.activity_log.log(
+                "visualization_downsampled",
+                "info",
+                "Vista espacial muestreada para rendimiento.",
+                {"source_points": spatial.source_points, "plotted_points": spatial.plotted_points},
+            )
+
+        self.activity_log.log("eda_dashboard_rendered", "info", "Dashboard EDA preparado.", {"rows": len(spatial.target)})
+        self.activity_log.log("spatial_dashboard_rendered", "info", "Dashboard espacial preparado.", {"rows": len(spatial.target)})
+        self.activity_log.log("section_view_rendered", "info", "Secciones XY/XZ/YZ preparadas.", {})
+        self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
+        return VisualPreparationResult(True, "Visuales preparados.", spatial)
+
+    def prepare_swath_data(self, bins: int = 20) -> dict[str, SwathSeries]:
+        if self.current_dataset is None or self.variable_config is None:
+            raise ValueError("No hay dataset/configuración suficiente para swath.")
         df = self.current_dataset.dataframe
         target = self.variable_config.target_column
         if not target or target not in df.columns:
@@ -251,6 +281,7 @@ class GeostatService:
             "Conteo de target válido calculado.",
             {"target": target, "valid_count": valid_count, "nan_count": nan_count},
         )
+        return payload
 
         clean_target = numeric_target.dropna().astype(float)
 
@@ -557,6 +588,7 @@ class GeostatService:
         message = f"{module_name}: etapa aún no implementada. Esta acción fue registrada."
         self.activity_log.log("placeholder_module_clicked", "info", message, {"module": module_name})
         return message
+
 
     def variogram_placeholder(self) -> str:
         return self.module_not_implemented("Variografía")
