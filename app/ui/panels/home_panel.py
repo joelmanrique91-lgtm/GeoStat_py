@@ -1,4 +1,4 @@
-"""Workflow-oriented dashboard focused on Datos, EDA and Espacial."""
+"""Workflow-oriented dashboard with clear stage separation: Datos / EDA / Espacial."""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ class HomePanel(ctk.CTkFrame):
         self.data_panel_collapsed = False
         self.summary_value_labels: dict[str, ctk.CTkLabel] = {}
         self.visual_cache: dict[str, object] = {}
+
         self._build_layout()
         self._render_step("Datos")
 
@@ -60,10 +61,17 @@ class HomePanel(ctk.CTkFrame):
         self.right_panel.grid_rowconfigure(1, weight=1)
 
         self._build_summary_cards(self.right_panel)
-        self.eda_tabs = ctk.CTkTabview(self.right_panel, command=self._on_visual_tab_changed)
+
+        self.data_stage_view = ctk.CTkFrame(self.right_panel)
+        self.data_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
+        self.eda_tabs = ctk.CTkTabview(self.right_panel, command=self._on_eda_tab_changed)
         self.eda_tabs.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        for tab_name in ["Resumen", "Univariado", "Espacial"]:
-            self.eda_tabs.add(tab_name)
+        self.eda_tabs.add("Resumen")
+        self.eda_tabs.add("Univariado")
+
+        self.spatial_stage_view = ctk.CTkFrame(self.right_panel)
+        self.spatial_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         self.log_panel = ctk.CTkFrame(self)
         self.log_panel.grid(row=2, column=0, sticky="ew")
@@ -110,6 +118,17 @@ class HomePanel(ctk.CTkFrame):
             lbl.grid(row=i // 3, column=(i % 3) * 2 + 1, sticky="w", padx=(0, 6), pady=2)
             self.summary_value_labels[key] = lbl
 
+    def _show_stage_view(self, stage: str) -> None:
+        self.data_stage_view.grid_remove()
+        self.eda_tabs.grid_remove()
+        self.spatial_stage_view.grid_remove()
+        if stage == "Datos":
+            self.data_stage_view.grid()
+        elif stage == "EDA":
+            self.eda_tabs.grid()
+        elif stage == "Espacial":
+            self.spatial_stage_view.grid()
+
     def _on_change_step(self, step_name: str) -> None:
         self.status_text.set(self.service.set_workflow_step(step_name))
         self.step_label.set(f"Paso actual: {step_name}")
@@ -117,12 +136,19 @@ class HomePanel(ctk.CTkFrame):
         self._render_step(step_name)
 
     def _render_step(self, step_name: str) -> None:
+        self._show_stage_view(step_name)
         for child in self.center_panel.winfo_children():
             child.destroy()
+
         if step_name == "Datos":
             self._render_data_step()
-        else:
-            self._render_analysis_step(step_name)
+            self._render_data_stage_panel()
+        elif step_name == "EDA":
+            self._render_analysis_step("EDA")
+            self._render_eda_tab(self.eda_tabs.get() or "Resumen")
+        elif step_name == "Espacial":
+            self._render_analysis_step("Espacial")
+            self._render_spatial_stage_panel()
 
     def _render_data_step(self) -> None:
         ctk.CTkLabel(self.center_panel, text="Etapa Datos", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
@@ -134,15 +160,13 @@ class HomePanel(ctk.CTkFrame):
         ).pack(fill="x", padx=8, pady=(0, 8))
 
         if self.data_panel_collapsed:
-            summary = self._build_compact_config_summary()
-            ctk.CTkLabel(self.center_panel, text=summary, justify="left").pack(anchor="w", padx=8, pady=4)
+            ctk.CTkLabel(self.center_panel, text=self._build_compact_config_summary(), justify="left").pack(anchor="w", padx=8, pady=4)
             ctk.CTkButton(self.center_panel, text="Editar configuración", command=self._toggle_data_panel).pack(fill="x", padx=8, pady=8)
             return
 
         config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
         config_grid.pack(fill="x", padx=8, pady=(0, 8))
         config_grid.grid_columnconfigure((0, 1), weight=1)
-
         cols = self.service.get_available_columns() or [""]
         self._selector(config_grid, "X", self.x_var, cols, 0, 0)
         self._selector(config_grid, "Y", self.y_var, cols, 0, 1)
@@ -154,7 +178,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_analysis_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
-        ctk.CTkButton(self.center_panel, text="Actualizar vista activa", command=self._render_active_tab).pack(fill="x", padx=8, pady=(0, 8))
+        ctk.CTkButton(self.center_panel, text="Actualizar vista", command=lambda: self._render_step(step_name)).pack(fill="x", padx=8, pady=(0, 8))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
         ctk.CTkLabel(parent, text=label).grid(row=row, column=col, sticky="w", padx=4)
@@ -177,97 +201,101 @@ class HomePanel(ctk.CTkFrame):
             f"Dominio: {self.domain_var.get() or '-'}"
         )
 
-    def _on_visual_tab_changed(self) -> None:
-        self.after(30, self._render_active_tab)
+    def _render_data_stage_panel(self) -> None:
+        DashboardGrid.clear(self.data_stage_view)
+        ctk.CTkLabel(
+            self.data_stage_view,
+            text="Etapa Datos: carga y configuración de columnas.\nLas vistas analíticas se habilitan en EDA y Espacial.",
+            justify="left",
+        ).pack(anchor="w", padx=8, pady=8)
 
-    def _invalidate_visual_cache(self) -> None:
-        self.visual_cache = {}
+    def _on_eda_tab_changed(self) -> None:
+        if self.workflow_state_is("EDA"):
+            self._render_eda_tab(self.eda_tabs.get())
 
-    def _render_active_tab(self) -> None:
-        active_tab = self.eda_tabs.get()
-        if active_tab == "Resumen":
+    def workflow_state_is(self, step: str) -> bool:
+        return self.service.workflow_state.current_step == step
+
+    def _render_eda_tab(self, tab_name: str) -> None:
+        if tab_name == "Resumen":
             self._set_summary_tab_content()
-            return
-        if active_tab in self.visual_cache:
-            self._draw_tab(active_tab, self.visual_cache[active_tab])
-            return
+        elif tab_name == "Univariado":
+            self._render_univariado_tab()
 
-        self._set_tab_status(active_tab, "Renderizando vista...", clear=True)
-
-        def worker() -> None:
-            payload: dict[str, object] = {"tab": active_tab}
-            try:
-                result = self.service.prepare_visual_data()
-                if not result.success or result.spatial_data is None:
-                    raise ValueError(result.message)
-                payload["data"] = result.spatial_data
-            except Exception as exc:
-                payload["error"] = str(exc)
-            self.after(0, lambda: self._on_render_done(payload))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_render_done(self, payload: dict[str, object]) -> None:
-        tab_name = str(payload.get("tab", ""))
-        if payload.get("error"):
-            self._set_tab_status(tab_name, f"No se pudo renderizar {tab_name}: {payload['error']}", clear=True)
-            return
-        data = payload.get("data")
-        self.visual_cache[tab_name] = data
-        self._draw_tab(tab_name, data)
-
-    def _draw_tab(self, tab_name: str, data: object) -> None:
-        if tab_name == "Univariado":
-            self._render_univariado(data.target)
-        elif tab_name == "Espacial":
-            self._render_spatial(data)
-
-    def _render_univariado(self, values: list[float]) -> None:
+    def _render_univariado_tab(self) -> None:
         tab = self.eda_tabs.tab("Univariado")
         DashboardGrid.clear(tab)
-        dashboard = DashboardGrid(tab, 1, 2)
-        ax1 = dashboard.axis(0, 0)
-        ax2 = dashboard.axis(0, 1)
-        ax1.hist(values, bins=20, color="#4c78a8", edgecolor="white")
-        ax1.set_title("Histograma target")
-        ax2.boxplot(values, vert=True, patch_artist=True)
-        ax2.set_title("Boxplot target")
+        try:
+            data = self.service.prepare_univariate_data(max_domain_categories=10)
+        except Exception as exc:
+            ctk.CTkLabel(tab, text=f"No se pudo preparar EDA univariado: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
+            return
+
+        dashboard = DashboardGrid(tab, 2, 2, figsize=(8.6, 6.0))
+        ax_hist = dashboard.axis(0, 0)
+        ax_box = dashboard.axis(0, 1)
+        ax_prob = dashboard.axis(1, 0)
+        ax_domain = dashboard.axis(1, 1)
+
+        ax_hist.hist(data["target_values"], bins=20, color="#4c78a8", edgecolor="white")
+        ax_hist.set_title("Histograma target")
+
+        ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
+        ax_box.set_title("Boxplot general")
+
+        ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color="#54a24b")
+        ax_prob.set_title("Probability plot")
+        ax_prob.set_xlabel("Cuantiles teóricos normal")
+        ax_prob.set_ylabel("Cuantiles observados")
+
+        domain_data = data["domain_boxplot"]
+        if domain_data["enabled"]:
+            ax_domain.boxplot(domain_data["values"], labels=domain_data["labels"], patch_artist=True)
+            ax_domain.set_title("Boxplot por dominio")
+            ax_domain.tick_params(axis="x", rotation=30)
+            if domain_data["message"]:
+                self._append_activity(domain_data["message"])
+        else:
+            ax_domain.axis("off")
+            ax_domain.text(0.5, 0.5, "Sin dominio seleccionado\no sin datos válidos.", ha="center", va="center")
+
         dashboard.render()
 
-    def _render_spatial(self, spatial_data) -> None:
-        tab = self.eda_tabs.tab("Espacial")
-        DashboardGrid.clear(tab)
-        dashboard = DashboardGrid(tab, 1, 2, figsize=(8.5, 5.0))
-
-        ax_xy = dashboard.axis(0, 0)
-        sc = ax_xy.scatter(spatial_data.x, spatial_data.y, c=spatial_data.target, cmap="viridis", s=12)
-        ax_xy.set_xlabel("X")
-        ax_xy.set_ylabel("Y")
-        ax_xy.set_title("Vista XY")
-        dashboard.figure.colorbar(sc, ax=ax_xy, shrink=0.8, label="Target")
+    def _render_spatial_stage_panel(self) -> None:
+        DashboardGrid.clear(self.spatial_stage_view)
 
         try:
-            ax_old = dashboard.axis(0, 1)
-            dashboard.figure.delaxes(ax_old)
-            ax3d = dashboard.figure.add_subplot(122, projection="3d")
-            sc3d = ax3d.scatter(spatial_data.x, spatial_data.y, spatial_data.z, c=spatial_data.target, cmap="viridis", s=10)
+            result = self.service.prepare_visual_data()
+            if not result.success or result.spatial_data is None:
+                raise ValueError(result.message)
+            spatial = result.spatial_data
+        except Exception as exc:
+            ctk.CTkLabel(self.spatial_stage_view, text=f"No se pudo renderizar Espacial: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
+            return
+
+        dashboard = DashboardGrid(self.spatial_stage_view, 1, 1, figsize=(9.2, 6.8))
+        ax = dashboard.axis(0, 0)
+        dashboard.figure.delaxes(ax)
+        try:
+            ax3d = dashboard.figure.add_subplot(111, projection="3d")
+            sc3d = ax3d.scatter(spatial.x, spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=12)
             ax3d.set_xlabel("X")
             ax3d.set_ylabel("Y")
             ax3d.set_zlabel("Z")
-            ax3d.set_title("Vista 3D (rotar/zoom)")
-            dashboard.figure.colorbar(sc3d, ax=ax3d, shrink=0.7, label="Target")
-            self.service.activity_log.log("spatial_3d_rendered", "success", "Vista espacial 3D renderizada.", {})
+            ax3d.set_title("Vista espacial 3D")
+            dashboard.figure.colorbar(sc3d, ax=ax3d, shrink=0.8, label="Target")
         except Exception:
-            ax_fallback = dashboard.axis(0, 1)
-            sc2 = ax_fallback.scatter(spatial_data.x, spatial_data.z, c=spatial_data.target, cmap="viridis", s=12)
-            ax_fallback.set_xlabel("X")
-            ax_fallback.set_ylabel("Z")
-            ax_fallback.set_title("Vista XZ (fallback)")
-            dashboard.figure.colorbar(sc2, ax=ax_fallback, shrink=0.8, label="Target")
+            ax2d = dashboard.figure.add_subplot(111)
+            sc2d = ax2d.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=12)
+            ax2d.set_xlabel("X")
+            ax2d.set_ylabel("Z")
+            ax2d.set_title("Vista XZ (fallback)")
+            dashboard.figure.colorbar(sc2d, ax=ax2d, shrink=0.8, label="Target")
             self.service.activity_log.log("spatial_3d_fallback_rendered", "warning", "Fallback a vista 2D por estabilidad.", {})
 
-        if spatial_data.downsampled:
-            self._append_activity(f"Vista muestreada para rendimiento ({spatial_data.plotted_points}/{spatial_data.source_points} puntos).")
+        if spatial.downsampled:
+            self._append_activity(f"Vista espacial muestreada ({spatial.plotted_points}/{spatial.source_points} puntos).")
+
         dashboard.render()
 
     def _set_summary_tab_content(self) -> None:
@@ -284,12 +312,6 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(grid, text=f"{key}:", font=ctk.CTkFont(weight="bold"), width=120, anchor="w").grid(row=idx // 2, column=(idx % 2) * 2, sticky="w", padx=4, pady=2)
             ctk.CTkLabel(grid, text=val, anchor="w", width=150).grid(row=idx // 2, column=(idx % 2) * 2 + 1, sticky="w", padx=4, pady=2)
 
-    def _set_tab_status(self, tab_name: str, message: str, clear: bool = False) -> None:
-        tab = self.eda_tabs.tab(tab_name)
-        if clear:
-            DashboardGrid.clear(tab)
-        ctk.CTkLabel(tab, text=message, justify="left").pack(anchor="w", padx=8, pady=8)
-
     def _on_load_csv(self) -> None:
         path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
         if not path:
@@ -301,9 +323,8 @@ class HomePanel(ctk.CTkFrame):
         if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self._apply_autodetected_columns()
-            self._invalidate_visual_cache()
             self._refresh_summary_cards()
-            self._set_summary_tab_content()
+            self._render_step(self.service.workflow_state.current_step)
 
     def _apply_autodetected_columns(self) -> None:
         suggestions = self.service.get_autodetected_columns()
@@ -325,10 +346,8 @@ class HomePanel(ctk.CTkFrame):
             self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
             self.data_panel_collapsed = True
             self.service.activity_log.log("data_panel_collapsed", "info", "Panel de datos colapsado automáticamente.", {})
-            self._invalidate_visual_cache()
             self._refresh_summary_cards()
-            self._render_step("Datos")
-            self._set_summary_tab_content()
+            self._render_step(self.service.workflow_state.current_step)
 
     def _refresh_summary_cards(self) -> None:
         cards = self.service.get_summary_cards()

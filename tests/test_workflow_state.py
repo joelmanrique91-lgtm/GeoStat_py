@@ -1,4 +1,4 @@
-"""Tests for workflow navigation and context state."""
+"""Tests for workflow navigation and stage-specific events."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class WorkflowStateTests(unittest.TestCase):
             lines = logger.session_log_path.read_text(encoding="utf-8").strip().splitlines()
             events = [json.loads(line)["event"] for line in lines]
             self.assertIn("workflow_step_changed", events)
-            self.assertIn("espacial_opened", events)
+            self.assertIn("workflow_step_spatial_opened", events)
 
 
 if __name__ == "__main__":

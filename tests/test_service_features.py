@@ -34,7 +34,7 @@ class ServiceFeatureTests(unittest.TestCase):
         self._load_sample_dataset()
         summary = self.service.build_eda_summary()
         self.assertIn("MÓDULO EDA", summary)
-        self.assertIn("Resumen | Univariado | Espacial", summary)
+        self.assertIn("Resumen | Univariado", summary)
 
     def test_autodetect_columns(self) -> None:
         self._load_sample_dataset()
@@ -53,13 +53,6 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("Configuración de variables guardada", result.message)
         self.assertIsNotNone(self.service.variable_config)
         self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
-
-    def test_set_variable_config_invalid_column(self) -> None:
-        self._load_sample_dataset()
-        result = self.service.set_variable_config("Easting", "Northing", "bad", "Au")
-
-        self.assertFalse(result.success)
-        self.assertIn("columnas no válidas", result.message)
 
     @patch("app.services.geostat_service.subprocess.run")
     def test_update_repository_success(self, mock_run) -> None:

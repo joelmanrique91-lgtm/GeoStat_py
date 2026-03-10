@@ -1,6 +1,6 @@
 # GeoStat_py
 
-App de escritorio local (CustomTkinter) para análisis geoestadístico visual **enfocado y simplificado**.
+App de escritorio local (CustomTkinter) para análisis geoestadístico visual con etapas separadas por responsabilidad.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -10,63 +10,47 @@ cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
-## Flujo visible actual del producto
-
-La GUI muestra solo módulos que hoy aportan valor real:
+## Flujo visible actual
 
 1. **Datos**
 2. **EDA**
 3. **Espacial**
 
-> En esta iteración, **Swath** y **Variografía** se mantienen fuera de la interfaz visible para evitar ruido y mantener foco en lo estable.
+## Separación de lógica visual por etapa
 
-## Módulo Datos
+### Datos
+- Carga de CSV.
+- Autodetección de columnas (X/Y/Z/target/Hole ID/Dominio).
+- Configuración editable y panel colapsable.
+- Resumen de configuración activa.
 
-- Carga CSV.
-- Selección de X/Y/Z/target (con edición manual).
-- Autodetección de columnas sugeridas al cargar:
-  - X: `X`, `Easting`, `East`
-  - Y: `Y`, `Northing`, `North`
-  - Z: `Z`, `RL`, `Elev`, `Elevation`
-  - Hole ID: `HoleID`, `Hole_ID`, `DHID`, `Drillhole`
-  - Dominio/litología: `Domain`, `Lito`, `Lithology`, `Zone`
-- El panel de configuración es **colapsable** para liberar espacio de visualización.
+### EDA
+- Subtabs: **Resumen** y **Univariado**.
+- **Resumen**: estadísticas completas del target (incluye nulos y válidos).
+- **Univariado**:
+  - histograma,
+  - boxplot general,
+  - probability plot,
+  - boxplot por dominio/categoría (si hay dominio seleccionado).
 
-## EDA
+### Espacial
+- Vista dedicada a **3D** (X/Y/Z coloreado por target) como gráfico principal.
+- Fallback interno a 2D (XZ) sólo si el 3D falla por estabilidad/entorno.
 
-### Resumen
-Se muestra una tabla compacta con:
-- dataset activo
-- muestras
-- columnas
-- target
-- valid_count
-- null_pct
-- mean, std, cv
-- min, p10, p25, p50, p75, p90, max
-- skewness
+## Uso de Dominio en EDA
 
-### Univariado
-- Histograma
-- Boxplot
+Si se selecciona una columna de dominio válida, EDA genera boxplot por categoría.
+Si hay demasiadas categorías, se limita a top-N por frecuencia y se informa en actividad/log.
 
-## Espacial
+## Logging JSONL relevante
 
-Vista espacial enfocada en utilidad y estabilidad:
-- Scatter **XY** coloreado por target.
-- Segundo panel con vista **3D X/Y/Z** (matplotlib) coloreada por target cuando es viable.
-- Si no es viable en el entorno, fallback seguro a vista 2D (XZ).
-- Downsampling automático para datasets grandes (mensaje visible en actividad).
-
-## Logging JSONL
-
-Se mantiene el log por sesión en `logs/` con eventos de flujo y estabilidad, incluyendo:
-- `columns_autodetected`
-- `data_panel_collapsed`
-- `data_panel_expanded`
-- `spatial_3d_rendered`
-- `spatial_3d_fallback_rendered`
-- `workflow_simplified_view_loaded`
+Se mantiene logging por sesión en `logs/` y se incluyen eventos como:
+- `workflow_step_data_opened`
+- `workflow_step_eda_opened`
+- `workflow_step_spatial_opened`
+- `eda_domain_boxplot_rendered`
+- `probability_plot_rendered`
+- `spatial_3d_primary_rendered`
 
 ## Tests
 
