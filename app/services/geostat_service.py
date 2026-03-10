@@ -79,6 +79,12 @@ def _is_numeric_dtype(series) -> bool:
     return bool(is_numeric_dtype(series))
 
 
+def _to_numeric(series):
+    import pandas as pd
+
+    return pd.to_numeric(series, errors="coerce")
+
+
 class GeostatService:
     def __init__(self, adapter: GeostatSpyAdapter, activity_log: ActivityLogService | None = None) -> None:
         self.adapter = adapter
@@ -217,6 +223,7 @@ class GeostatService:
         if self.current_dataset is None or self.variable_config is None:
             message = "No hay dataset/configuración suficiente para EDA."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {})
+            self.activity_log.log("univariate_payload_empty", "warning", message, {})
             raise ValueError(message)
 
         try:
@@ -251,15 +258,78 @@ class GeostatService:
             raise ValueError("No hay dataset/configuración suficiente para swath.")
         df = self.current_dataset.dataframe
         target = self.variable_config.target_column
-        if target not in df.columns or not _is_numeric_dtype(df[target]):
-            message = "Target no numérico para EDA univariado."
+        if not target or target not in df.columns:
+            message = f"Target no válido para EDA univariado: '{target}'."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
+            self.activity_log.log("univariate_payload_empty", "warning", message, {"target": target})
             raise ValueError(message)
 
-        clean_target = df[target].dropna().astype(float)
-        if clean_target.empty:
-            message = "No hay suficientes datos válidos para renderizar Univariado."
+        numeric_target = _to_numeric(df[target])
+        total_rows = int(len(df))
+        valid_count = int(numeric_target.notna().sum())
+        nan_count = int(total_rows - valid_count)
+
+        self.activity_log.log(
+            "eda_target_coerced_numeric",
+            "info",
+            "Target convertido a numérico para EDA univariado.",
+            {"target": target, "total_rows": total_rows, "valid_count": valid_count, "nan_count": nan_count},
+        )
+        self.activity_log.log(
+            "eda_target_valid_count_computed",
+            "info",
+            "Conteo de target válido calculado.",
+            {"target": target, "valid_count": valid_count, "nan_count": nan_count},
+        )
+        return payload
+
+        clean_target = numeric_target.dropna().astype(float)
+
+        histogram_available = valid_count > 0
+        boxplot_available = valid_count > 0
+        probability_min_samples = 3
+        probability_available = valid_count >= probability_min_samples
+
+        availability = {
+            "histogram": {
+                "available": histogram_available,
+                "message": ""
+                if histogram_available
+                else f"Histograma no disponible: target {target} no tiene valores numéricos válidos.",
+            },
+            "boxplot": {
+                "available": boxplot_available,
+                "message": ""
+                if boxplot_available
+                else f"Boxplot general no disponible: target {target} no tiene valores numéricos válidos.",
+            },
+            "probability": {
+                "available": probability_available,
+                "message": ""
+                if probability_available
+                else f"Probability plot no disponible: menos de {probability_min_samples} valores válidos.",
+            },
+        }
+
+        for key, event_name, detail in [
+            ("histogram", "univariate_histogram_available", "histograma"),
+            ("boxplot", "univariate_boxplot_available", "boxplot general"),
+            ("probability", "univariate_probability_available", "probability plot"),
+        ]:
+            if availability[key]["available"]:
+                self.activity_log.log(event_name, "info", f"{detail.capitalize()} disponible.", {"target": target, "valid_count": valid_count})
+            else:
+                self.activity_log.log(
+                    "univariate_component_unavailable",
+                    "warning",
+                    availability[key]["message"],
+                    {"component": key, "target": target, "valid_count": valid_count},
+                )
+
+        if not (histogram_available or boxplot_available or probability_available):
+            message = f"No hay valores numéricos válidos para target {target}."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
+            self.activity_log.log("univariate_payload_empty", "warning", message, {"target": target})
             raise ValueError(message)
 
         sorted_vals = sorted(clean_target.tolist())
@@ -267,41 +337,108 @@ class GeostatService:
         qq_x: list[float] = []
         qq_y: list[float] = []
         probability_failed = False
-        try:
-            normal = statistics.NormalDist()
-            qq_x = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)]
-            qq_y = sorted_vals
-            self.activity_log.log("probability_plot_rendered", "info", "Probability plot preparado.", {"n": n})
-        except Exception as exc:
-            probability_failed = True
-            self.activity_log.log("probability_plot_failed", "error", str(exc), {"n": n})
-
-        domain_payload = {"enabled": False, "labels": [], "values": [], "message": ""}
-        domain_col = self.variable_config.domain_column
-        if domain_col and domain_col in df.columns:
+        if probability_available:
             try:
-                domain_df = df[[target, domain_col]].dropna()
+                normal = statistics.NormalDist()
+                qq_x = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)]
+                qq_y = sorted_vals
+                self.activity_log.log("probability_plot_rendered", "info", "Probability plot preparado.", {"n": n})
+            except Exception as exc:
+                probability_failed = True
+                availability["probability"] = {
+                    "available": False,
+                    "message": f"Probability plot no disponible: error al calcular cuantiles ({exc}).",
+                }
+                self.activity_log.log("probability_plot_failed", "error", str(exc), {"n": n})
+                self.activity_log.log(
+                    "univariate_component_unavailable",
+                    "warning",
+                    availability["probability"]["message"],
+                    {"component": "probability", "target": target, "valid_count": valid_count},
+                )
+
+        domain_payload = {"enabled": False, "labels": [], "values": [], "message": "", "valid_rows": 0, "valid_categories": 0}
+        domain_col = self.variable_config.domain_column
+        if not domain_col:
+            domain_payload["message"] = "Boxplot por dominio no disponible: no hay dominio seleccionado."
+            self.activity_log.log("univariate_component_unavailable", "warning", domain_payload["message"], {"component": "domain_boxplot", "target": target})
+        elif domain_col not in df.columns:
+            domain_payload["message"] = f"Boxplot por dominio no disponible: columna {domain_col} no encontrada."
+            self.activity_log.log(
+                "univariate_component_unavailable", "warning", domain_payload["message"], {"component": "domain_boxplot", "target": target, "domain": domain_col}
+            )
+        else:
+            try:
+                domain_df = df[[domain_col]].copy()
+                domain_df["target"] = numeric_target
+                domain_df = domain_df.dropna(subset=["target", domain_col])
+                valid_rows = int(len(domain_df))
+                valid_categories = int(domain_df[domain_col].nunique()) if valid_rows else 0
+                self.activity_log.log(
+                    "eda_domain_valid_count_computed",
+                    "info",
+                    "Conteo de dominio válido calculado.",
+                    {"domain": domain_col, "valid_rows": valid_rows, "valid_categories": valid_categories},
+                )
                 if not domain_df.empty:
                     counts = domain_df[domain_col].value_counts()
                     top = counts.head(max_domain_categories)
                     labels = [str(v) for v in top.index.tolist()]
-                    grouped_values = [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]
+                    grouped_values = [domain_df.loc[domain_df[domain_col] == label, "target"].astype(float).tolist() for label in top.index.tolist()]
+                    labels = [lbl for lbl, vals in zip(labels, grouped_values) if vals]
                     grouped_values = [vals for vals in grouped_values if vals]
-                    labels = [lbl for lbl, vals in zip(labels, [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]) if vals]
                     simplified = len(counts) > max_domain_categories
                     domain_payload = {
                         "enabled": bool(labels and grouped_values),
                         "labels": labels,
                         "values": grouped_values,
                         "message": "" if not simplified else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
+                        "valid_rows": valid_rows,
+                        "valid_categories": valid_categories,
                     }
                     if domain_payload["enabled"]:
+                        self.activity_log.log(
+                            "univariate_domain_boxplot_available",
+                            "info",
+                            "Boxplot por dominio disponible.",
+                            {"domain": domain_col, "categories": len(labels), "valid_rows": valid_rows},
+                        )
                         self.activity_log.log("eda_domain_boxplot_rendered", "info", "Boxplot por dominio preparado.", {"categories": len(labels)})
                         self.activity_log.log("domain_boxplot_rendered", "info", "Boxplot por dominio renderizable preparado.", {"categories": len(labels)})
                         if simplified:
                             self.activity_log.log("domain_boxplot_simplified", "info", "Boxplot por dominio simplificado a top categorías.", {"max_categories": max_domain_categories})
+                    else:
+                        domain_payload["message"] = f"Boxplot por dominio no disponible: {domain_col} no tiene categorías válidas con target numérico."
+                        self.activity_log.log(
+                            "univariate_component_unavailable",
+                            "warning",
+                            domain_payload["message"],
+                            {"component": "domain_boxplot", "domain": domain_col, "valid_rows": valid_rows},
+                        )
+                else:
+                    domain_payload = {
+                        "enabled": False,
+                        "labels": [],
+                        "values": [],
+                        "message": f"Boxplot por dominio no disponible: {domain_col} no tiene filas válidas con target numérico.",
+                        "valid_rows": valid_rows,
+                        "valid_categories": valid_categories,
+                    }
+                    self.activity_log.log(
+                        "univariate_component_unavailable",
+                        "warning",
+                        domain_payload["message"],
+                        {"component": "domain_boxplot", "domain": domain_col, "valid_rows": valid_rows},
+                    )
             except Exception as exc:
                 self.activity_log.log("domain_boxplot_failed", "error", str(exc), {"domain": domain_col})
+                domain_payload["message"] = f"Boxplot por dominio no disponible: error al preparar dominio ({exc})."
+                self.activity_log.log(
+                    "univariate_component_unavailable",
+                    "warning",
+                    domain_payload["message"],
+                    {"component": "domain_boxplot", "domain": domain_col},
+                )
 
         payload = {
             "target_values": clean_target.tolist(),
@@ -309,7 +446,18 @@ class GeostatService:
             "probplot_y": qq_y,
             "probability_failed": probability_failed,
             "domain_boxplot": domain_payload,
+            "availability": availability,
+            "diagnostics": {
+                "target": target,
+                "domain": domain_col or "",
+                "total_rows": total_rows,
+                "target_valid_count": valid_count,
+                "target_nan_count": nan_count,
+                "domain_valid_rows": domain_payload.get("valid_rows", 0),
+                "domain_valid_categories": domain_payload.get("valid_categories", 0),
+            },
         }
+        self.activity_log.log("univariate_payload_built", "success", "Payload univariado construido.", payload["diagnostics"])
         self.activity_log.log(
             "eda_univariate_payload_prepared",
             "success",

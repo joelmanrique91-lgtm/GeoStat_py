@@ -58,6 +58,7 @@ class VisualAnalyticsTests(unittest.TestCase):
             service.set_variable_config("x", "y", "z", "target")
             payload = service.prepare_univariate_data()
             self.assertFalse(payload["domain_boxplot"]["enabled"])
+            self.assertIn("no hay dominio seleccionado", payload["domain_boxplot"]["message"].lower())
 
 
     def test_payload_empty_event_for_invalid_target(self) -> None:
@@ -72,6 +73,22 @@ class VisualAnalyticsTests(unittest.TestCase):
                 service.prepare_univariate_data()
             content = log_service.session_log_path.read_text(encoding="utf-8")
             self.assertIn("eda_univariate_payload_empty", content)
+            self.assertIn("univariate_payload_empty", content)
+
+    def test_univariate_payload_partial_when_domain_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_service = ActivityLogService(logs_dir=Path(tmp_dir))
+            service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=log_service)
+            csv = Path(tmp_dir) / "sample.csv"
+            csv.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n2,2,2,3\n", encoding="utf-8")
+            service.load_csv(str(csv))
+            service.set_variable_config("x", "y", "z", "target", domain_column="dom")
+            payload = service.prepare_univariate_data()
+            self.assertTrue(payload["availability"]["histogram"]["available"])
+            self.assertTrue(payload["availability"]["boxplot"]["available"])
+            self.assertTrue(payload["availability"]["probability"]["available"])
+            self.assertFalse(payload["domain_boxplot"]["enabled"])
+            self.assertIn("columna dom no encontrada", payload["domain_boxplot"]["message"].lower())
 
     def test_logging_events_for_new_rendering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -94,6 +111,8 @@ class VisualAnalyticsTests(unittest.TestCase):
             self.assertIn("eda_domain_boxplot_rendered", content)
             self.assertIn("probability_plot_rendered", content)
             self.assertIn("spatial_2d_rendered", content)
+            self.assertIn("univariate_payload_built", content)
+            self.assertIn("eda_target_coerced_numeric", content)
 
 
 if __name__ == "__main__":

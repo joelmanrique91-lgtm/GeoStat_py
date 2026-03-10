@@ -232,31 +232,41 @@ class HomePanel(ctk.CTkFrame):
 
         dashboard = DashboardGrid(tab, 2, 2, figsize=(8.6, 6.0))
         failed_parts: list[str] = []
+        availability = data.get("availability", {})
 
         ax_hist = dashboard.axis(0, 0)
         try:
+            hist_meta = availability.get("histogram", {})
+            if not hist_meta.get("available", True):
+                raise ValueError(hist_meta.get("message", "Histograma no disponible"))
             ax_hist.hist(data["target_values"], bins=20, color="#4c78a8", edgecolor="white")
             ax_hist.set_title("Histograma target")
         except Exception as exc:
             failed_parts.append("histograma")
             ax_hist.axis("off")
-            ax_hist.text(0.5, 0.5, "Histograma no disponible", ha="center", va="center")
+            ax_hist.text(0.5, 0.5, str(exc), ha="center", va="center", wrap=True)
             self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "histogram"})
 
         ax_box = dashboard.axis(0, 1)
         try:
+            box_meta = availability.get("boxplot", {})
+            if not box_meta.get("available", True):
+                raise ValueError(box_meta.get("message", "Boxplot general no disponible"))
             ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
             ax_box.set_title("Boxplot general")
         except Exception as exc:
             failed_parts.append("boxplot general")
             ax_box.axis("off")
-            ax_box.text(0.5, 0.5, "Boxplot general no disponible", ha="center", va="center")
+            ax_box.text(0.5, 0.5, str(exc), ha="center", va="center", wrap=True)
             self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "boxplot_general"})
 
         ax_prob = dashboard.axis(1, 0)
         try:
+            prob_meta = availability.get("probability", {})
+            if not prob_meta.get("available", True):
+                raise ValueError(prob_meta.get("message", "Probability plot no disponible"))
             if data.get("probability_failed") or not data["probplot_x"] or not data["probplot_y"]:
-                raise ValueError("Payload de probability plot vacío o inválido")
+                raise ValueError("Probability plot no disponible: payload vacío o inválido.")
             ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color="#54a24b")
             ax_prob.set_title("Probability plot")
             ax_prob.set_xlabel("Cuantiles teóricos normal")
@@ -264,7 +274,7 @@ class HomePanel(ctk.CTkFrame):
         except Exception as exc:
             failed_parts.append("probability plot")
             ax_prob.axis("off")
-            ax_prob.text(0.5, 0.5, "Probability plot no disponible", ha="center", va="center")
+            ax_prob.text(0.5, 0.5, str(exc), ha="center", va="center", wrap=True)
             self.service.activity_log.log("probability_plot_failed", "error", str(exc), {})
             self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "probability_plot"})
 
@@ -278,15 +288,18 @@ class HomePanel(ctk.CTkFrame):
                 if domain_data["message"]:
                     self._append_activity(domain_data["message"])
             else:
-                raise ValueError("Sin dominio seleccionado o sin datos válidos")
+                raise ValueError(domain_data.get("message") or "Boxplot por dominio no disponible")
         except Exception as exc:
             failed_parts.append("boxplot por dominio")
             ax_domain.axis("off")
-            ax_domain.text(0.5, 0.5, "Sin dominio seleccionado\no sin datos válidos.", ha="center", va="center")
+            ax_domain.text(0.5, 0.5, str(exc), ha="center", va="center", wrap=True)
             self.service.activity_log.log("domain_boxplot_failed", "warning", str(exc), {})
             self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "domain_boxplot"})
 
         dashboard.render()
+        diagnostics = data.get("diagnostics", {})
+        if diagnostics:
+            self.service.activity_log.log("eda_univariate_diagnostics", "info", "Métricas de validación de univariado.", diagnostics)
         if failed_parts and len(failed_parts) < 4:
             self._append_activity(f"Univariado render parcial. No disponible: {', '.join(failed_parts)}")
         if len(failed_parts) == 4:

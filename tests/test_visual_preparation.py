@@ -54,6 +54,9 @@ class VisualPreparationTests(unittest.TestCase):
         payload = self.service.prepare_univariate_data(max_domain_categories=5)
         self.assertEqual(len(payload["probplot_x"]), 3)
         self.assertTrue(payload["domain_boxplot"]["enabled"])
+        self.assertTrue(payload["availability"]["histogram"]["available"])
+        self.assertTrue(payload["availability"]["boxplot"]["available"])
+        self.assertTrue(payload["availability"]["probability"]["available"])
 
 
     @patch("app.services.geostat_service.statistics.NormalDist")
@@ -74,6 +77,17 @@ class VisualPreparationTests(unittest.TestCase):
             result = self.service.prepare_visual_data()
             self.assertFalse(result.success)
             self.assertIn("Target no numérico", result.message)
+
+    def test_univariate_coerces_numeric_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            p = Path(tmp_dir) / "data.csv"
+            p.write_text("x,y,z,target,dom\n1,2,3,10,a\n2,3,4,11.5,b\n3,4,5,foo,a\n", encoding="utf-8")
+            self.service.load_csv(str(p))
+            self.service.set_variable_config("x", "y", "z", "target", domain_column="dom")
+            payload = self.service.prepare_univariate_data()
+            self.assertEqual(payload["diagnostics"]["target_valid_count"], 2)
+            self.assertEqual(payload["diagnostics"]["target_nan_count"], 1)
+            self.assertTrue(payload["availability"]["histogram"]["available"])
 
 
 if __name__ == "__main__":
