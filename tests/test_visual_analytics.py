@@ -62,7 +62,7 @@ class VisualAnalyticsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compute_swath_series(bad_df, "x", "target", bins=5)
 
-    def test_logging_events_for_stability_pipeline(self) -> None:
+    def test_logging_events_for_simplified_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_service = ActivityLogService(logs_dir=Path(tmp_dir))
             service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=log_service)
@@ -71,15 +71,11 @@ class VisualAnalyticsTests(unittest.TestCase):
             service.load_csv(str(csv))
             service.set_variable_config("x", "y", "z", "target")
             service.prepare_visual_data()
-            service.prepare_swath_data(bins=4)
-            service.prepare_variogram_data(lag=10, n_lags=4, max_distance=60)
 
             content = log_service.session_log_path.read_text(encoding="utf-8")
+            self.assertIn("columns_autodetected", content)
             self.assertIn("dashboard_render_started", content)
             self.assertIn("dashboard_render_finished", content)
-            self.assertIn("swath_rendered", content)
-            self.assertIn("variogram_started", content)
-            self.assertIn("variogram_rendered", content)
 
 
 if __name__ == "__main__":

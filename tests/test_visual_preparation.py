@@ -1,4 +1,4 @@
-"""Tests for visual data preparation and statistics tables."""
+"""Tests for visual data preparation and expanded statistics table."""
 
 from __future__ import annotations
 
@@ -42,6 +42,8 @@ class VisualPreparationTests(unittest.TestCase):
         self.assertIn("mean", table)
         self.assertIn("p10", table)
         self.assertIn("skewness", table)
+        self.assertIn("null_pct", table)
+        self.assertIn("valid_count", table)
 
     def test_prepare_visual_data_fails_for_non_numeric_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
