@@ -1,6 +1,6 @@
 # GeoStat_py
 
-App de escritorio local (CustomTkinter) para análisis geoestadístico visual con etapas separadas por responsabilidad.
+App de escritorio local (CustomTkinter) para análisis geoestadístico visual con separación clara por etapa.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -22,35 +22,41 @@ python -m app.main
 - Carga de CSV.
 - Autodetección de columnas (X/Y/Z/target/Hole ID/Dominio).
 - Configuración editable y panel colapsable.
-- Resumen de configuración activa.
+- Resumen compacto de configuración activa.
 
 ### EDA
 - Subtabs: **Resumen** y **Univariado**.
-- **Resumen**: estadísticas completas del target (incluye nulos y válidos).
+- **Resumen**: tabla de estadísticos completos del target.
 - **Univariado**:
   - histograma,
   - boxplot general,
   - probability plot,
-  - boxplot por dominio/categoría (si hay dominio seleccionado).
+  - boxplot por dominio/categoría (si hay dominio válido).
+
+Cuando hay muchas categorías en dominio, la vista se simplifica a top-N por frecuencia y se informa en actividad/log.
 
 ### Espacial
-- Vista dedicada a **3D** (X/Y/Z coloreado por target) como gráfico principal.
-- Fallback interno a 2D (XZ) sólo si el 3D falla por estabilidad/entorno.
-
-## Uso de Dominio en EDA
-
-Si se selecciona una columna de dominio válida, EDA genera boxplot por categoría.
-Si hay demasiadas categorías, se limita a top-N por frecuencia y se informa en actividad/log.
+- Vista principal centrada en secciones 2D útiles:
+  - XY (planta),
+  - XZ (sección),
+  - YZ (sección).
+- La vista 3D deja de ser el foco principal en esta iteración.
 
 ## Logging JSONL relevante
 
-Se mantiene logging por sesión en `logs/` y se incluyen eventos como:
+Se mantiene logging por sesión en `logs/` con eventos como:
 - `workflow_step_data_opened`
 - `workflow_step_eda_opened`
 - `workflow_step_spatial_opened`
-- `eda_domain_boxplot_rendered`
+- `eda_univariate_render_started`
+- `eda_univariate_rendered`
+- `eda_univariate_render_failed`
+- `domain_boxplot_rendered`
+- `domain_boxplot_simplified`
 - `probability_plot_rendered`
-- `spatial_3d_primary_rendered`
+- `spatial_2d_rendered`
+- `spatial_3d_disabled_or_hidden`
+- `empty_state_shown`
 
 ## Tests
 

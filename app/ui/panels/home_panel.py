@@ -32,7 +32,6 @@ class HomePanel(ctk.CTkFrame):
         self.log_visible = True
         self.data_panel_collapsed = False
         self.summary_value_labels: dict[str, ctk.CTkLabel] = {}
-        self.visual_cache: dict[str, object] = {}
 
         self._build_layout()
         self._render_step("Datos")
@@ -209,12 +208,9 @@ class HomePanel(ctk.CTkFrame):
             justify="left",
         ).pack(anchor="w", padx=8, pady=8)
 
-    def _on_eda_tab_changed(self) -> None:
-        if self.workflow_state_is("EDA"):
-            self._render_eda_tab(self.eda_tabs.get())
-
-    def workflow_state_is(self, step: str) -> bool:
-        return self.service.workflow_state.current_step == step
+    def _on_eda_tab_changed(self, *_args) -> None:
+        if self.service.workflow_state.current_step == "EDA":
+            self.after(20, lambda: self._render_eda_tab(self.eda_tabs.get() or "Resumen"))
 
     def _render_eda_tab(self, tab_name: str) -> None:
         if tab_name == "Resumen":
@@ -225,9 +221,12 @@ class HomePanel(ctk.CTkFrame):
     def _render_univariado_tab(self) -> None:
         tab = self.eda_tabs.tab("Univariado")
         DashboardGrid.clear(tab)
+        self.service.activity_log.log("eda_univariate_render_started", "info", "Render Univariado iniciado.", {})
         try:
             data = self.service.prepare_univariate_data(max_domain_categories=10)
         except Exception as exc:
+            self.service.activity_log.log("eda_univariate_render_failed", "error", str(exc), {})
+            self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Univariado.", {"reason": str(exc)})
             ctk.CTkLabel(tab, text=f"No se pudo preparar EDA univariado: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
             return
 
@@ -260,9 +259,11 @@ class HomePanel(ctk.CTkFrame):
             ax_domain.text(0.5, 0.5, "Sin dominio seleccionado\no sin datos válidos.", ha="center", va="center")
 
         dashboard.render()
+        self.service.activity_log.log("eda_univariate_rendered", "success", "Render Univariado completado.", {})
 
     def _render_spatial_stage_panel(self) -> None:
         DashboardGrid.clear(self.spatial_stage_view)
+        self.service.activity_log.log("spatial_3d_disabled_or_hidden", "info", "Vista 3D deshabilitada como vista principal.", {})
 
         try:
             result = self.service.prepare_visual_data()
@@ -270,31 +271,40 @@ class HomePanel(ctk.CTkFrame):
                 raise ValueError(result.message)
             spatial = result.spatial_data
         except Exception as exc:
+            self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Espacial.", {"reason": str(exc)})
             ctk.CTkLabel(self.spatial_stage_view, text=f"No se pudo renderizar Espacial: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
             return
 
-        dashboard = DashboardGrid(self.spatial_stage_view, 1, 1, figsize=(9.2, 6.8))
-        ax = dashboard.axis(0, 0)
-        dashboard.figure.delaxes(ax)
-        try:
-            ax3d = dashboard.figure.add_subplot(111, projection="3d")
-            sc3d = ax3d.scatter(spatial.x, spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=12)
-            ax3d.set_xlabel("X")
-            ax3d.set_ylabel("Y")
-            ax3d.set_zlabel("Z")
-            ax3d.set_title("Vista espacial 3D")
-            dashboard.figure.colorbar(sc3d, ax=ax3d, shrink=0.8, label="Target")
-        except Exception:
-            ax2d = dashboard.figure.add_subplot(111)
-            sc2d = ax2d.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=12)
-            ax2d.set_xlabel("X")
-            ax2d.set_ylabel("Z")
-            ax2d.set_title("Vista XZ (fallback)")
-            dashboard.figure.colorbar(sc2d, ax=ax2d, shrink=0.8, label="Target")
-            self.service.activity_log.log("spatial_3d_fallback_rendered", "warning", "Fallback a vista 2D por estabilidad.", {})
+        dashboard = DashboardGrid(self.spatial_stage_view, 2, 2, figsize=(9.2, 6.8))
+        ax_xy = dashboard.axis(0, 0)
+        ax_xz = dashboard.axis(0, 1)
+        ax_yz = dashboard.axis(1, 0)
+        ax_info = dashboard.axis(1, 1)
 
+        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap="viridis", s=12)
+        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=12)
+        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=12)
+
+        ax_xy.set_title("XY (planta)")
+        ax_xy.set_xlabel("X")
+        ax_xy.set_ylabel("Y")
+
+        ax_xz.set_title("XZ (sección)")
+        ax_xz.set_xlabel("X")
+        ax_xz.set_ylabel("Z")
+
+        ax_yz.set_title("YZ (sección)")
+        ax_yz.set_xlabel("Y")
+        ax_yz.set_ylabel("Z")
+
+        for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
+            dashboard.figure.colorbar(sc, ax=ax, shrink=0.78, label="Target")
+
+        ax_info.axis("off")
+        msg = "Vistas 2D activas: XY, XZ, YZ."
         if spatial.downsampled:
-            self._append_activity(f"Vista espacial muestreada ({spatial.plotted_points}/{spatial.source_points} puntos).")
+            msg += f"\nMuestreo: {spatial.plotted_points}/{spatial.source_points} puntos."
+        ax_info.text(0.05, 0.9, msg, va="top")
 
         dashboard.render()
 
@@ -303,6 +313,7 @@ class HomePanel(ctk.CTkFrame):
         DashboardGrid.clear(tab)
         table_data = self.service.get_target_statistics_table()
         if not table_data:
+            self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Resumen EDA.", {})
             ctk.CTkLabel(tab, text=self.service.build_eda_summary(), justify="left").pack(anchor="w", padx=8, pady=8)
             return
 

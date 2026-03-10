@@ -35,6 +35,9 @@ class VisualPreparationTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIsNotNone(result.spatial_data)
         self.assertEqual(len(result.spatial_data.target), 3)
+        self.assertEqual(len(result.spatial_data.x), 3)
+        self.assertEqual(len(result.spatial_data.y), 3)
+        self.assertEqual(len(result.spatial_data.z), 3)
 
     def test_statistics_table_contains_expected_metrics(self) -> None:
         self._load_numeric_dataset()

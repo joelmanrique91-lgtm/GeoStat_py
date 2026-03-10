@@ -209,7 +209,7 @@ class GeostatService:
             self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
             return VisualPreparationResult(False, str(exc), None)
 
-        self.activity_log.log("spatial_3d_primary_rendered", "success", "Vista espacial 3D preparada.", {"rows": len(spatial.target)})
+        self.activity_log.log("spatial_2d_rendered", "success", "Vistas espaciales 2D preparadas.", {"rows": len(spatial.target)})
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
 
@@ -272,13 +272,17 @@ class GeostatService:
                 top = counts.head(max_domain_categories)
                 labels = [str(v) for v in top.index.tolist()]
                 grouped_values = [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]
+                simplified = len(counts) > max_domain_categories
                 domain_payload = {
                     "enabled": True,
                     "labels": labels,
                     "values": grouped_values,
-                    "message": "" if len(counts) <= max_domain_categories else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
+                    "message": "" if not simplified else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
                 }
                 self.activity_log.log("eda_domain_boxplot_rendered", "info", "Boxplot por dominio preparado.", {"categories": len(labels)})
+                self.activity_log.log("domain_boxplot_rendered", "info", "Boxplot por dominio renderizable preparado.", {"categories": len(labels)})
+                if simplified:
+                    self.activity_log.log("domain_boxplot_simplified", "info", "Boxplot por dominio simplificado a top categorías.", {"max_categories": max_domain_categories})
 
         return {
             "target_values": clean_target.tolist(),

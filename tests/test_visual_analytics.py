@@ -1,4 +1,4 @@
-"""Tests for spatial prep, domain handling and new logging events."""
+"""Tests for spatial prep, domain handling and logging events."""
 
 from __future__ import annotations
 
@@ -48,6 +48,17 @@ class VisualAnalyticsTests(unittest.TestCase):
             self.assertEqual(len(payload["domain_boxplot"]["labels"]), 5)
             self.assertIn("top 5", payload["domain_boxplot"]["message"])
 
+    def test_univariate_without_domain_selected(self) -> None:
+        df = pd.DataFrame({"x": [1, 2], "y": [3, 4], "z": [5, 6], "target": [7.0, 8.0]})
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv = Path(tmp_dir) / "sample.csv"
+            df.to_csv(csv, index=False)
+            service = GeostatService(adapter=GeostatSpyAdapter())
+            service.load_csv(str(csv))
+            service.set_variable_config("x", "y", "z", "target")
+            payload = service.prepare_univariate_data()
+            self.assertFalse(payload["domain_boxplot"]["enabled"])
+
     def test_logging_events_for_new_rendering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_service = ActivityLogService(logs_dir=Path(tmp_dir))
@@ -68,7 +79,7 @@ class VisualAnalyticsTests(unittest.TestCase):
             self.assertIn("workflow_step_spatial_opened", content)
             self.assertIn("eda_domain_boxplot_rendered", content)
             self.assertIn("probability_plot_rendered", content)
-            self.assertIn("spatial_3d_primary_rendered", content)
+            self.assertIn("spatial_2d_rendered", content)
 
 
 if __name__ == "__main__":
