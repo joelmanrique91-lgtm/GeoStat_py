@@ -1,4 +1,4 @@
-"""Tests for repository update, workflow, variable selection and EDA logic."""
+"""Tests for repository update, workflow, autodetection and variable selection logic."""
 
 from __future__ import annotations
 
@@ -26,41 +26,33 @@ class ServiceFeatureTests(unittest.TestCase):
     def _load_sample_dataset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = Path(tmp_dir) / "sample.csv"
-            csv_path.write_text("x,y,z,target,cat\n1,2,3,10,a\n3,4,5,20,b\n", encoding="utf-8")
+            csv_path.write_text("Easting,Northing,RL,Au,HoleID,Lithology\n1,2,3,10,DH01,A\n3,4,5,20,DH02,B\n", encoding="utf-8")
             result = self.service.load_csv(str(csv_path))
             self.assertTrue(result.success)
 
     def test_eda_summary_contains_expected_sections(self) -> None:
         self._load_sample_dataset()
         summary = self.service.build_eda_summary()
-
         self.assertIn("MÓDULO EDA", summary)
-        self.assertIn("Tipos de datos", summary)
-        self.assertIn("Nulos por columna", summary)
-        self.assertIn("Columnas numéricas", summary)
+        self.assertIn("Resumen | Univariado", summary)
+
+    def test_autodetect_columns(self) -> None:
+        self._load_sample_dataset()
+        detected = self.service.get_autodetected_columns()
+        self.assertEqual(detected["x"], "Easting")
+        self.assertEqual(detected["y"], "Northing")
+        self.assertEqual(detected["z"], "RL")
+        self.assertEqual(detected["hole_id"], "HoleID")
+        self.assertEqual(detected["domain"], "Lithology")
 
     def test_set_variable_config_success(self) -> None:
         self._load_sample_dataset()
-        result = self.service.set_variable_config("x", "y", "z", "target", "cat", "cat")
+        result = self.service.set_variable_config("Easting", "Northing", "RL", "Au", "HoleID", "Lithology")
 
         self.assertTrue(result.success)
         self.assertIn("Configuración de variables guardada", result.message)
-        self.assertIn("Estadísticos del target", result.eda_summary)
         self.assertIsNotNone(self.service.variable_config)
         self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
-
-    def test_set_variable_config_invalid_column(self) -> None:
-        self._load_sample_dataset()
-        result = self.service.set_variable_config("x", "y", "bad", "target")
-
-        self.assertFalse(result.success)
-        self.assertIn("columnas no válidas", result.message)
-
-    def test_evaluate_data_quality_returns_semaphore(self) -> None:
-        self._load_sample_dataset()
-        semaphore, summary = self.service.evaluate_data_quality()
-        self.assertIn(semaphore, {"verde", "amarillo", "rojo"})
-        self.assertIn("QUALITY GATE INICIAL", summary)
 
     @patch("app.services.geostat_service.subprocess.run")
     def test_update_repository_success(self, mock_run) -> None:
@@ -74,12 +66,6 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("actualizado", result.message.lower())
         self.assertFalse(result.restart_recommended)
-
-    def test_module_not_implemented_logs_message(self) -> None:
-        message = self.service.module_not_implemented("Kriging")
-
-        self.assertIn("aún no implementada", message)
-        self.assertIn("Kriging", message)
 
 
 if __name__ == "__main__":

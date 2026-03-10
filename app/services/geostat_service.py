@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import math
+import statistics
 import subprocess
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
@@ -11,30 +13,15 @@ from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
+from app.services.visualization_service import SpatialDataBundle, prepare_spatial_sections
 from app.utils.paths import PROJECT_ROOT
 
-WORKFLOW_STEPS = [
-    "Datos",
-    "QA/QC",
-    "EDA",
-    "Espacial",
-    "Variografía",
-    "Kriging",
-    "Simulación",
-    "Validación",
-    "Exportación",
-]
-
-FUNCTIONAL_STATUS = {
-    "Datos": "funcional",
-    "QA/QC": "parcial",
-    "EDA": "funcional",
-    "Espacial": "funcional",
-    "Variografía": "futuro",
-    "Kriging": "futuro",
-    "Simulación": "futuro",
-    "Validación": "futuro",
-    "Exportación": "parcial",
+WORKFLOW_STEPS = ["Datos", "EDA", "Espacial"]
+FUNCTIONAL_STATUS = {step: "funcional" for step in WORKFLOW_STEPS}
+STEP_EVENT_MAP = {
+    "Datos": "workflow_step_data_opened",
+    "EDA": "workflow_step_eda_opened",
+    "Espacial": "workflow_step_spatial_opened",
 }
 
 
@@ -65,10 +52,7 @@ class ColumnSelectionResult:
 class VisualPreparationResult:
     success: bool
     message: str
-    target_values: list[float]
-    x_values: list[float]
-    y_values: list[float]
-    z_values: list[float]
+    spatial_data: SpatialDataBundle | None
 
 
 def _read_csv(path: Path):
@@ -102,18 +86,22 @@ class GeostatService:
         self.current_dataset: DatasetModel | None = None
         self.variable_config: VariableConfigModel | None = None
         self.workflow_state = WorkflowStateModel()
+        self.autodetected_columns: dict[str, str] = {}
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
             return "Paso de workflow no válido."
         self.workflow_state.current_step = step_name
-        event_name = f"{step_name.lower().replace(' ', '_').replace('/', '_')}_opened"
         self.activity_log.log("workflow_step_changed", "info", f"Paso activo: {step_name}", {"step": step_name})
-        self.activity_log.log(event_name, "info", f"Se abrió el paso {step_name}.", {"step": step_name})
-        return f"Paso activo: {step_name} ({FUNCTIONAL_STATUS.get(step_name, 'futuro')})."
+        self.activity_log.log(STEP_EVENT_MAP[step_name], "info", f"Se abrió el paso {step_name}.", {"step": step_name})
+        return f"Paso activo: {step_name} (funcional)."
 
     def get_workflow_step_status(self) -> list[tuple[str, str]]:
-        return [(step, FUNCTIONAL_STATUS.get(step, "futuro")) for step in WORKFLOW_STEPS]
+        self.activity_log.log("workflow_simplified_view_loaded", "info", "Workflow simplificado cargado.", {"steps": WORKFLOW_STEPS})
+        return [(step, FUNCTIONAL_STATUS[step]) for step in WORKFLOW_STEPS]
+
+    def get_available_columns(self) -> list[str]:
+        return [] if self.current_dataset is None else self.current_dataset.columns
 
     def load_csv(self, file_path: str) -> LoadCsvResult:
         self.activity_log.log("csv_load_started", "info", "Iniciando carga de CSV.", {"file_path": file_path})
@@ -145,101 +133,168 @@ class GeostatService:
         dataset = DatasetModel.from_dataframe(file_path=selected_path, dataframe=dataframe)
         self.current_dataset = dataset
         self.variable_config = None
+        self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
+        self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
         self.activity_log.log("csv_load_succeeded", "success", "CSV cargado correctamente.", {"file": dataset.file_name})
         return LoadCsvResult(True, "CSV cargado correctamente.", details, dataset)
 
-    def evaluate_data_quality(self) -> tuple[str, str]:
-        if self.current_dataset is None:
-            return "rojo", "No hay dataset cargado para evaluar calidad."
-        df = self.current_dataset.dataframe
-        missing_pct = float(df.isna().sum().sum()) / float(df.size) * 100.0 if df.size else 0.0
-        duplicated_rows = int(df.duplicated().sum())
-        coord_nulls = sum(int(df[c].isna().sum()) for c in ["x", "y", "z"] if c in df.columns)
+    def autodetect_columns(self, columns: list[str], dataframe) -> dict[str, str]:
+        normalized = {col.lower().replace("_", "").replace(" ", ""): col for col in columns}
 
-        semaphore = "verde"
-        if coord_nulls > 0:
-            semaphore = "rojo"
-        elif duplicated_rows > 0 or missing_pct > 5:
-            semaphore = "amarillo"
+        def pick(candidates: list[str]) -> str:
+            for candidate in candidates:
+                for key, original in normalized.items():
+                    if candidate in key:
+                        return original
+            return ""
 
-        summary = (
-            "QUALITY GATE INICIAL\n"
-            f"Semáforo: {semaphore.upper()}\n"
-            f"% faltantes: {missing_pct:.2f}%\n"
-            f"Duplicados: {duplicated_rows}\n"
-            f"Coordenadas nulas (x/y/z): {coord_nulls}\n"
-            "Tratamiento de extremos (top-cut/capping): pendiente en siguiente iteración."
-        )
-        self.activity_log.log("data_quality_evaluated", "success", "Evaluación QA/QC ejecutada.", {"semaphore": semaphore})
-        return semaphore, summary
-
-    def prepare_visual_data(self) -> VisualPreparationResult:
-        if self.current_dataset is None or self.variable_config is None:
-            message = "No hay dataset/configuración suficiente para renderizar visuales."
-            self.activity_log.log("visual_render_failed", "error", message, {})
-            return VisualPreparationResult(False, message, [], [], [], [])
-
-        df = self.current_dataset.dataframe
-        tcol = self.variable_config.target_column
-        xcol = self.variable_config.x_column
-        ycol = self.variable_config.y_column
-        zcol = self.variable_config.z_column
-
-        for col in [tcol, xcol, ycol, zcol]:
-            if col not in df.columns:
-                message = f"Columna requerida no encontrada: {col}"
-                self.activity_log.log("visual_render_failed", "error", message, {"column": col})
-                return VisualPreparationResult(False, message, [], [], [], [])
-
-        if not _is_numeric_dtype(df[tcol]):
-            message = "Target no numérico: no se puede renderizar histograma/boxplot/scatter continuo."
-            self.activity_log.log("visual_render_failed", "error", message, {"target": tcol})
-            return VisualPreparationResult(False, message, [], [], [], [])
-
-        clean = df[[tcol, xcol, ycol, zcol]].dropna()
-        if clean.empty:
-            message = "No hay datos válidos (sin NaN) para renderizado visual."
-            self.activity_log.log("visual_render_failed", "error", message, {})
-            return VisualPreparationResult(False, message, [], [], [], [])
-
-        self.activity_log.log("visuals_auto_rendered", "success", "Visuales listos para renderizado automático.", {"rows": len(clean)})
-        self.activity_log.log("histogram_rendered", "info", "Histograma preparado.", {})
-        self.activity_log.log("boxplot_rendered", "info", "Boxplot preparado.", {})
-        self.activity_log.log("spatial_view_rendered", "info", "Vista espacial preparada.", {})
-
-        return VisualPreparationResult(
-            True,
-            "Visuales preparados.",
-            clean[tcol].astype(float).tolist(),
-            clean[xcol].astype(float).tolist(),
-            clean[ycol].astype(float).tolist(),
-            clean[zcol].astype(float).tolist(),
-        )
-
-    def get_summary_cards(self) -> dict[str, str]:
-        if self.current_dataset is None:
-            return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente"}
-
-        target = self.variable_config.target_column if self.variable_config else "No definido"
-        cards = {
-            "Dataset": self.current_dataset.file_name,
-            "Muestras": str(self.current_dataset.row_count),
-            "Columnas": str(self.current_dataset.column_count),
-            "Target": target,
-            "Estado": "Listo" if self.variable_config else "Configurar variables",
-            "Dominio": self.workflow_state.active_domain,
-            "Soporte": self.workflow_state.active_support,
+        suggestions = {
+            "x": pick(["x", "easting", "east"]),
+            "y": pick(["y", "northing", "north"]),
+            "z": pick(["z", "elev", "elevation", "rl"]),
+            "hole_id": pick(["holeid", "hole_id", "dhid", "drillhole"]),
+            "domain": pick(["domain", "lito", "litho", "lithology", "zone"]),
         }
 
-        if self.variable_config and target in self.current_dataset.dataframe.columns and _is_numeric_dtype(self.current_dataset.dataframe[target]):
-            series = self.current_dataset.dataframe[target].dropna()
-            if len(series) > 0:
-                cards["Mean"] = f"{float(series.mean()):.3g}"
-                cards["Std"] = f"{float(series.std()):.3g}"
-                if float(series.mean()) != 0:
-                    cards["CV"] = f"{float(series.std()/series.mean()):.3g}"
-        return cards
+        numeric_candidates: list[str] = []
+        for col in columns:
+            if _is_numeric_dtype(dataframe[col]) and col not in {suggestions["x"], suggestions["y"], suggestions["z"]}:
+                numeric_candidates.append(col)
+        suggestions["target"] = numeric_candidates[0] if numeric_candidates else ""
+        return suggestions
+
+    def get_autodetected_columns(self) -> dict[str, str]:
+        return self.autodetected_columns.copy()
+
+    def set_variable_config(
+        self,
+        x_column: str,
+        y_column: str,
+        z_column: str,
+        target_column: str,
+        hole_id_column: str | None = None,
+        domain_column: str | None = None,
+    ) -> ColumnSelectionResult:
+        if self.current_dataset is None:
+            return ColumnSelectionResult(False, "Primero debes cargar un CSV.", "No hay dataset cargado.")
+        selected = [x_column, y_column, z_column, target_column]
+        if any(not value for value in selected):
+            return ColumnSelectionResult(False, "Debes seleccionar X, Y, Z y variable objetivo.", "Configuración incompleta.")
+        invalid = [col for col in selected if col not in self.current_dataset.columns]
+        if invalid:
+            return ColumnSelectionResult(False, "La selección contiene columnas no válidas.", f"Columnas inválidas: {', '.join(invalid)}")
+
+        self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
+        self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
+        self.workflow_state.active_support = "Muestra original"
+        self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
+        return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
+
+    def prepare_visual_data(self) -> VisualPreparationResult:
+        self.activity_log.log("dashboard_render_started", "info", "Render espacial iniciado.", {"view": "Espacial"})
+        if self.current_dataset is None or self.variable_config is None:
+            message = "No hay dataset/configuración suficiente para renderizar visuales."
+            self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Espacial"})
+            return VisualPreparationResult(False, message, None)
+        try:
+            spatial = prepare_spatial_sections(
+                self.current_dataset.dataframe,
+                self.variable_config.x_column,
+                self.variable_config.y_column,
+                self.variable_config.z_column,
+                self.variable_config.target_column,
+            )
+        except ValueError as exc:
+            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
+            return VisualPreparationResult(False, str(exc), None)
+
+        self.activity_log.log("spatial_3d_primary_rendered", "success", "Vista espacial 3D preparada.", {"rows": len(spatial.target)})
+        self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
+        return VisualPreparationResult(True, "Visuales preparados.", spatial)
+
+    def prepare_univariate_data(self, max_domain_categories: int = 10) -> dict:
+        if self.current_dataset is None or self.variable_config is None:
+            raise ValueError("No hay dataset/configuración suficiente para EDA.")
+
+        df = self.current_dataset.dataframe
+        target = self.variable_config.target_column
+        if target not in df.columns or not _is_numeric_dtype(df[target]):
+            raise ValueError("Target no numérico para EDA univariado.")
+
+        clean_target = df[target].dropna().astype(float)
+        if clean_target.empty:
+            raise ValueError("No hay datos válidos de target para EDA univariado.")
+
+        sorted_vals = sorted(clean_target.tolist())
+        n = len(sorted_vals)
+        normal = statistics.NormalDist()
+        qq_x = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)]
+        qq_y = sorted_vals
+        self.activity_log.log("probability_plot_rendered", "info", "Probability plot preparado.", {"n": n})
+
+        domain_payload = {"enabled": False, "labels": [], "values": [], "message": ""}
+        domain_col = self.variable_config.domain_column
+        if domain_col and domain_col in df.columns:
+            domain_df = df[[target, domain_col]].dropna()
+            if not domain_df.empty:
+                counts = domain_df[domain_col].value_counts()
+                top = counts.head(max_domain_categories)
+                labels = [str(v) for v in top.index.tolist()]
+                grouped_values = [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]
+                domain_payload = {
+                    "enabled": True,
+                    "labels": labels,
+                    "values": grouped_values,
+                    "message": "" if len(counts) <= max_domain_categories else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
+                }
+                self.activity_log.log("eda_domain_boxplot_rendered", "info", "Boxplot por dominio preparado.", {"categories": len(labels)})
+
+        return {
+            "target_values": clean_target.tolist(),
+            "probplot_x": qq_x,
+            "probplot_y": qq_y,
+            "domain_boxplot": domain_payload,
+        }
+
+    def build_eda_summary(self) -> str:
+        if self.current_dataset is None:
+            return "No hay dataset cargado para EDA."
+        base = (
+            "MÓDULO EDA\n"
+            "----------\n"
+            "Subsecciones: Resumen | Univariado\n"
+            f"Filas: {self.current_dataset.row_count} | Columnas: {self.current_dataset.column_count}\n"
+        )
+        if self.variable_config is None:
+            return base + "Selecciona X/Y/Z/target para habilitar estadísticas del target."
+        target = self.variable_config.target_column
+        df = self.current_dataset.dataframe
+        if target not in df.columns or not _is_numeric_dtype(df[target]):
+            return base + "Target no numérico: estadísticas limitadas."
+        stats = self._target_statistics()
+        return base + f"Target {target}: válidos={stats['valid_count']} | nulos={stats['null_pct']:.2f}% | mean={stats['mean']:.4g}"
+
+    def _target_statistics(self) -> dict[str, float]:
+        target = self.variable_config.target_column
+        df = self.current_dataset.dataframe
+        total = len(df)
+        clean = df[target].dropna().astype(float)
+        return {
+            "valid_count": float(len(clean)),
+            "null_pct": float(((total - len(clean)) / total) * 100.0) if total else 0.0,
+            "mean": float(clean.mean()),
+            "std": float(clean.std()),
+            "cv": float(clean.std() / clean.mean()) if float(clean.mean()) != 0 else 0.0,
+            "min": float(clean.min()),
+            "p10": float(clean.quantile(0.10)),
+            "p25": float(clean.quantile(0.25)),
+            "p50": float(clean.quantile(0.50)),
+            "p75": float(clean.quantile(0.75)),
+            "p90": float(clean.quantile(0.90)),
+            "max": float(clean.max()),
+            "skewness": float(clean.skew()) if len(clean) > 2 else math.nan,
+        }
 
     def get_target_statistics_table(self) -> list[tuple[str, str]]:
         if self.current_dataset is None or self.variable_config is None:
@@ -249,24 +304,40 @@ class GeostatService:
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return []
 
-        series = df[target].dropna()
-        if series.empty:
-            return []
+        stats = self._target_statistics()
+        return [
+            ("dataset", self.current_dataset.file_name),
+            ("samples", str(self.current_dataset.row_count)),
+            ("columns", str(self.current_dataset.column_count)),
+            ("target", target),
+            ("valid_count", str(int(stats["valid_count"]))),
+            ("null_pct", f"{stats['null_pct']:.3g}"),
+            ("mean", f"{stats['mean']:.5g}"),
+            ("std", f"{stats['std']:.5g}"),
+            ("cv", f"{stats['cv']:.5g}"),
+            ("min", f"{stats['min']:.5g}"),
+            ("p10", f"{stats['p10']:.5g}"),
+            ("p25", f"{stats['p25']:.5g}"),
+            ("p50", f"{stats['p50']:.5g}"),
+            ("p75", f"{stats['p75']:.5g}"),
+            ("p90", f"{stats['p90']:.5g}"),
+            ("max", f"{stats['max']:.5g}"),
+            ("skewness", f"{stats['skewness']:.5g}"),
+        ]
 
-        stats = {
-            "n": len(series),
-            "mean": float(series.mean()),
-            "std": float(series.std()),
-            "min": float(series.min()),
-            "p10": float(series.quantile(0.10)),
-            "p25": float(series.quantile(0.25)),
-            "p50": float(series.quantile(0.50)),
-            "p75": float(series.quantile(0.75)),
-            "p90": float(series.quantile(0.90)),
-            "max": float(series.max()),
-            "skewness": float(series.skew()),
+    def get_summary_cards(self) -> dict[str, str]:
+        if self.current_dataset is None:
+            return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente", "Dominio": "No definido"}
+
+        target = self.variable_config.target_column if self.variable_config else "No definido"
+        return {
+            "Dataset": self.current_dataset.file_name,
+            "Muestras": str(self.current_dataset.row_count),
+            "Columnas": str(self.current_dataset.column_count),
+            "Target": target,
+            "Estado": "Listo" if self.variable_config else "Configurar variables",
+            "Dominio": self.workflow_state.active_domain,
         }
-        return [(k, f"{v:.5g}" if isinstance(v, float) else str(v)) for k, v in stats.items()]
 
     def update_repository(self) -> RepoUpdateResult:
         self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
@@ -291,60 +362,14 @@ class GeostatService:
         submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
         combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
         up_to_date = "Already up to date" in output or "Ya está actualizado" in output
-        restart_recommended = not up_to_date
         message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
-        self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": restart_recommended})
-        return RepoUpdateResult(True, message, combined, restart_recommended)
+        self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
+        return RepoUpdateResult(True, message, combined, not up_to_date)
 
     def export_activity_log(self, destination_path: str) -> str:
         exported = self.activity_log.export_log(destination_path)
         self.activity_log.log("export_log_requested", "success", "Log exportado correctamente.", {"destination": str(exported)})
         return str(exported)
-
-    def get_available_columns(self) -> list[str]:
-        return [] if self.current_dataset is None else self.current_dataset.columns
-
-    def set_variable_config(
-        self,
-        x_column: str,
-        y_column: str,
-        z_column: str,
-        target_column: str,
-        hole_id_column: str | None = None,
-        domain_column: str | None = None,
-    ) -> ColumnSelectionResult:
-        if self.current_dataset is None:
-            return ColumnSelectionResult(False, "Primero debes cargar un CSV.", "No hay dataset cargado.")
-        selected = [x_column, y_column, z_column, target_column]
-        if any(not value for value in selected):
-            return ColumnSelectionResult(False, "Debes seleccionar X, Y, Z y variable objetivo.", "Configuración incompleta.")
-        invalid = [col for col in selected if col not in self.current_dataset.columns]
-        if invalid:
-            return ColumnSelectionResult(False, "La selección contiene columnas no válidas.", f"Columnas inválidas: {', '.join(invalid)}")
-
-        self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
-        self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
-        self.workflow_state.active_support = "Muestra original"
-        self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column})
-        return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
-
-    def build_eda_summary(self) -> str:
-        if self.current_dataset is None:
-            return "No hay dataset cargado para EDA."
-        df = self.current_dataset.dataframe
-        summary = (
-            "MÓDULO EDA\n"
-            "----------\n"
-            "Subsecciones: Resumen | Univariado | Espacial\n"
-            f"Filas: {self.current_dataset.row_count} | Columnas: {self.current_dataset.column_count}\n"
-        )
-        if self.variable_config is None:
-            return summary + "Selecciona X/Y/Z/target para habilitar estadísticas del target."
-        target = self.variable_config.target_column
-        if target not in df.columns or not _is_numeric_dtype(df[target]):
-            return summary + "Target no numérico: estadísticas limitadas."
-        series = df[target].dropna()
-        return summary + f"Target {target}: n={len(series)}, mean={float(series.mean()):.4g}, std={float(series.std()):.4g}"
 
     def module_not_implemented(self, module_name: str) -> str:
         message = f"{module_name}: etapa aún no implementada. Esta acción fue registrada."
@@ -366,11 +391,14 @@ class GeostatService:
     def _build_dataset_summary(self, dataset: DatasetModel) -> str:
         dtypes = dataset.dataframe.dtypes.astype(str).to_dict()
         dtypes_text = "\n".join(f"• {k}: {v}" for k, v in dtypes.items())
+        preview = dataset.preview_as_text()
         return (
             "ETAPA DATOS\n"
             "-----------\n"
             f"Archivo: {dataset.file_name}\n"
             f"Filas: {dataset.row_count} | Columnas: {dataset.column_count}\n"
             "Tipos de datos:\n"
-            f"{dtypes_text}"
+            f"{dtypes_text}\n\n"
+            "Preview:\n"
+            f"{preview}"
         )
