@@ -139,24 +139,27 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkButton(self.center_panel, text="Editar configuración", command=self._toggle_data_panel).pack(fill="x", padx=8, pady=8)
             return
 
-        self.center_panel.grid_columnconfigure((0, 1), weight=1)
+        config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
+        config_grid.pack(fill="x", padx=8, pady=(0, 8))
+        config_grid.grid_columnconfigure((0, 1), weight=1)
+
         cols = self.service.get_available_columns() or [""]
-        self._selector("X", self.x_var, cols, 2, 0)
-        self._selector("Y", self.y_var, cols, 2, 1)
-        self._selector("Z", self.z_var, cols, 4, 0)
-        self._selector("Target", self.target_var, cols, 4, 1)
-        self._selector("Hole ID", self.hole_var, cols, 6, 0)
-        self._selector("Dominio", self.domain_var, cols, 6, 1)
-        ctk.CTkButton(self.center_panel, text="Aplicar configuración", command=self._on_apply_config).grid(row=8, column=0, columnspan=2, sticky="ew", padx=8, pady=8)
+        self._selector(config_grid, "X", self.x_var, cols, 0, 0)
+        self._selector(config_grid, "Y", self.y_var, cols, 0, 1)
+        self._selector(config_grid, "Z", self.z_var, cols, 2, 0)
+        self._selector(config_grid, "Target", self.target_var, cols, 2, 1)
+        self._selector(config_grid, "Hole ID", self.hole_var, cols, 4, 0)
+        self._selector(config_grid, "Dominio", self.domain_var, cols, 4, 1)
+        ctk.CTkButton(config_grid, text="Aplicar configuración", command=self._on_apply_config).grid(row=6, column=0, columnspan=2, sticky="ew", pady=8)
 
     def _render_analysis_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
         ctk.CTkButton(self.center_panel, text="Actualizar vista activa", command=self._render_active_tab).pack(fill="x", padx=8, pady=(0, 8))
 
-    def _selector(self, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
-        ctk.CTkLabel(self.center_panel, text=label).grid(row=row, column=col, sticky="w", padx=8)
+    def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
+        ctk.CTkLabel(parent, text=label).grid(row=row, column=col, sticky="w", padx=4)
         state = "normal" if values and values[0] else "disabled"
-        ctk.CTkOptionMenu(self.center_panel, variable=variable, values=values, state=state).grid(row=row + 1, column=col, sticky="ew", padx=8, pady=(0, 6))
+        ctk.CTkOptionMenu(parent, variable=variable, values=values, state=state).grid(row=row + 1, column=col, sticky="ew", padx=4, pady=(0, 6))
 
     def _toggle_data_panel(self) -> None:
         self.data_panel_collapsed = not self.data_panel_collapsed
@@ -285,191 +288,6 @@ class HomePanel(ctk.CTkFrame):
         tab = self.eda_tabs.tab(tab_name)
         if clear:
             DashboardGrid.clear(tab)
-        ctk.CTkLabel(tab, text=message, justify="left").pack(anchor="w", padx=8, pady=8)
-
-    def _on_visual_tab_changed(self) -> None:
-        self.after(30, self._render_active_tab)
-
-    def _invalidate_visual_cache(self) -> None:
-        self.visual_cache = {}
-
-    def _render_active_tab(self) -> None:
-        active_tab = self.eda_tabs.get()
-        if active_tab == "Resumen":
-            self._set_summary_tab_text(self.service.build_eda_summary())
-            return
-        if self.render_in_progress:
-            self._append_activity("Render en progreso, espera un momento...")
-            return
-        if active_tab in self.visual_cache:
-            self._draw_tab(active_tab, self.visual_cache[active_tab])
-            return
-
-        self.render_in_progress = True
-        self.render_token += 1
-        token = self.render_token
-        self._set_tab_status(active_tab, "Renderizando vista...", clear=True)
-
-        def worker() -> None:
-            payload: dict[str, object] = {"tab": active_tab}
-            try:
-                if active_tab in {"Univariado", "Espacial"}:
-                    result = self.service.prepare_visual_data()
-                    if not result.success or result.spatial_data is None:
-                        raise ValueError(result.message)
-                    payload["data"] = result.spatial_data
-                elif active_tab == "Swath":
-                    bins = int(self.swath_bins_var.get() or "20")
-                    payload["data"] = self.service.prepare_swath_data(bins=bins)
-                elif active_tab == "Variografía":
-                    payload["data"] = self.service.prepare_variogram_data(
-                        lag=float(self.variogram_lag_var.get() or "10"),
-                        n_lags=int(self.variogram_nlags_var.get() or "12"),
-                        max_distance=float(self.variogram_maxdist_var.get() or "120"),
-                        mode=self.variogram_mode_var.get(),
-                    )
-            except Exception as exc:
-                payload["error"] = str(exc)
-            self.after(0, lambda: self._on_render_worker_done(token, payload))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_render_worker_done(self, token: int, payload: dict[str, object]) -> None:
-        if token != self.render_token:
-            return
-        self.render_in_progress = False
-        tab_name = str(payload.get("tab", ""))
-        error = payload.get("error")
-        if error:
-            self.service.activity_log.log("ui_recovered_after_error", "warning", str(error), {"tab": tab_name})
-            self._append_activity(f"No se pudo renderizar {tab_name}; la app sigue operativa: {error}")
-            self._set_tab_status(tab_name, f"No se pudo renderizar {tab_name}.\n{error}", clear=True)
-            return
-        data = payload.get("data")
-        self.visual_cache[tab_name] = data
-        self._draw_tab(tab_name, data)
-
-    def _draw_tab(self, tab_name: str, data: object) -> None:
-        try:
-            if tab_name == "Univariado":
-                self._render_univariate_plots(data.target)
-            elif tab_name == "Espacial":
-                self._render_spatial_dashboard(data)
-            elif tab_name == "Swath":
-                self._render_swath_dashboard(data)
-            elif tab_name == "Variografía":
-                self._render_variogram_dashboard(data)
-        except Exception as exc:
-            self.service.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": tab_name})
-            self.service.activity_log.log("ui_recovered_after_error", "warning", str(exc), {"tab": tab_name})
-            self._set_tab_status(tab_name, f"Error de render: {exc}", clear=True)
-
-    def _render_univariate_plots(self, values: list[float]) -> None:
-        tab = self.eda_tabs.tab("Univariado")
-        self._clear_dashboard(tab)
-        dashboard = DashboardGrid(tab, 1, 2)
-        ax1 = dashboard.axis(0, 0)
-        ax2 = dashboard.axis(0, 1)
-        ax1.hist(values, bins=20, color="#4c78a8", edgecolor="white")
-        ax1.set_title("Histograma target")
-        ax2.boxplot(values, vert=True, patch_artist=True)
-        ax2.set_title("Boxplot target")
-        dashboard.render()
-
-    def _render_spatial_dashboard(self, spatial_data) -> None:
-        tab = self.eda_tabs.tab("Espacial")
-        self._clear_dashboard(tab)
-
-        if spatial_data.source_points > 50000:
-            self.service.activity_log.log("visualization_degraded_mode", "warning", "Vista espacial simplificada por tamaño del dataset.", {"source_points": spatial_data.source_points})
-            self._append_activity("Se renderizó versión simplificada por tamaño del dataset.")
-            dashboard = DashboardGrid(tab, 1, 2, figsize=(8.2, 4.8))
-            ax_xy = dashboard.axis(0, 0)
-            sc = ax_xy.scatter(spatial_data.x, spatial_data.y, c=spatial_data.target, cmap="viridis", s=10)
-            ax_xy.set_xlabel("X")
-            ax_xy.set_ylabel("Y")
-            ax_xy.set_title("XY")
-            dashboard.figure.colorbar(sc, ax=ax_xy, shrink=0.8, label="Target")
-            ax_hist = dashboard.axis(0, 1)
-            ax_hist.hist(spatial_data.target, bins=20, color="#72b7b2", edgecolor="white")
-            ax_hist.set_title("Distribución target")
-            dashboard.render()
-            return
-
-        dashboard = DashboardGrid(tab, 2, 2, figsize=(8.4, 6.2))
-        ax_xy = dashboard.axis(0, 0)
-        ax_xz = dashboard.axis(0, 1)
-        ax_yz = dashboard.axis(1, 0)
-        ax_hist = dashboard.axis(1, 1)
-
-        sc1 = ax_xy.scatter(spatial_data.x, spatial_data.y, c=spatial_data.target, cmap="viridis", s=12)
-        sc2 = ax_xz.scatter(spatial_data.x, spatial_data.z, c=spatial_data.target, cmap="viridis", s=12)
-        sc3 = ax_yz.scatter(spatial_data.y, spatial_data.z, c=spatial_data.target, cmap="viridis", s=12)
-
-        ax_xy.set_xlabel("X")
-        ax_xy.set_ylabel("Y")
-        ax_xy.set_title("XY")
-        ax_xz.set_xlabel("X")
-        ax_xz.set_ylabel("Z")
-        ax_xz.set_title("XZ")
-        ax_yz.set_xlabel("Y")
-        ax_yz.set_ylabel("Z")
-        ax_yz.set_title("YZ")
-        ax_hist.hist(spatial_data.target, bins=20, color="#72b7b2", edgecolor="white")
-        ax_hist.set_title("Distribución target")
-
-        for sc, ax in [(sc1, ax_xy), (sc2, ax_xz), (sc3, ax_yz)]:
-            dashboard.figure.colorbar(sc, ax=ax, shrink=0.75, label="Target")
-
-        if spatial_data.downsampled:
-            self._append_activity(f"Vista muestreada para mantener rendimiento ({spatial_data.plotted_points}/{spatial_data.source_points} puntos).")
-        dashboard.render()
-
-    def _render_swath_dashboard(self, swaths: dict[str, object]) -> None:
-        tab = self.eda_tabs.tab("Swath")
-        self._clear_dashboard(tab)
-        dashboard = DashboardGrid(tab, 3, 1, figsize=(8.2, 7.0))
-        for idx, axis_name in enumerate(["X", "Y", "Z"]):
-            series = swaths[axis_name]
-            ax = dashboard.axis(idx, 0)
-            ax.plot(series.centers, series.means, marker="o", color="#4c78a8", label="Mean target")
-            ax.set_title(f"Swath {axis_name}")
-            ax.set_ylabel("Mean")
-            ax2 = ax.twinx()
-            width = (max(series.centers) - min(series.centers)) / max(len(series.centers), 1) if series.centers else 1.0
-            ax2.bar(series.centers, series.counts, alpha=0.2, color="#f58518", width=width)
-            ax2.set_ylabel("N")
-        dashboard.axis(2, 0).set_xlabel("Coordenada")
-        dashboard.render()
-
-    def _render_variogram_dashboard(self, result) -> None:
-        tab = self.eda_tabs.tab("Variografía")
-        self._clear_dashboard(tab)
-        dashboard = DashboardGrid(tab, 1, 2, figsize=(8.4, 4.6))
-        ax = dashboard.axis(0, 0)
-        ax.plot(result.lag_centers, result.gamma_values, marker="o", color="#54a24b")
-        ax.set_title("Variograma experimental")
-        ax.set_xlabel("Lag")
-        ax.set_ylabel("γ(h)")
-
-        ax_tbl = dashboard.axis(0, 1)
-        ax_tbl.axis("off")
-        rows = [[f"{h:.2f}", f"{g:.4g}", str(n)] for h, g, n in zip(result.lag_centers, result.gamma_values, result.pair_counts)]
-        table = ax_tbl.table(cellText=rows[:12], colLabels=["Lag", "Gamma", "Pares"], loc="center")
-        table.auto_set_font_size(False)
-        table.set_fontsize(8)
-        if result.downsampled:
-            self._append_activity(f"Variograma muestreado para rendimiento ({result.used_points}/{result.source_points} puntos).")
-        dashboard.render()
-
-    def _clear_dashboard(self, tab: ctk.CTkFrame) -> None:
-        DashboardGrid.clear(tab)
-        self.service.activity_log.log("dashboard_cleared", "info", "Dashboard limpiado antes de renderizar.", {})
-
-    def _set_tab_status(self, tab_name: str, message: str, clear: bool = False) -> None:
-        tab = self.eda_tabs.tab(tab_name)
-        if clear:
-            self._clear_dashboard(tab)
         ctk.CTkLabel(tab, text=message, justify="left").pack(anchor="w", padx=8, pady=8)
 
     def _on_load_csv(self) -> None:
