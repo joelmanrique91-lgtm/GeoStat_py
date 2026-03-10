@@ -18,14 +18,14 @@ class WorkflowStateTests(unittest.TestCase):
             logger = ActivityLogService(logs_dir=Path(tmp_dir))
             service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=logger)
 
-            msg = service.set_workflow_step("Variografía")
+            msg = service.set_workflow_step("Espacial")
             self.assertIn("Paso activo", msg)
-            self.assertEqual(service.workflow_state.current_step, "Variografía")
+            self.assertEqual(service.workflow_state.current_step, "Espacial")
 
             lines = logger.session_log_path.read_text(encoding="utf-8").strip().splitlines()
             events = [json.loads(line)["event"] for line in lines]
             self.assertIn("workflow_step_changed", events)
-            self.assertIn("variografía_opened", events)
+            self.assertIn("espacial_opened", events)
 
 
 if __name__ == "__main__":

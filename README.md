@@ -1,6 +1,6 @@
 # GeoStat_py
 
-App de escritorio local (CustomTkinter) para workflow geoestadístico con foco en **exploración visual**.
+App de escritorio local (CustomTkinter) para análisis geoestadístico visual **enfocado y simplificado**.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -10,84 +10,66 @@ cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
-## Qué cambió en esta iteración
+## Flujo visible actual del producto
 
-La app dejó de priorizar texto y ahora prioriza panel visual:
-- Sidebar izquierda: workflow por etapas.
-- Centro: controles del paso actual.
-- Derecha (dominante): panel visual con tabs EDA.
-- Log técnico: secundario y colapsable.
+La GUI muestra solo módulos que hoy aportan valor real:
 
-## Workflow visible
+1. **Datos**
+2. **EDA**
+3. **Espacial**
 
-1. Datos (funcional)
-2. QA/QC (parcial)
-3. EDA (funcional)
-4. Espacial (funcional inicial)
-5. Variografía (futuro)
-6. Kriging (futuro)
-7. Simulación (futuro)
-8. Validación (futuro)
-9. Exportación (parcial)
+> En esta iteración, **Swath** y **Variografía** se mantienen fuera de la interfaz visible para evitar ruido y mantener foco en lo estable.
 
-## Feedback visual automático
+## Módulo Datos
 
-Después de:
-1) cargar CSV,
-2) seleccionar X/Y/Z/target,
-3) aplicar configuración,
+- Carga CSV.
+- Selección de X/Y/Z/target (con edición manual).
+- Autodetección de columnas sugeridas al cargar:
+  - X: `X`, `Easting`, `East`
+  - Y: `Y`, `Northing`, `North`
+  - Z: `Z`, `RL`, `Elev`, `Elevation`
+  - Hole ID: `HoleID`, `Hole_ID`, `DHID`, `Drillhole`
+  - Dominio/litología: `Domain`, `Lito`, `Lithology`, `Zone`
+- El panel de configuración es **colapsable** para liberar espacio de visualización.
 
-la app renderiza automáticamente:
-- Histograma del target
-- Boxplot del target
-- Scatter XY coloreado por target
+## EDA
 
-Si target no es numérico o faltan datos válidos, se muestra mensaje claro y se registra en JSONL.
+### Resumen
+Se muestra una tabla compacta con:
+- dataset activo
+- muestras
+- columnas
+- target
+- valid_count
+- null_pct
+- mean, std, cv
+- min, p10, p25, p50, p75, p90, max
+- skewness
 
-## EDA visual por tabs
+### Univariado
+- Histograma
+- Boxplot
 
-- **Resumen**: resumen textual compacto + tabla corta de estadísticas (n, mean, std, min, p10, p25, p50, p75, p90, max, skewness).
-- **Univariado**: histograma + boxplot.
-- **Espacial**: scatter XY con color por target.
+## Espacial
 
-## Tarjetas compactas (parte superior del panel visual)
-
-- Dataset
-- Muestras
-- Columnas
-- Target
-- Estado
-- Dominio
-- Soporte
-- Mean / Std / CV (si target numérico)
-
-## Botones globales
-
-- **Actualizar repo**: `git pull` + `git submodule update --init --recursive`.
-- **Exportar log**: exporta log JSONL de sesión.
+Vista espacial enfocada en utilidad y estabilidad:
+- Scatter **XY** coloreado por target.
+- Segundo panel con vista **3D X/Y/Z** (matplotlib) coloreada por target cuando es viable.
+- Si no es viable en el entorno, fallback seguro a vista 2D (XZ).
+- Downsampling automático para datasets grandes (mensaje visible en actividad).
 
 ## Logging JSONL
 
-- Carpeta: `logs/`
-- Archivo por sesión: `session_YYYYMMDD_HHMMSS.jsonl`
-- Eventos relevantes incluyen:
-  - `visuals_auto_rendered`
-  - `histogram_rendered`
-  - `boxplot_rendered`
-  - `spatial_view_rendered`
-  - `visual_render_failed`
-  - `workflow_step_changed`
-  - `csv_load_*`, `repo_update_*`, `export_log_requested`
+Se mantiene el log por sesión en `logs/` con eventos de flujo y estabilidad, incluyendo:
+- `columns_autodetected`
+- `data_panel_collapsed`
+- `data_panel_expanded`
+- `spatial_3d_rendered`
+- `spatial_3d_fallback_rendered`
+- `workflow_simplified_view_loaded`
 
 ## Tests
 
 ```bash
-python -m unittest tests/test_activity_log.py tests/test_workflow_state.py tests/test_visual_preparation.py tests/test_module_placeholders.py tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
+python -m unittest
 ```
-
-## Próxima iteración sugerida
-
-- selector de vista espacial XY/XZ/YZ
-- probability plot en Univariado
-- secciones y swath plots
-- variografía experimental
