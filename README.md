@@ -33,6 +33,8 @@ python -m app.main
   - probability plot,
   - boxplot por dominio/categoría (si hay dominio válido).
 
+Univariado ahora intenta renderizar cada gráfico de forma independiente; si uno falla, los demás siguen visibles y se informa en pantalla/log (sin panel vacío silencioso).
+
 Cuando hay muchas categorías en dominio, la vista se simplifica a top-N por frecuencia y se informa en actividad/log.
 
 ### Espacial
@@ -49,11 +51,16 @@ Se mantiene logging por sesión en `logs/` con eventos como:
 - `workflow_step_eda_opened`
 - `workflow_step_spatial_opened`
 - `eda_univariate_render_started`
-- `eda_univariate_rendered`
+- `eda_univariate_payload_prepared`
+- `eda_univariate_payload_empty`
+- `eda_univariate_render_partial`
+- `eda_univariate_render_finished`
 - `eda_univariate_render_failed`
 - `domain_boxplot_rendered`
 - `domain_boxplot_simplified`
+- `domain_boxplot_failed`
 - `probability_plot_rendered`
+- `probability_plot_failed`
 - `spatial_2d_rendered`
 - `spatial_3d_disabled_or_hidden`
 - `empty_state_shown`

@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     import pandas  # noqa: F401
@@ -53,6 +54,16 @@ class VisualPreparationTests(unittest.TestCase):
         payload = self.service.prepare_univariate_data(max_domain_categories=5)
         self.assertEqual(len(payload["probplot_x"]), 3)
         self.assertTrue(payload["domain_boxplot"]["enabled"])
+
+
+    @patch("app.services.geostat_service.statistics.NormalDist")
+    def test_univariate_payload_partial_when_probability_fails(self, mock_normal) -> None:
+        self._load_numeric_dataset()
+        mock_normal.return_value.inv_cdf.side_effect = ValueError("boom")
+        payload = self.service.prepare_univariate_data(max_domain_categories=5)
+        self.assertTrue(payload["probability_failed"])
+        self.assertEqual(payload["probplot_x"], [])
+        self.assertEqual(payload["probplot_y"], [])
 
     def test_prepare_visual_data_fails_for_non_numeric_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

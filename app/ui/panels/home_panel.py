@@ -227,39 +227,73 @@ class HomePanel(ctk.CTkFrame):
         except Exception as exc:
             self.service.activity_log.log("eda_univariate_render_failed", "error", str(exc), {})
             self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Univariado.", {"reason": str(exc)})
-            ctk.CTkLabel(tab, text=f"No se pudo preparar EDA univariado: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(tab, text=f"No se pudo renderizar Univariado: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
             return
 
         dashboard = DashboardGrid(tab, 2, 2, figsize=(8.6, 6.0))
+        failed_parts: list[str] = []
+
         ax_hist = dashboard.axis(0, 0)
+        try:
+            ax_hist.hist(data["target_values"], bins=20, color="#4c78a8", edgecolor="white")
+            ax_hist.set_title("Histograma target")
+        except Exception as exc:
+            failed_parts.append("histograma")
+            ax_hist.axis("off")
+            ax_hist.text(0.5, 0.5, "Histograma no disponible", ha="center", va="center")
+            self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "histogram"})
+
         ax_box = dashboard.axis(0, 1)
+        try:
+            ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
+            ax_box.set_title("Boxplot general")
+        except Exception as exc:
+            failed_parts.append("boxplot general")
+            ax_box.axis("off")
+            ax_box.text(0.5, 0.5, "Boxplot general no disponible", ha="center", va="center")
+            self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "boxplot_general"})
+
         ax_prob = dashboard.axis(1, 0)
+        try:
+            if data.get("probability_failed") or not data["probplot_x"] or not data["probplot_y"]:
+                raise ValueError("Payload de probability plot vacío o inválido")
+            ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color="#54a24b")
+            ax_prob.set_title("Probability plot")
+            ax_prob.set_xlabel("Cuantiles teóricos normal")
+            ax_prob.set_ylabel("Cuantiles observados")
+        except Exception as exc:
+            failed_parts.append("probability plot")
+            ax_prob.axis("off")
+            ax_prob.text(0.5, 0.5, "Probability plot no disponible", ha="center", va="center")
+            self.service.activity_log.log("probability_plot_failed", "error", str(exc), {})
+            self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "probability_plot"})
+
         ax_domain = dashboard.axis(1, 1)
-
-        ax_hist.hist(data["target_values"], bins=20, color="#4c78a8", edgecolor="white")
-        ax_hist.set_title("Histograma target")
-
-        ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
-        ax_box.set_title("Boxplot general")
-
-        ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color="#54a24b")
-        ax_prob.set_title("Probability plot")
-        ax_prob.set_xlabel("Cuantiles teóricos normal")
-        ax_prob.set_ylabel("Cuantiles observados")
-
-        domain_data = data["domain_boxplot"]
-        if domain_data["enabled"]:
-            ax_domain.boxplot(domain_data["values"], labels=domain_data["labels"], patch_artist=True)
-            ax_domain.set_title("Boxplot por dominio")
-            ax_domain.tick_params(axis="x", rotation=30)
-            if domain_data["message"]:
-                self._append_activity(domain_data["message"])
-        else:
+        try:
+            domain_data = data["domain_boxplot"]
+            if domain_data["enabled"]:
+                ax_domain.boxplot(domain_data["values"], labels=domain_data["labels"], patch_artist=True)
+                ax_domain.set_title("Boxplot por dominio")
+                ax_domain.tick_params(axis="x", rotation=30)
+                if domain_data["message"]:
+                    self._append_activity(domain_data["message"])
+            else:
+                raise ValueError("Sin dominio seleccionado o sin datos válidos")
+        except Exception as exc:
+            failed_parts.append("boxplot por dominio")
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, "Sin dominio seleccionado\no sin datos válidos.", ha="center", va="center")
+            self.service.activity_log.log("domain_boxplot_failed", "warning", str(exc), {})
+            self.service.activity_log.log("eda_univariate_render_partial", "warning", str(exc), {"component": "domain_boxplot"})
 
         dashboard.render()
-        self.service.activity_log.log("eda_univariate_rendered", "success", "Render Univariado completado.", {})
+        if failed_parts and len(failed_parts) < 4:
+            self._append_activity(f"Univariado render parcial. No disponible: {', '.join(failed_parts)}")
+        if len(failed_parts) == 4:
+            self.service.activity_log.log("eda_univariate_render_failed", "error", "Ningún gráfico univariado pudo renderizarse.", {})
+            self.service.activity_log.log("empty_state_shown", "warning", "Todos los componentes univariados fallaron.", {})
+        else:
+            self.service.activity_log.log("eda_univariate_render_finished", "success", "Render Univariado completado.", {"failed_components": failed_parts})
 
     def _render_spatial_stage_panel(self) -> None:
         DashboardGrid.clear(self.spatial_stage_view)

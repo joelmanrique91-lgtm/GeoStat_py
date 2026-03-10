@@ -215,7 +215,9 @@ class GeostatService:
 
     def prepare_univariate_data(self, max_domain_categories: int = 10) -> dict:
         if self.current_dataset is None or self.variable_config is None:
-            raise ValueError("No hay dataset/configuración suficiente para EDA.")
+            message = "No hay dataset/configuración suficiente para EDA."
+            self.activity_log.log("eda_univariate_payload_empty", "warning", message, {})
+            raise ValueError(message)
 
         try:
             spatial = prepare_spatial_sections(
@@ -250,46 +252,75 @@ class GeostatService:
         df = self.current_dataset.dataframe
         target = self.variable_config.target_column
         if target not in df.columns or not _is_numeric_dtype(df[target]):
-            raise ValueError("Target no numérico para EDA univariado.")
+            message = "Target no numérico para EDA univariado."
+            self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
+            raise ValueError(message)
 
         clean_target = df[target].dropna().astype(float)
         if clean_target.empty:
-            raise ValueError("No hay datos válidos de target para EDA univariado.")
+            message = "No hay suficientes datos válidos para renderizar Univariado."
+            self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
+            raise ValueError(message)
 
         sorted_vals = sorted(clean_target.tolist())
         n = len(sorted_vals)
-        normal = statistics.NormalDist()
-        qq_x = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)]
-        qq_y = sorted_vals
-        self.activity_log.log("probability_plot_rendered", "info", "Probability plot preparado.", {"n": n})
+        qq_x: list[float] = []
+        qq_y: list[float] = []
+        probability_failed = False
+        try:
+            normal = statistics.NormalDist()
+            qq_x = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)]
+            qq_y = sorted_vals
+            self.activity_log.log("probability_plot_rendered", "info", "Probability plot preparado.", {"n": n})
+        except Exception as exc:
+            probability_failed = True
+            self.activity_log.log("probability_plot_failed", "error", str(exc), {"n": n})
 
         domain_payload = {"enabled": False, "labels": [], "values": [], "message": ""}
         domain_col = self.variable_config.domain_column
         if domain_col and domain_col in df.columns:
-            domain_df = df[[target, domain_col]].dropna()
-            if not domain_df.empty:
-                counts = domain_df[domain_col].value_counts()
-                top = counts.head(max_domain_categories)
-                labels = [str(v) for v in top.index.tolist()]
-                grouped_values = [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]
-                simplified = len(counts) > max_domain_categories
-                domain_payload = {
-                    "enabled": True,
-                    "labels": labels,
-                    "values": grouped_values,
-                    "message": "" if not simplified else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
-                }
-                self.activity_log.log("eda_domain_boxplot_rendered", "info", "Boxplot por dominio preparado.", {"categories": len(labels)})
-                self.activity_log.log("domain_boxplot_rendered", "info", "Boxplot por dominio renderizable preparado.", {"categories": len(labels)})
-                if simplified:
-                    self.activity_log.log("domain_boxplot_simplified", "info", "Boxplot por dominio simplificado a top categorías.", {"max_categories": max_domain_categories})
+            try:
+                domain_df = df[[target, domain_col]].dropna()
+                if not domain_df.empty:
+                    counts = domain_df[domain_col].value_counts()
+                    top = counts.head(max_domain_categories)
+                    labels = [str(v) for v in top.index.tolist()]
+                    grouped_values = [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]
+                    grouped_values = [vals for vals in grouped_values if vals]
+                    labels = [lbl for lbl, vals in zip(labels, [domain_df.loc[domain_df[domain_col] == label, target].astype(float).tolist() for label in top.index.tolist()]) if vals]
+                    simplified = len(counts) > max_domain_categories
+                    domain_payload = {
+                        "enabled": bool(labels and grouped_values),
+                        "labels": labels,
+                        "values": grouped_values,
+                        "message": "" if not simplified else f"Mostrando top {max_domain_categories} categorías por frecuencia.",
+                    }
+                    if domain_payload["enabled"]:
+                        self.activity_log.log("eda_domain_boxplot_rendered", "info", "Boxplot por dominio preparado.", {"categories": len(labels)})
+                        self.activity_log.log("domain_boxplot_rendered", "info", "Boxplot por dominio renderizable preparado.", {"categories": len(labels)})
+                        if simplified:
+                            self.activity_log.log("domain_boxplot_simplified", "info", "Boxplot por dominio simplificado a top categorías.", {"max_categories": max_domain_categories})
+            except Exception as exc:
+                self.activity_log.log("domain_boxplot_failed", "error", str(exc), {"domain": domain_col})
 
-        return {
+        payload = {
             "target_values": clean_target.tolist(),
             "probplot_x": qq_x,
             "probplot_y": qq_y,
+            "probability_failed": probability_failed,
             "domain_boxplot": domain_payload,
         }
+        self.activity_log.log(
+            "eda_univariate_payload_prepared",
+            "success",
+            "Payload univariado preparado.",
+            {
+                "rows": len(clean_target),
+                "domain_enabled": bool(domain_payload["enabled"]),
+                "probability_failed": probability_failed,
+            },
+        )
+        return payload
 
     def build_eda_summary(self) -> str:
         if self.current_dataset is None:

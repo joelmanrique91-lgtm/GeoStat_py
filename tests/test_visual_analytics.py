@@ -59,6 +59,20 @@ class VisualAnalyticsTests(unittest.TestCase):
             payload = service.prepare_univariate_data()
             self.assertFalse(payload["domain_boxplot"]["enabled"])
 
+
+    def test_payload_empty_event_for_invalid_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_service = ActivityLogService(logs_dir=Path(tmp_dir))
+            service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=log_service)
+            csv = Path(tmp_dir) / "sample.csv"
+            csv.write_text("x,y,z,target\n0,0,0,a\n10,1,2,b\n", encoding="utf-8")
+            service.load_csv(str(csv))
+            service.set_variable_config("x", "y", "z", "target")
+            with self.assertRaises(ValueError):
+                service.prepare_univariate_data()
+            content = log_service.session_log_path.read_text(encoding="utf-8")
+            self.assertIn("eda_univariate_payload_empty", content)
+
     def test_logging_events_for_new_rendering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_service = ActivityLogService(logs_dir=Path(tmp_dir))
