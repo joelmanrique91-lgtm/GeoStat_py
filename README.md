@@ -58,7 +58,10 @@ Vista espacial enfocada en utilidad y estabilidad:
 - Si no es viable en el entorno, fallback seguro a vista 2D (XZ).
 - Downsampling automático para datasets grandes (mensaje visible en actividad).
 
-## Logging JSONL
+En el tab **Variografía**:
+- Parámetros: `lag`, `# lags`, `dist máx`, `modo` (omnidireccional en esta iteración).
+- Salida: curva del variograma experimental + tabla Lag/Gamma/Pares.
+- Si no hay pares suficientes, se informa claramente en la UI y en log.
 
 Se mantiene el log por sesión en `logs/` con eventos de flujo y estabilidad, incluyendo:
 - `columns_autodetected`

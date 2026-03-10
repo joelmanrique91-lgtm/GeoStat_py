@@ -390,6 +390,7 @@ class GeostatService:
         self.activity_log.log("placeholder_module_clicked", "info", message, {"module": module_name})
         return message
 
+
     def variogram_placeholder(self) -> str:
         return self.module_not_implemented("Variografía")
 
