@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import customtkinter as ctk
+from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
@@ -27,7 +28,15 @@ class DashboardGrid:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
 
+    def destroy(self) -> None:
+        widget = self.canvas.get_tk_widget()
+        if widget.winfo_exists():
+            widget.destroy()
+        plt.close(self.figure)
+
     @staticmethod
     def clear(parent: ctk.CTkFrame) -> None:
         for child in parent.winfo_children():
             child.destroy()
+        for fig_num in plt.get_fignums():
+            plt.close(fig_num)

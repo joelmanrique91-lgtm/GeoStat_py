@@ -17,6 +17,7 @@ python -m app.main
 - Módulo de **Swath plots** en X, Y y Z con media por bin y conteo de muestras.
 - Primer módulo de **Variograma experimental omnidireccional** con parámetros configurables.
 - Sidebar de workflow mantenida con foco visual en EDA/Espacial/Variografía.
+- Endurecimiento de estabilidad GUI: limpieza explícita de dashboards/canvas, render lazy por tab activa y manejo de errores para evitar congelamientos.
 
 ## Workflow visible
 
@@ -77,6 +78,19 @@ Se mantienen logs por sesión en `logs/` y se agregan eventos:
 - `variogram_rendered`
 - `variogram_failed`
 - `graph_render_failed`
+- `dashboard_render_started`
+- `dashboard_render_finished`
+- `dashboard_render_failed`
+- `dashboard_cleared`
+- `visualization_downsampled`
+- `visualization_degraded_mode`
+- `ui_recovered_after_error`
+
+## Protección de rendimiento (datasets grandes)
+
+- Las vistas espaciales se muestrean automáticamente cuando el dataset excede el umbral de puntos de render.
+- El variograma experimental puede calcularse en muestra para evitar bloqueos por costo cuadrático.
+- La GUI renderiza bajo demanda (solo tab activa) y muestra mensajes cuando aplica muestreo o modo simplificado.
 
 ## Tests
 

@@ -1,4 +1,4 @@
-"""Tests for spatial sections, swath plots and experimental variogram."""
+"""Tests for spatial sections, swath plots, variogram and stability logging."""
 
 from __future__ import annotations
 
@@ -34,7 +34,14 @@ class VisualAnalyticsTests(unittest.TestCase):
     def test_prepare_spatial_sections_xy_xz_yz(self) -> None:
         data = prepare_spatial_sections(self.df, "x", "y", "z", "target")
         self.assertEqual(len(data.x), 5)
-        self.assertEqual(data.z[0], 100.0)
+        self.assertFalse(data.downsampled)
+
+    def test_downsampling_for_large_spatial_data(self) -> None:
+        big = pd.DataFrame({"x": range(30000), "y": range(30000), "z": range(30000), "target": range(30000)})
+        data = prepare_spatial_sections(big, "x", "y", "z", "target", max_points=5000)
+        self.assertTrue(data.downsampled)
+        self.assertEqual(data.source_points, 30000)
+        self.assertEqual(data.plotted_points, 5000)
 
     def test_prepare_swath_data(self) -> None:
         swath = compute_swath_series(self.df, "x", "target", bins=4)
@@ -55,7 +62,7 @@ class VisualAnalyticsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compute_swath_series(bad_df, "x", "target", bins=5)
 
-    def test_logging_events_for_new_modules(self) -> None:
+    def test_logging_events_for_stability_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_service = ActivityLogService(logs_dir=Path(tmp_dir))
             service = GeostatService(adapter=GeostatSpyAdapter(), activity_log=log_service)
@@ -68,8 +75,8 @@ class VisualAnalyticsTests(unittest.TestCase):
             service.prepare_variogram_data(lag=10, n_lags=4, max_distance=60)
 
             content = log_service.session_log_path.read_text(encoding="utf-8")
-            self.assertIn("eda_dashboard_rendered", content)
-            self.assertIn("spatial_dashboard_rendered", content)
+            self.assertIn("dashboard_render_started", content)
+            self.assertIn("dashboard_render_finished", content)
             self.assertIn("swath_rendered", content)
             self.assertIn("variogram_started", content)
             self.assertIn("variogram_rendered", content)

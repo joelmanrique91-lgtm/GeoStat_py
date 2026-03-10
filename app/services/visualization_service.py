@@ -12,6 +12,9 @@ class SpatialDataBundle:
     y: list[float]
     z: list[float]
     target: list[float]
+    source_points: int
+    plotted_points: int
+    downsampled: bool
 
 
 @dataclass
@@ -27,9 +30,25 @@ class VariogramResult:
     lag_centers: list[float]
     gamma_values: list[float]
     pair_counts: list[int]
+    source_points: int
+    used_points: int
+    downsampled: bool
 
 
-def prepare_spatial_sections(dataframe, x_col: str, y_col: str, z_col: str, target_col: str) -> SpatialDataBundle:
+def _downsample_dataframe(dataframe, max_points: int, random_state: int = 42):
+    if len(dataframe) <= max_points:
+        return dataframe, False
+    return dataframe.sample(n=max_points, random_state=random_state), True
+
+
+def prepare_spatial_sections(
+    dataframe,
+    x_col: str,
+    y_col: str,
+    z_col: str,
+    target_col: str,
+    max_points: int = 20000,
+) -> SpatialDataBundle:
     import pandas as pd
 
     required = [x_col, y_col, z_col, target_col]
@@ -42,12 +61,17 @@ def prepare_spatial_sections(dataframe, x_col: str, y_col: str, z_col: str, targ
     clean = dataframe[required].dropna()
     if clean.empty:
         raise ValueError("No hay datos válidos para secciones espaciales.")
+    source_points = len(clean)
+    sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
     return SpatialDataBundle(
-        x=clean[x_col].astype(float).tolist(),
-        y=clean[y_col].astype(float).tolist(),
-        z=clean[z_col].astype(float).tolist(),
-        target=clean[target_col].astype(float).tolist(),
+        x=sampled[x_col].astype(float).tolist(),
+        y=sampled[y_col].astype(float).tolist(),
+        z=sampled[z_col].astype(float).tolist(),
+        target=sampled[target_col].astype(float).tolist(),
+        source_points=source_points,
+        plotted_points=len(sampled),
+        downsampled=downsampled,
     )
 
 
@@ -89,6 +113,7 @@ def compute_experimental_variogram(
     lag: float,
     n_lags: int,
     max_distance: float,
+    max_points: int = 2500,
 ) -> VariogramResult:
     import pandas as pd
 
@@ -104,10 +129,12 @@ def compute_experimental_variogram(
     clean = dataframe[required].dropna()
     if len(clean) < 3:
         raise ValueError("No hay suficientes datos para calcular variograma experimental.")
+    source_points = len(clean)
+    sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
     records = [
         (float(row[x_col]), float(row[y_col]), float(row[z_col]), float(row[target_col]))
-        for _, row in clean.iterrows()
+        for _, row in sampled.iterrows()
     ]
 
     dist_acc: list[list[float]] = [[] for _ in range(n_lags)]
@@ -132,4 +159,11 @@ def compute_experimental_variogram(
     if max(pairs, default=0) == 0:
         raise ValueError("No se encontraron pares dentro de max_distance para el variograma.")
 
-    return VariogramResult(lag_centers=lag_centers, gamma_values=gammas, pair_counts=pairs)
+    return VariogramResult(
+        lag_centers=lag_centers,
+        gamma_values=gammas,
+        pair_counts=pairs,
+        source_points=source_points,
+        used_points=len(sampled),
+        downsampled=downsampled,
+    )
