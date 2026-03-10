@@ -1,6 +1,6 @@
 # GeoStat_py
 
-App de escritorio local (CustomTkinter) para workflow geoestadístico con foco en **exploración visual**.
+App de escritorio local (CustomTkinter) para workflow geoestadístico con foco en visualización y exploración espacial.
 
 ## Arranque estándar (Windows + Anaconda)
 
@@ -10,84 +10,97 @@ cd C:\repos\GeoStat_py
 python -m app.main
 ```
 
-## Qué cambió en esta iteración
+## Qué incluye esta iteración
 
-La app dejó de priorizar texto y ahora prioriza panel visual:
-- Sidebar izquierda: workflow por etapas.
-- Centro: controles del paso actual.
-- Derecha (dominante): panel visual con tabs EDA.
-- Log técnico: secundario y colapsable.
+- Dashboard reutilizable de gráficos embebidos (layouts 1x1, 1x2, 2x2, 3x1).
+- Etapa Espacial con secciones **XY, XZ, YZ** + panel auxiliar de histograma.
+- Módulo de **Swath plots** en X, Y y Z con media por bin y conteo de muestras.
+- Primer módulo de **Variograma experimental omnidireccional** con parámetros configurables.
+- Sidebar de workflow mantenida con foco visual en EDA/Espacial/Variografía.
+- Endurecimiento de estabilidad GUI: limpieza explícita de dashboards/canvas, render lazy por tab activa y manejo de errores para evitar congelamientos.
 
 ## Workflow visible
 
 1. Datos (funcional)
 2. QA/QC (parcial)
 3. EDA (funcional)
-4. Espacial (funcional inicial)
-5. Variografía (futuro)
+4. Espacial (funcional)
+5. Variografía (funcional inicial)
 6. Kriging (futuro)
 7. Simulación (futuro)
 8. Validación (futuro)
 9. Exportación (parcial)
 
-## Feedback visual automático
+## Cómo usar X/Y/Z/target
 
-Después de:
-1) cargar CSV,
-2) seleccionar X/Y/Z/target,
-3) aplicar configuración,
+1. Cargar CSV desde **Datos > Cargar CSV**.
+2. Seleccionar columnas X, Y, Z y target.
+3. Aplicar configuración.
+4. Ir a EDA/Espacial/Variografía y pulsar **Actualizar dashboards**.
 
-la app renderiza automáticamente:
-- Histograma del target
-- Boxplot del target
-- Scatter XY coloreado por target
+> Todas las visualizaciones usan la configuración activa X/Y/Z/target y gestionan NaN descartando filas incompletas.
 
-Si target no es numérico o faltan datos válidos, se muestra mensaje claro y se registra en JSONL.
+## Módulo Espacial
 
-## EDA visual por tabs
+En el tab **Espacial** se renderiza un dashboard 2x2:
+- Scatter XY coloreado por target.
+- Scatter XZ coloreado por target.
+- Scatter YZ coloreado por target.
+- Histograma de target (panel auxiliar).
 
-- **Resumen**: resumen textual compacto + tabla corta de estadísticas (n, mean, std, min, p10, p25, p50, p75, p90, max, skewness).
-- **Univariado**: histograma + boxplot.
-- **Espacial**: scatter XY con color por target.
+Cada sección incluye ejes rotulados y colorbar.
 
-## Tarjetas compactas (parte superior del panel visual)
+## Swath plots
 
-- Dataset
-- Muestras
-- Columnas
-- Target
-- Estado
-- Dominio
-- Soporte
-- Mean / Std / CV (si target numérico)
+En el tab **Swath** se muestra un layout 3x1:
+- Swath X, Swath Y y Swath Z.
+- Línea = media de target por bin.
+- Barras secundarias = número de muestras por bin.
 
-## Botones globales
+Control principal:
+- `Swath bins` (default 20).
 
-- **Actualizar repo**: `git pull` + `git submodule update --init --recursive`.
-- **Exportar log**: exporta log JSONL de sesión.
+## Variografía experimental
 
-## Logging JSONL
+En el tab **Variografía**:
+- Parámetros: `lag`, `# lags`, `dist máx`, `modo` (omnidireccional en esta iteración).
+- Salida: curva del variograma experimental + tabla Lag/Gamma/Pares.
+- Si no hay pares suficientes, se informa claramente en la UI y en log.
 
-- Carpeta: `logs/`
-- Archivo por sesión: `session_YYYYMMDD_HHMMSS.jsonl`
-- Eventos relevantes incluyen:
-  - `visuals_auto_rendered`
-  - `histogram_rendered`
-  - `boxplot_rendered`
-  - `spatial_view_rendered`
-  - `visual_render_failed`
-  - `workflow_step_changed`
-  - `csv_load_*`, `repo_update_*`, `export_log_requested`
+## Logging JSONL (eventos nuevos)
+
+Se mantienen logs por sesión en `logs/` y se agregan eventos:
+- `eda_dashboard_rendered`
+- `spatial_dashboard_rendered`
+- `section_view_rendered`
+- `swath_rendered`
+- `variogram_started`
+- `variogram_rendered`
+- `variogram_failed`
+- `graph_render_failed`
+- `dashboard_render_started`
+- `dashboard_render_finished`
+- `dashboard_render_failed`
+- `dashboard_cleared`
+- `visualization_downsampled`
+- `visualization_degraded_mode`
+- `ui_recovered_after_error`
+
+## Protección de rendimiento (datasets grandes)
+
+- Las vistas espaciales se muestrean automáticamente cuando el dataset excede el umbral de puntos de render.
+- El variograma experimental puede calcularse en muestra para evitar bloqueos por costo cuadrático.
+- La GUI renderiza bajo demanda (solo tab activa) y muestra mensajes cuando aplica muestreo o modo simplificado.
 
 ## Tests
 
 ```bash
-python -m unittest tests/test_activity_log.py tests/test_workflow_state.py tests/test_visual_preparation.py tests/test_module_placeholders.py tests/test_imports.py tests/test_csv_loading.py tests/test_service_features.py
+python -m unittest
 ```
 
-## Próxima iteración sugerida
+## Pendiente para próxima iteración
 
-- selector de vista espacial XY/XZ/YZ
-- probability plot en Univariado
-- secciones y swath plots
-- variografía experimental
+- Variografía direccional (azimut, tolerancia angular, bandwidth).
+- Ajuste de modelos variográficos.
+- Integración de soporte compositado y dominios avanzados en vistas.
+- Kriging/Simulación/Validación operativos.

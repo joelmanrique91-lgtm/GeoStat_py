@@ -1,4 +1,4 @@
-"""Tests for repository update, workflow, variable selection and EDA logic."""
+"""Tests for repository update, workflow and variable selection logic."""
 
 from __future__ import annotations
 
@@ -33,11 +33,8 @@ class ServiceFeatureTests(unittest.TestCase):
     def test_eda_summary_contains_expected_sections(self) -> None:
         self._load_sample_dataset()
         summary = self.service.build_eda_summary()
-
         self.assertIn("MÓDULO EDA", summary)
-        self.assertIn("Tipos de datos", summary)
-        self.assertIn("Nulos por columna", summary)
-        self.assertIn("Columnas numéricas", summary)
+        self.assertIn("Subsecciones", summary)
 
     def test_set_variable_config_success(self) -> None:
         self._load_sample_dataset()
@@ -45,7 +42,6 @@ class ServiceFeatureTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertIn("Configuración de variables guardada", result.message)
-        self.assertIn("Estadísticos del target", result.eda_summary)
         self.assertIsNotNone(self.service.variable_config)
         self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
 

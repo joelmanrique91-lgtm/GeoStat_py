@@ -11,6 +11,14 @@ from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
+from app.services.visualization_service import (
+    SpatialDataBundle,
+    SwathSeries,
+    VariogramResult,
+    compute_experimental_variogram,
+    compute_swath_series,
+    prepare_spatial_sections,
+)
 from app.utils.paths import PROJECT_ROOT
 
 WORKFLOW_STEPS = [
@@ -30,7 +38,7 @@ FUNCTIONAL_STATUS = {
     "QA/QC": "parcial",
     "EDA": "funcional",
     "Espacial": "funcional",
-    "Variografía": "futuro",
+    "Variografía": "funcional",
     "Kriging": "futuro",
     "Simulación": "futuro",
     "Validación": "futuro",
@@ -65,10 +73,7 @@ class ColumnSelectionResult:
 class VisualPreparationResult:
     success: bool
     message: str
-    target_values: list[float]
-    x_values: list[float]
-    y_values: list[float]
-    z_values: list[float]
+    spatial_data: SpatialDataBundle | None
 
 
 def _read_csv(path: Path):
@@ -175,47 +180,93 @@ class GeostatService:
         return semaphore, summary
 
     def prepare_visual_data(self) -> VisualPreparationResult:
+        self.activity_log.log("dashboard_render_started", "info", "Render espacial iniciado.", {"view": "Espacial"})
         if self.current_dataset is None or self.variable_config is None:
             message = "No hay dataset/configuración suficiente para renderizar visuales."
-            self.activity_log.log("visual_render_failed", "error", message, {})
-            return VisualPreparationResult(False, message, [], [], [], [])
+            self.activity_log.log("graph_render_failed", "error", message, {"view": "Espacial"})
+            self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Espacial"})
+            return VisualPreparationResult(False, message, None)
+
+        try:
+            spatial = prepare_spatial_sections(
+                self.current_dataset.dataframe,
+                self.variable_config.x_column,
+                self.variable_config.y_column,
+                self.variable_config.z_column,
+                self.variable_config.target_column,
+            )
+        except ValueError as exc:
+            self.activity_log.log("graph_render_failed", "error", str(exc), {"view": "Espacial"})
+            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
+            return VisualPreparationResult(False, str(exc), None)
+
+        if spatial.downsampled:
+            self.activity_log.log(
+                "visualization_downsampled",
+                "info",
+                "Vista espacial muestreada para rendimiento.",
+                {"source_points": spatial.source_points, "plotted_points": spatial.plotted_points},
+            )
+
+        self.activity_log.log("eda_dashboard_rendered", "info", "Dashboard EDA preparado.", {"rows": len(spatial.target)})
+        self.activity_log.log("spatial_dashboard_rendered", "info", "Dashboard espacial preparado.", {"rows": len(spatial.target)})
+        self.activity_log.log("section_view_rendered", "info", "Secciones XY/XZ/YZ preparadas.", {})
+        self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
+        return VisualPreparationResult(True, "Visuales preparados.", spatial)
+
+    def prepare_swath_data(self, bins: int = 20) -> dict[str, SwathSeries]:
+        self.activity_log.log("dashboard_render_started", "info", "Render swath iniciado.", {"view": "Swath"})
+        if self.current_dataset is None or self.variable_config is None:
+            message = "No hay dataset/configuración suficiente para swath."
+            self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Swath"})
+            raise ValueError(message)
 
         df = self.current_dataset.dataframe
-        tcol = self.variable_config.target_column
-        xcol = self.variable_config.x_column
-        ycol = self.variable_config.y_column
-        zcol = self.variable_config.z_column
+        target = self.variable_config.target_column
+        result = {
+            "X": compute_swath_series(df, self.variable_config.x_column, target, bins=bins),
+            "Y": compute_swath_series(df, self.variable_config.y_column, target, bins=bins),
+            "Z": compute_swath_series(df, self.variable_config.z_column, target, bins=bins),
+        }
+        self.activity_log.log("swath_rendered", "success", "Swath plots preparados.", {"bins": bins})
+        self.activity_log.log("dashboard_render_finished", "success", "Render swath finalizado.", {"view": "Swath"})
+        return result
 
-        for col in [tcol, xcol, ycol, zcol]:
-            if col not in df.columns:
-                message = f"Columna requerida no encontrada: {col}"
-                self.activity_log.log("visual_render_failed", "error", message, {"column": col})
-                return VisualPreparationResult(False, message, [], [], [], [])
+    def prepare_variogram_data(self, lag: float, n_lags: int, max_distance: float, mode: str = "omnidireccional") -> VariogramResult:
+        self.activity_log.log("dashboard_render_started", "info", "Render variograma iniciado.", {"view": "Variografía"})
+        if self.current_dataset is None or self.variable_config is None:
+            message = "No hay dataset/configuración suficiente para variograma."
+            self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Variografía"})
+            raise ValueError(message)
 
-        if not _is_numeric_dtype(df[tcol]):
-            message = "Target no numérico: no se puede renderizar histograma/boxplot/scatter continuo."
-            self.activity_log.log("visual_render_failed", "error", message, {"target": tcol})
-            return VisualPreparationResult(False, message, [], [], [], [])
+        self.activity_log.log("variogram_started", "info", "Cálculo de variograma iniciado.", {"mode": mode})
+        try:
+            result = compute_experimental_variogram(
+                self.current_dataset.dataframe,
+                self.variable_config.x_column,
+                self.variable_config.y_column,
+                self.variable_config.z_column,
+                self.variable_config.target_column,
+                lag=lag,
+                n_lags=n_lags,
+                max_distance=max_distance,
+            )
+        except ValueError as exc:
+            self.activity_log.log("variogram_failed", "error", str(exc), {"mode": mode})
+            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Variografía"})
+            raise
 
-        clean = df[[tcol, xcol, ycol, zcol]].dropna()
-        if clean.empty:
-            message = "No hay datos válidos (sin NaN) para renderizado visual."
-            self.activity_log.log("visual_render_failed", "error", message, {})
-            return VisualPreparationResult(False, message, [], [], [], [])
+        if result.downsampled:
+            self.activity_log.log(
+                "visualization_degraded_mode",
+                "warning",
+                "Variograma calculado con muestra para mantener estabilidad.",
+                {"source_points": result.source_points, "used_points": result.used_points},
+            )
 
-        self.activity_log.log("visuals_auto_rendered", "success", "Visuales listos para renderizado automático.", {"rows": len(clean)})
-        self.activity_log.log("histogram_rendered", "info", "Histograma preparado.", {})
-        self.activity_log.log("boxplot_rendered", "info", "Boxplot preparado.", {})
-        self.activity_log.log("spatial_view_rendered", "info", "Vista espacial preparada.", {})
-
-        return VisualPreparationResult(
-            True,
-            "Visuales preparados.",
-            clean[tcol].astype(float).tolist(),
-            clean[xcol].astype(float).tolist(),
-            clean[ycol].astype(float).tolist(),
-            clean[zcol].astype(float).tolist(),
-        )
+        self.activity_log.log("variogram_rendered", "success", "Variograma experimental preparado.", {"lags": n_lags, "mode": mode})
+        self.activity_log.log("dashboard_render_finished", "success", "Render variograma finalizado.", {"view": "Variografía"})
+        return result
 
     def get_summary_cards(self) -> dict[str, str]:
         if self.current_dataset is None:
@@ -335,7 +386,7 @@ class GeostatService:
         summary = (
             "MÓDULO EDA\n"
             "----------\n"
-            "Subsecciones: Resumen | Univariado | Espacial\n"
+            "Subsecciones: Resumen | Univariado | Espacial | Swath | Variografía\n"
             f"Filas: {self.current_dataset.row_count} | Columnas: {self.current_dataset.column_count}\n"
         )
         if self.variable_config is None:
@@ -350,6 +401,7 @@ class GeostatService:
         message = f"{module_name}: etapa aún no implementada. Esta acción fue registrada."
         self.activity_log.log("placeholder_module_clicked", "info", message, {"module": module_name})
         return message
+
 
     def variogram_placeholder(self) -> str:
         return self.module_not_implemented("Variografía")
