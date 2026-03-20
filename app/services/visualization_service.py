@@ -15,6 +15,9 @@ class SpatialDataBundle:
     source_points: int
     plotted_points: int
     downsampled: bool
+    target_label: str = "Target"
+    target_tick_positions: list[float] | None = None
+    target_tick_labels: list[str] | None = None
 
 
 @dataclass
@@ -48,6 +51,7 @@ def prepare_spatial_sections(
     z_col: str,
     target_col: str,
     max_points: int = 20000,
+    allow_categorical_target: bool = False,
 ) -> SpatialDataBundle:
     import pandas as pd
 
@@ -55,23 +59,38 @@ def prepare_spatial_sections(
     missing = [column for column in required if column not in dataframe.columns]
     if missing:
         raise ValueError(f"Columnas faltantes para secciones: {', '.join(missing)}")
-    if not pd.api.types.is_numeric_dtype(dataframe[target_col]):
+    if not allow_categorical_target and not pd.api.types.is_numeric_dtype(dataframe[target_col]):
         raise ValueError("Target no numérico para secciones espaciales.")
-
     clean = dataframe[required].dropna()
     if clean.empty:
         raise ValueError("No hay datos válidos para secciones espaciales.")
     source_points = len(clean)
     sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
+    target_tick_positions: list[float] | None = None
+    target_tick_labels: list[str] | None = None
+    target_label = "Target"
+    if pd.api.types.is_numeric_dtype(sampled[target_col]):
+        plotted_target = sampled[target_col].astype(float).tolist()
+    else:
+        categorical = sampled[target_col].astype("category")
+        plotted_target = categorical.cat.codes.astype(float).tolist()
+        categories = [str(cat) for cat in categorical.cat.categories]
+        target_tick_positions = [float(idx) for idx in range(len(categories))]
+        target_tick_labels = categories
+        target_label = "Target (categorías)"
+
     return SpatialDataBundle(
         x=sampled[x_col].astype(float).tolist(),
         y=sampled[y_col].astype(float).tolist(),
         z=sampled[z_col].astype(float).tolist(),
-        target=sampled[target_col].astype(float).tolist(),
+        target=plotted_target,
         source_points=source_points,
         plotted_points=len(sampled),
         downsampled=downsampled,
+        target_label=target_label,
+        target_tick_positions=target_tick_positions,
+        target_tick_labels=target_tick_labels,
     )
 
 

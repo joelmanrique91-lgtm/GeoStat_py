@@ -1,8 +1,8 @@
-"""Workflow-oriented dashboard with clear stage separation: Datos / EDA / Espacial."""
+"""Workflow-oriented dashboard with clear stage separation: Datos / EDA / Cutoffs / Espacial."""
 
 from __future__ import annotations
 
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import threading
 
 import customtkinter as ctk
@@ -28,6 +28,26 @@ class HomePanel(ctk.CTkFrame):
         self.target_var = ctk.StringVar(value="")
         self.hole_var = ctk.StringVar(value="")
         self.domain_var = ctk.StringVar(value="")
+        self.cutoff_enabled_var = ctk.BooleanVar(value=False)
+        self.cutoff_target_var = ctk.StringVar(value="")
+        self.cutoff_limits_var = ctk.StringVar(value="")
+        self.cutoff_output_var = ctk.StringVar(value="")
+        self.dynamic_cutoff_enabled_var = ctk.BooleanVar(value=False)
+        self.dynamic_mode_var = ctk.StringVar(value="Percentil")
+        self.dynamic_slider_var = ctk.DoubleVar(value=95.0)
+        self.dynamic_output_var = ctk.StringVar(value="")
+        self.dynamic_keep_class_var = ctk.BooleanVar(value=True)
+        self.cutoff_metrics_var = ctk.StringVar(value="Sin preview.")
+        self.eda_use_capping_var = ctk.BooleanVar(value=False)
+        self._cutoff_preview_after_id: str | None = None
+        self.cutoff_preview_container: ctk.CTkFrame | None = None
+        self.cutoff_card_vars: dict[str, ctk.StringVar] = {
+            "cutoff": ctk.StringVar(value="-"),
+            "percentil": ctk.StringVar(value="-"),
+            "afectadas": ctk.StringVar(value="-"),
+            "maximos": ctk.StringVar(value="-"),
+            "efectiva": ctk.StringVar(value="-"),
+        }
 
         self.log_visible = True
         self.data_panel_collapsed = False
@@ -71,6 +91,8 @@ class HomePanel(ctk.CTkFrame):
 
         self.spatial_stage_view = ctk.CTkFrame(self.right_panel)
         self.spatial_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.cutoff_stage_view = ctk.CTkFrame(self.right_panel)
+        self.cutoff_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         self.log_panel = ctk.CTkFrame(self)
         self.log_panel.grid(row=2, column=0, sticky="ew")
@@ -84,7 +106,7 @@ class HomePanel(ctk.CTkFrame):
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py | Datos + EDA + Espacial", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
+        ctk.CTkLabel(header, text="GeoStat Py | Datos + EDA + Cutoffs + Espacial", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
 
         context = ctk.CTkFrame(header)
         context.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
@@ -120,11 +142,14 @@ class HomePanel(ctk.CTkFrame):
     def _show_stage_view(self, stage: str) -> None:
         self.data_stage_view.grid_remove()
         self.eda_tabs.grid_remove()
+        self.cutoff_stage_view.grid_remove()
         self.spatial_stage_view.grid_remove()
         if stage == "Datos":
             self.data_stage_view.grid()
         elif stage == "EDA":
             self.eda_tabs.grid()
+        elif stage == "Cutoffs":
+            self.cutoff_stage_view.grid()
         elif stage == "Espacial":
             self.spatial_stage_view.grid()
 
@@ -145,6 +170,9 @@ class HomePanel(ctk.CTkFrame):
         elif step_name == "EDA":
             self._render_analysis_step("EDA")
             self._render_eda_tab(self.eda_tabs.get() or "Resumen")
+        elif step_name == "Cutoffs":
+            self._render_analysis_step("Cutoffs")
+            self._render_cutoff_stage_panel()
         elif step_name == "Espacial":
             self._render_analysis_step("Espacial")
             self._render_spatial_stage_panel()
@@ -177,6 +205,24 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_analysis_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        if step_name == "EDA":
+            state = self.service.get_cutoff_state()
+            has_capping = self.service.has_confirmed_dynamic_capping()
+            if not has_capping:
+                self.eda_use_capping_var.set(False)
+            ctk.CTkSwitch(
+                self.center_panel,
+                text="EDA con capping confirmado de Paso 3",
+                variable=self.eda_use_capping_var,
+                state="normal" if has_capping else "disabled",
+                command=lambda: self._render_step("EDA"),
+            ).pack(fill="x", padx=8, pady=(0, 4))
+            active_view = "capping confirmado" if self.eda_use_capping_var.get() and has_capping else "variable original"
+            ctk.CTkLabel(
+                self.center_panel,
+                text=f"Vista EDA activa: {active_view}\nVariable efectiva actual: {state['effective_target_column'] or '-'}",
+                justify="left",
+            ).pack(anchor="w", padx=8, pady=(0, 8))
         ctk.CTkButton(self.center_panel, text="Actualizar vista", command=lambda: self._render_step(step_name)).pack(fill="x", padx=8, pady=(0, 8))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
@@ -223,7 +269,7 @@ class HomePanel(ctk.CTkFrame):
         DashboardGrid.clear(tab)
         self.service.activity_log.log("eda_univariate_render_started", "info", "Render Univariado iniciado.", {})
         try:
-            data = self.service.prepare_univariate_data(max_domain_categories=10)
+            data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
         except Exception as exc:
             self.service.activity_log.log("eda_univariate_render_failed", "error", str(exc), {})
             self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Univariado.", {"reason": str(exc)})
@@ -345,10 +391,18 @@ class HomePanel(ctk.CTkFrame):
         ax_yz.set_ylabel("Z")
 
         for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
-            dashboard.figure.colorbar(sc, ax=ax, shrink=0.78, label="Target")
+            cbar = dashboard.figure.colorbar(sc, ax=ax, shrink=0.78, label=spatial.target_label)
+            if spatial.target_tick_positions and spatial.target_tick_labels:
+                cbar.set_ticks(spatial.target_tick_positions)
+                cbar.set_ticklabels(spatial.target_tick_labels)
 
         ax_info.axis("off")
         msg = "Vistas 2D activas: XY, XZ, YZ."
+        state = self.service.get_cutoff_state()
+        if state["dynamic_enabled"]:
+            msg += f"\nCapping activo: {state['dynamic_output_column']} ({state['dynamic_target_column']}) @ {state['dynamic_cutoff_value']:.6g}."
+        elif state["enabled"]:
+            msg += f"\nCutoffs activos: {state['output_column']} ({state['target_column']})."
         if spatial.downsampled:
             msg += f"\nMuestreo: {spatial.plotted_points}/{spatial.source_points} puntos."
         ax_info.text(0.05, 0.9, msg, va="top")
@@ -358,10 +412,10 @@ class HomePanel(ctk.CTkFrame):
     def _set_summary_tab_content(self) -> None:
         tab = self.eda_tabs.tab("Resumen")
         DashboardGrid.clear(tab)
-        table_data = self.service.get_target_statistics_table()
+        table_data = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))
         if not table_data:
             self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Resumen EDA.", {})
-            ctk.CTkLabel(tab, text=self.service.build_eda_summary(), justify="left").pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(tab, text=self.service.build_eda_summary(use_effective_target=bool(self.eda_use_capping_var.get())), justify="left").pack(anchor="w", padx=8, pady=8)
             return
 
         grid = ctk.CTkFrame(tab)
@@ -377,10 +431,14 @@ class HomePanel(ctk.CTkFrame):
             return
         result = self.service.load_csv(path)
         self.status_text.set(result.message)
-        self._append_activity(result.message)
+        if result.success and bool(self.dynamic_cutoff_enabled_var.get()):
+            self._append_activity(f"{result.message} | cutoff confirmado: {result.cutoff_value:.6g}")
+        else:
+            self._append_activity(result.message)
         if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self._apply_autodetected_columns()
+            self._sync_cutoff_defaults()
             self._refresh_summary_cards()
             self._render_step(self.service.workflow_state.current_step)
 
@@ -402,10 +460,224 @@ class HomePanel(ctk.CTkFrame):
         if result.success:
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
+            self._sync_cutoff_defaults()
             self.data_panel_collapsed = True
             self.service.activity_log.log("data_panel_collapsed", "info", "Panel de datos colapsado automáticamente.", {})
             self._refresh_summary_cards()
             self._render_step(self.service.workflow_state.current_step)
+
+    def _sync_cutoff_defaults(self) -> None:
+        self.cutoff_enabled_var.set(False)
+        self.cutoff_limits_var.set("")
+        self.cutoff_target_var.set(self.target_var.get())
+        default_output = f"{self.target_var.get()}_cutoff" if self.target_var.get() else ""
+        self.cutoff_output_var.set(default_output)
+        self.dynamic_cutoff_enabled_var.set(False)
+        self.dynamic_mode_var.set("Percentil")
+        self.dynamic_slider_var.set(95.0)
+        self.dynamic_output_var.set(f"{self.target_var.get()}_capped" if self.target_var.get() else "")
+        self.dynamic_keep_class_var.set(True)
+
+    def _render_cutoff_stage_panel(self) -> None:
+        DashboardGrid.clear(self.cutoff_stage_view)
+        state = self.service.get_cutoff_state()
+        numeric_columns = self.service.get_numeric_columns()
+        target_default = state["target_column"] or self.target_var.get()
+        if target_default and not self.cutoff_target_var.get():
+            self.cutoff_target_var.set(target_default)
+        if state["output_column"]:
+            self.cutoff_output_var.set(str(state["output_column"]))
+        if state["limits"] and not self.cutoff_limits_var.get():
+            self.cutoff_limits_var.set(", ".join(f"{val:.6g}" for val in state["limits"]))
+        self.cutoff_enabled_var.set(bool(state["enabled"]))
+        self.dynamic_cutoff_enabled_var.set(bool(state["dynamic_enabled"]))
+        self.dynamic_mode_var.set("Valor absoluto" if state["dynamic_mode"] == "absolute" else "Percentil")
+        self.dynamic_slider_var.set(float(state["dynamic_percent"]))
+        if state["dynamic_output_column"]:
+            self.dynamic_output_var.set(str(state["dynamic_output_column"]))
+        elif not self.dynamic_output_var.get() and self.cutoff_target_var.get():
+            self.dynamic_output_var.set(f"{self.cutoff_target_var.get()}_capped")
+        if state["dynamic_enabled"]:
+            decision_status = "Capping dinámico confirmado"
+        elif state["enabled"]:
+            decision_status = "Cutoffs manuales confirmados"
+        else:
+            decision_status = "Usando variable original"
+
+        dataset_name = self.service.current_dataset.file_name if self.service.current_dataset else "No cargado"
+        header = (
+            f"Paso 3 | Panel de decisión geoestadística\n"
+            f"Dataset: {dataset_name} | Dominio: {self.service.workflow_state.active_domain}\n"
+            f"Variable objetivo: {self.cutoff_target_var.get() or '-'} | Modo: {self.dynamic_mode_var.get()}\n"
+            f"Variable efectiva para Espacial: {state['effective_target_column'] or '-'} | Estado: {decision_status}"
+        )
+        ctk.CTkLabel(self.cutoff_stage_view, text=header, justify="left", font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=8, pady=(8, 6))
+
+        top = ctk.CTkFrame(self.cutoff_stage_view)
+        top.pack(fill="x", padx=8, pady=(0, 6))
+        top.grid_columnconfigure((0, 1), weight=1)
+        left = ctk.CTkFrame(top)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=4)
+        right = ctk.CTkFrame(top)
+        right.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=4)
+
+        ctk.CTkLabel(left, text="Configuración manual", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        ctk.CTkSwitch(left, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, command=self._refresh_cutoff_preview).pack(anchor="w", padx=8, pady=4)
+        ctk.CTkLabel(left, text="Variable numérica objetivo").pack(anchor="w", padx=8, pady=(4, 2))
+        ctk.CTkOptionMenu(left, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkLabel(left, text="Cutoffs manuales").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkEntry(left, textvariable=self.cutoff_limits_var, placeholder_text="Ej: 0.5, 1.2, 2.0").pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkLabel(left, text="Salida categorizada").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkEntry(left, textvariable=self.cutoff_output_var, placeholder_text="target_cutoff").pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkButton(left, text="Confirmar cutoffs manuales", command=self._on_apply_cutoffs).pack(fill="x", padx=8, pady=(0, 8))
+
+        ctk.CTkLabel(right, text="Exploración dinámica (P95 sugerido)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        ctk.CTkSwitch(right, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._refresh_cutoff_preview).pack(anchor="w", padx=8, pady=(0, 4))
+        ctk.CTkLabel(right, text="Modo cutoff").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkOptionMenu(right, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkLabel(right, text="Slider exploración (0-100)").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkSlider(right, from_=0, to=100, variable=self.dynamic_slider_var, command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkLabel(right, text="Salida truncada").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkEntry(right, textvariable=self.dynamic_output_var, placeholder_text="target_capped").pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkCheckBox(right, text="Persistir categoría bajo/alto", variable=self.dynamic_keep_class_var).pack(anchor="w", padx=8, pady=(0, 4))
+        ctk.CTkButton(right, text="Confirmar capping dinámico", command=self._on_apply_dynamic_cutoff).pack(fill="x", padx=8, pady=(0, 8))
+
+        metrics_strip = ctk.CTkFrame(self.cutoff_stage_view)
+        metrics_strip.pack(fill="x", padx=8, pady=(0, 6))
+        metrics_strip.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
+        cards = [
+            ("Cutoff actual", "cutoff"),
+            ("Percentil retenido", "percentil"),
+            ("Muestras afectadas", "afectadas"),
+            ("Máx orig/trunc", "maximos"),
+            ("Variable efectiva", "efectiva"),
+        ]
+        for idx, (title, key) in enumerate(cards):
+            card = ctk.CTkFrame(metrics_strip)
+            card.grid(row=0, column=idx, sticky="nsew", padx=4, pady=4)
+            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(6, 2))
+            ctk.CTkLabel(card, textvariable=self.cutoff_card_vars[key], justify="left").pack(anchor="w", padx=6, pady=(0, 6))
+        ctk.CTkLabel(metrics_strip, textvariable=self.cutoff_metrics_var, justify="left").grid(row=1, column=0, columnspan=5, sticky="w", padx=6, pady=(0, 4))
+
+        self.cutoff_preview_container = ctk.CTkFrame(self.cutoff_stage_view)
+        self.cutoff_preview_container.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._refresh_cutoff_preview()
+
+    def _on_apply_cutoffs(self) -> None:
+        result = self.service.apply_cutoffs(
+            enabled=bool(self.cutoff_enabled_var.get()),
+            target_column=self.cutoff_target_var.get(),
+            limits_text=self.cutoff_limits_var.get(),
+            output_column=self.cutoff_output_var.get() or None,
+        )
+        self.status_text.set(result.message)
+        self._append_activity(result.message)
+        if result.success:
+            self._refresh_summary_cards()
+            self._render_step("Cutoffs")
+
+    def _schedule_cutoff_preview(self) -> None:
+        if self._cutoff_preview_after_id is not None:
+            self.after_cancel(self._cutoff_preview_after_id)
+        self._cutoff_preview_after_id = self.after(120, self._refresh_cutoff_preview)
+
+    def _refresh_cutoff_preview(self) -> None:
+        if self.service.workflow_state.current_step != "Cutoffs":
+            return
+        if self.cutoff_preview_container is None:
+            return
+        DashboardGrid.clear(self.cutoff_preview_container)
+        self._render_cutoff_preview_plots(self.cutoff_preview_container)
+
+    def _render_cutoff_preview_plots(self, parent: ctk.CTkFrame) -> None:
+        target = self.cutoff_target_var.get()
+        if not target:
+            self.cutoff_metrics_var.set("Selecciona variable numérica para preview.")
+            ctk.CTkLabel(parent, text="Sin variable para preview.", justify="left").pack(anchor="w", padx=8, pady=8)
+            return
+        mode = "absolute" if self.dynamic_mode_var.get() == "Valor absoluto" else "percentile"
+        try:
+            preview = self.service.prepare_dynamic_cutoff_preview(target, mode, float(self.dynamic_slider_var.get()))
+        except Exception as exc:
+            self.cutoff_metrics_var.set(f"No se pudo generar preview: {exc}")
+            ctk.CTkLabel(parent, text=f"No se pudo generar preview: {exc}", justify="left").pack(anchor="w", padx=8, pady=8)
+            return
+
+        cutoff = float(preview["cutoff_value"])
+        self.cutoff_metrics_var.set(
+            f"Exploración actual -> Percentil retenido: {preview['retained_pct']:.2f}% | Cutoff absoluto: {cutoff:.6g}\n"
+            f"Truncadas: {preview['affected_count']} ({preview['affected_pct']:.2f}%) | Máx original: {preview['max_original']:.6g} | Máx truncado: {preview['max_truncated']:.6g}\n"
+            f"Decisión confirmada -> dinámico: {self.service.workflow_state.dynamic_cutoff_value:.6g} | manual: {', '.join(str(v) for v in self.service.workflow_state.cutoff_limits) or '-'}"
+        )
+        self.cutoff_card_vars["cutoff"].set(f"{cutoff:.6g}")
+        self.cutoff_card_vars["percentil"].set(f"{preview['retained_pct']:.2f}%")
+        self.cutoff_card_vars["afectadas"].set(f"{preview['affected_count']} ({preview['affected_pct']:.2f}%)")
+        self.cutoff_card_vars["maximos"].set(f"{preview['max_original']:.6g} / {preview['max_truncated']:.6g}")
+        self.cutoff_card_vars["efectiva"].set(self.service.get_cutoff_state().get("effective_target_column", "-") or "-")
+
+        dashboard = DashboardGrid(parent, 2, 2, figsize=(11.5, 7.4))
+        ax_hist = dashboard.axis(0, 0)
+        ax_hist.hist(preview["retained_values"], bins="sturges", color="#4c78a8", alpha=0.85, label="Retenido")
+        if preview["truncated_values"]:
+            ax_hist.hist(preview["truncated_values"], bins="sturges", color="#f58518", alpha=0.75, label="Truncado")
+        ax_hist.axvline(cutoff, color="#e45756", linestyle="--", linewidth=1.4, label="Cutoff")
+        ax_hist.set_title("Histograma")
+        ax_hist.legend(fontsize=8)
+
+        ax_prob = dashboard.axis(0, 1)
+        retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
+        for x_val, y_val in zip(preview["sorted_values"], preview["theoretical_quantiles"]):
+            if x_val <= cutoff:
+                retained_x.append(x_val)
+                retained_y.append(y_val)
+            else:
+                trunc_x.append(x_val)
+                trunc_y.append(y_val)
+        ax_prob.scatter(retained_x, retained_y, s=10, color="#4c78a8", alpha=0.85, label="Retenido")
+        if trunc_x:
+            ax_prob.scatter(trunc_x, trunc_y, s=10, color="#f58518", alpha=0.85, label="Truncado")
+        ax_prob.axvline(cutoff, color="#e45756", linestyle="--", linewidth=1.4)
+        nearest_idx = min(range(len(preview["sorted_values"])), key=lambda idx: abs(preview["sorted_values"][idx] - cutoff))
+        ax_prob.scatter([cutoff], [preview["theoretical_quantiles"][nearest_idx]], color="#e45756", s=30, zorder=5, label="Punto cutoff")
+        ax_prob.set_title("Probability plot")
+        ax_prob.set_xlabel("Valores")
+        ax_prob.set_ylabel("Cuantiles normales")
+        ax_prob.legend(fontsize=8)
+        ax_prob.grid(alpha=0.25)
+
+        ax_before_after = dashboard.axis(1, 0)
+        original_sorted = sorted(preview["values"])
+        capped_sorted = sorted(preview["capped_values"])
+        original_cdf = [(idx + 1) / len(original_sorted) for idx in range(len(original_sorted))]
+        capped_cdf = [(idx + 1) / len(capped_sorted) for idx in range(len(capped_sorted))]
+        ax_before_after.plot(original_sorted, original_cdf, color="#9c755f", label="Original")
+        ax_before_after.plot(capped_sorted, capped_cdf, color="#59a14f", label="Capped")
+        ax_before_after.axvline(cutoff, color="#e45756", linestyle="--", linewidth=1.2)
+        ax_before_after.set_title("Curva acumulada original vs capped")
+        ax_before_after.set_ylabel("F(x)")
+        ax_before_after.legend(fontsize=8)
+
+        ax_decision = dashboard.axis(1, 1)
+        ax_decision.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True)
+        ax_decision.set_title("Boxplot antes/después")
+        ax_decision.tick_params(axis="x", rotation=15)
+        dashboard.render()
+
+    def _on_apply_dynamic_cutoff(self) -> None:
+        mode = "absolute" if self.dynamic_mode_var.get() == "Valor absoluto" else "percentile"
+        result = self.service.apply_dynamic_cutoff(
+            enabled=bool(self.dynamic_cutoff_enabled_var.get()),
+            target_column=self.cutoff_target_var.get(),
+            mode=mode,
+            slider_percent=float(self.dynamic_slider_var.get()),
+            output_column=self.dynamic_output_var.get() or None,
+            keep_category_column=bool(self.dynamic_keep_class_var.get()),
+        )
+        self.status_text.set(result.message)
+        self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
+        if result.success:
+            self._refresh_summary_cards()
+            self._render_step("Cutoffs")
 
     def _refresh_summary_cards(self) -> None:
         cards = self.service.get_summary_cards()
@@ -413,6 +685,9 @@ class HomePanel(ctk.CTkFrame):
             label.configure(text=cards.get(key, "-"))
 
     def _on_update_repo(self) -> None:
+        if not messagebox.askyesno("Confirmar actualización", "Esto actualizará el repositorio. ¿Continuar?"):
+            self._append_activity("Actualización de repositorio cancelada por usuario.")
+            return
         self.update_repo_button.configure(state="disabled")
         self.status_text.set("Actualizando repo...")
 
@@ -424,7 +699,8 @@ class HomePanel(ctk.CTkFrame):
 
     def _finish_repo_update(self, message: str, details: str) -> None:
         self.update_repo_button.configure(state="normal")
-        self.status_text.set(message)
+        prefix = "✅" if "actualizado" in message.lower() or "correctamente" in message.lower() else "⚠️"
+        self.status_text.set(f"{prefix} {message}")
         self._append_activity(message)
         self._append_activity(details)
 
