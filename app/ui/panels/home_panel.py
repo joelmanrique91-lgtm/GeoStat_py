@@ -527,6 +527,10 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
         self._schedule_cutoff_preview()
 
+    def _on_slider_change(self, _value: float) -> None:
+        self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
+        self._schedule_cutoff_preview()
+
     def _refresh_cutoff_preview(self) -> None:
         if self.service.workflow_state.current_step != "Cutoffs" or self.plot_frame is None:
             return
