@@ -1,4 +1,4 @@
-"""Workflow-oriented dashboard with clear stage separation: Datos / EDA / Espacial."""
+"""Workflow-oriented dashboard with clear stage separation: Datos / EDA / Cutoffs / Espacial."""
 
 from __future__ import annotations
 
@@ -28,6 +28,10 @@ class HomePanel(ctk.CTkFrame):
         self.target_var = ctk.StringVar(value="")
         self.hole_var = ctk.StringVar(value="")
         self.domain_var = ctk.StringVar(value="")
+        self.cutoff_enabled_var = ctk.BooleanVar(value=False)
+        self.cutoff_target_var = ctk.StringVar(value="")
+        self.cutoff_limits_var = ctk.StringVar(value="")
+        self.cutoff_output_var = ctk.StringVar(value="")
 
         self.log_visible = True
         self.data_panel_collapsed = False
@@ -71,6 +75,8 @@ class HomePanel(ctk.CTkFrame):
 
         self.spatial_stage_view = ctk.CTkFrame(self.right_panel)
         self.spatial_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.cutoff_stage_view = ctk.CTkFrame(self.right_panel)
+        self.cutoff_stage_view.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         self.log_panel = ctk.CTkFrame(self)
         self.log_panel.grid(row=2, column=0, sticky="ew")
@@ -84,7 +90,7 @@ class HomePanel(ctk.CTkFrame):
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py | Datos + EDA + Espacial", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
+        ctk.CTkLabel(header, text="GeoStat Py | Datos + EDA + Cutoffs + Espacial", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
 
         context = ctk.CTkFrame(header)
         context.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
@@ -120,11 +126,14 @@ class HomePanel(ctk.CTkFrame):
     def _show_stage_view(self, stage: str) -> None:
         self.data_stage_view.grid_remove()
         self.eda_tabs.grid_remove()
+        self.cutoff_stage_view.grid_remove()
         self.spatial_stage_view.grid_remove()
         if stage == "Datos":
             self.data_stage_view.grid()
         elif stage == "EDA":
             self.eda_tabs.grid()
+        elif stage == "Cutoffs":
+            self.cutoff_stage_view.grid()
         elif stage == "Espacial":
             self.spatial_stage_view.grid()
 
@@ -145,6 +154,9 @@ class HomePanel(ctk.CTkFrame):
         elif step_name == "EDA":
             self._render_analysis_step("EDA")
             self._render_eda_tab(self.eda_tabs.get() or "Resumen")
+        elif step_name == "Cutoffs":
+            self._render_analysis_step("Cutoffs")
+            self._render_cutoff_stage_panel()
         elif step_name == "Espacial":
             self._render_analysis_step("Espacial")
             self._render_spatial_stage_panel()
@@ -345,10 +357,16 @@ class HomePanel(ctk.CTkFrame):
         ax_yz.set_ylabel("Z")
 
         for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
-            dashboard.figure.colorbar(sc, ax=ax, shrink=0.78, label="Target")
+            cbar = dashboard.figure.colorbar(sc, ax=ax, shrink=0.78, label=spatial.target_label)
+            if spatial.target_tick_positions and spatial.target_tick_labels:
+                cbar.set_ticks(spatial.target_tick_positions)
+                cbar.set_ticklabels(spatial.target_tick_labels)
 
         ax_info.axis("off")
         msg = "Vistas 2D activas: XY, XZ, YZ."
+        state = self.service.get_cutoff_state()
+        if state["enabled"]:
+            msg += f"\nCutoffs activos: {state['output_column']} ({state['target_column']})."
         if spatial.downsampled:
             msg += f"\nMuestreo: {spatial.plotted_points}/{spatial.source_points} puntos."
         ax_info.text(0.05, 0.9, msg, va="top")
@@ -381,6 +399,7 @@ class HomePanel(ctk.CTkFrame):
         if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self._apply_autodetected_columns()
+            self._sync_cutoff_defaults()
             self._refresh_summary_cards()
             self._render_step(self.service.workflow_state.current_step)
 
@@ -402,10 +421,69 @@ class HomePanel(ctk.CTkFrame):
         if result.success:
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
+            self._sync_cutoff_defaults()
             self.data_panel_collapsed = True
             self.service.activity_log.log("data_panel_collapsed", "info", "Panel de datos colapsado automáticamente.", {})
             self._refresh_summary_cards()
             self._render_step(self.service.workflow_state.current_step)
+
+    def _sync_cutoff_defaults(self) -> None:
+        self.cutoff_enabled_var.set(False)
+        self.cutoff_limits_var.set("")
+        self.cutoff_target_var.set(self.target_var.get())
+        default_output = f"{self.target_var.get()}_cutoff" if self.target_var.get() else ""
+        self.cutoff_output_var.set(default_output)
+
+    def _render_cutoff_stage_panel(self) -> None:
+        DashboardGrid.clear(self.cutoff_stage_view)
+        state = self.service.get_cutoff_state()
+        numeric_columns = self.service.get_numeric_columns()
+        target_default = state["target_column"] or self.target_var.get()
+        if target_default and not self.cutoff_target_var.get():
+            self.cutoff_target_var.set(target_default)
+        if state["output_column"]:
+            self.cutoff_output_var.set(str(state["output_column"]))
+        if state["limits"] and not self.cutoff_limits_var.get():
+            self.cutoff_limits_var.set(", ".join(f"{val:.6g}" for val in state["limits"]))
+        self.cutoff_enabled_var.set(bool(state["enabled"]))
+
+        ctk.CTkLabel(
+            self.cutoff_stage_view,
+            text="Paso 3: aplicar cutoffs manuales sobre variable numérica (opcional).",
+            justify="left",
+        ).pack(anchor="w", padx=8, pady=(8, 6))
+
+        ctk.CTkSwitch(self.cutoff_stage_view, text="Aplicar cutoffs", variable=self.cutoff_enabled_var).pack(anchor="w", padx=8, pady=4)
+        ctk.CTkLabel(self.cutoff_stage_view, text="Variable numérica objetivo").pack(anchor="w", padx=8, pady=(8, 2))
+        ctk.CTkOptionMenu(
+            self.cutoff_stage_view,
+            variable=self.cutoff_target_var,
+            values=numeric_columns or [""],
+            state="normal" if numeric_columns else "disabled",
+        ).pack(fill="x", padx=8, pady=(0, 8))
+
+        ctk.CTkLabel(self.cutoff_stage_view, text="Cutoffs manuales (coma o punto y coma)").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkEntry(self.cutoff_stage_view, textvariable=self.cutoff_limits_var, placeholder_text="Ej: 0.5, 1.2, 2.0").pack(fill="x", padx=8, pady=(0, 8))
+
+        ctk.CTkLabel(self.cutoff_stage_view, text="Nombre de salida categorizada").pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkEntry(self.cutoff_stage_view, textvariable=self.cutoff_output_var, placeholder_text="target_cutoff").pack(fill="x", padx=8, pady=(0, 8))
+
+        ctk.CTkButton(self.cutoff_stage_view, text="Guardar Paso 3", command=self._on_apply_cutoffs).pack(fill="x", padx=8, pady=(0, 8))
+        effective = state["effective_target_column"] or "-"
+        ctk.CTkLabel(self.cutoff_stage_view, text=f"Variable efectiva para Espacial: {effective}", justify="left").pack(anchor="w", padx=8, pady=(0, 8))
+
+    def _on_apply_cutoffs(self) -> None:
+        result = self.service.apply_cutoffs(
+            enabled=bool(self.cutoff_enabled_var.get()),
+            target_column=self.cutoff_target_var.get(),
+            limits_text=self.cutoff_limits_var.get(),
+            output_column=self.cutoff_output_var.get() or None,
+        )
+        self.status_text.set(result.message)
+        self._append_activity(result.message)
+        if result.success:
+            self._refresh_summary_cards()
+            self._render_step("Cutoffs")
 
     def _refresh_summary_cards(self) -> None:
         cards = self.service.get_summary_cards()
