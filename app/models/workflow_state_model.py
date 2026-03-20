@@ -16,3 +16,10 @@ class WorkflowStateModel:
     cutoff_labels: list[str] = field(default_factory=list)
     cutoff_output_column: str = ""
     effective_target_column: str = ""
+    dynamic_cutoff_enabled: bool = False
+    dynamic_cutoff_target_column: str = ""
+    dynamic_cutoff_mode: str = "percentile"
+    dynamic_cutoff_percent: float = 95.0
+    dynamic_cutoff_value: float = 0.0
+    dynamic_cutoff_output_column: str = ""
+    dynamic_cutoff_category_column: str = ""

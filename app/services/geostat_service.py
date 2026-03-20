@@ -63,6 +63,13 @@ class CutoffResult:
     message: str
 
 
+@dataclass
+class DynamicCutoffResult:
+    success: bool
+    message: str
+    cutoff_value: float = 0.0
+
+
 def _read_csv(path: Path):
     import pandas as pd
 
@@ -148,6 +155,7 @@ class GeostatService:
         self.current_dataset = dataset
         self.variable_config = None
         self._clear_cutoff_state()
+        self._clear_dynamic_cutoff_state()
         self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
@@ -204,6 +212,7 @@ class GeostatService:
         self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
         self.workflow_state.active_support = "Muestra original"
         self._clear_cutoff_state()
+        self._clear_dynamic_cutoff_state()
         self.workflow_state.effective_target_column = target_column
         self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
         return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
@@ -226,7 +235,124 @@ class GeostatService:
             "labels": list(self.workflow_state.cutoff_labels),
             "output_column": self.workflow_state.cutoff_output_column,
             "effective_target_column": self._get_effective_target_column(),
+            "dynamic_enabled": self.workflow_state.dynamic_cutoff_enabled,
+            "dynamic_target_column": self.workflow_state.dynamic_cutoff_target_column or default_target,
+            "dynamic_mode": self.workflow_state.dynamic_cutoff_mode,
+            "dynamic_percent": float(self.workflow_state.dynamic_cutoff_percent),
+            "dynamic_cutoff_value": float(self.workflow_state.dynamic_cutoff_value),
+            "dynamic_output_column": self.workflow_state.dynamic_cutoff_output_column,
+            "dynamic_category_column": self.workflow_state.dynamic_cutoff_category_column,
         }
+
+    def prepare_dynamic_cutoff_preview(self, target_column: str, mode: str, slider_percent: float) -> dict[str, object]:
+        if self.current_dataset is None:
+            raise ValueError("No hay dataset cargado.")
+        if target_column not in self.current_dataset.columns:
+            raise ValueError("La variable seleccionada no existe en el dataset.")
+
+        numeric = _to_numeric(self.current_dataset.dataframe[target_column]).dropna().astype(float)
+        if numeric.empty:
+            raise ValueError("La variable seleccionada no tiene valores numéricos válidos.")
+
+        values = numeric.tolist()
+        min_val = float(numeric.min())
+        max_val = float(numeric.max())
+        slider_clamped = max(0.0, min(100.0, float(slider_percent)))
+        if mode == "absolute":
+            cutoff = min_val + ((max_val - min_val) * (slider_clamped / 100.0))
+        else:
+            cutoff = float(numeric.quantile(slider_clamped / 100.0))
+
+        retained = numeric[numeric <= cutoff]
+        truncated = numeric[numeric > cutoff]
+        capped_max = float(min(max_val, cutoff))
+
+        sorted_vals = sorted(values)
+        n = len(sorted_vals)
+        normal = statistics.NormalDist()
+        theoretical = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)] if n > 1 else [0.0]
+
+        return {
+            "values": values,
+            "sorted_values": sorted_vals,
+            "theoretical_quantiles": theoretical,
+            "cutoff_value": float(cutoff),
+            "min": min_val,
+            "max": max_val,
+            "affected_count": int(len(truncated)),
+            "affected_pct": float((len(truncated) / len(values)) * 100.0),
+            "retained_values": retained.tolist(),
+            "truncated_values": truncated.tolist(),
+            "max_original": max_val,
+            "max_truncated": capped_max,
+        }
+
+    def apply_dynamic_cutoff(
+        self,
+        enabled: bool,
+        target_column: str,
+        mode: str,
+        slider_percent: float,
+        output_column: str | None = None,
+        keep_category_column: bool = True,
+    ) -> DynamicCutoffResult:
+        if self.current_dataset is None:
+            return DynamicCutoffResult(False, "No hay dataset cargado.")
+        if self.variable_config is None:
+            return DynamicCutoffResult(False, "Configura X/Y/Z/target antes de aplicar capping.")
+        if not enabled:
+            self._clear_dynamic_cutoff_state()
+            return DynamicCutoffResult(True, "Capping dinámico desactivado.")
+
+        try:
+            preview = self.prepare_dynamic_cutoff_preview(target_column, mode, slider_percent)
+        except ValueError as exc:
+            return DynamicCutoffResult(False, str(exc))
+
+        cutoff = float(preview["cutoff_value"])
+        out_col = (output_column or f"{target_column}_capped").strip()
+        if out_col in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
+            return DynamicCutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
+
+        source = _to_numeric(self.current_dataset.dataframe[target_column])
+        self.current_dataset.dataframe[out_col] = source.clip(upper=cutoff)
+        if out_col not in self.current_dataset.columns:
+            self.current_dataset.columns.append(out_col)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        category_col = ""
+        if keep_category_column:
+            category_col = f"{out_col}_class"
+            labels = [f"<= {self._format_cutoff_number(cutoff)}", f"> {self._format_cutoff_number(cutoff)}"]
+            import pandas as pd
+
+            self.current_dataset.dataframe[category_col] = pd.cut(source, bins=[-math.inf, cutoff, math.inf], labels=labels, right=True, include_lowest=True)
+            if category_col not in self.current_dataset.columns:
+                self.current_dataset.columns.append(category_col)
+                self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        self.workflow_state.dynamic_cutoff_enabled = True
+        self.workflow_state.dynamic_cutoff_target_column = target_column
+        self.workflow_state.dynamic_cutoff_mode = "absolute" if mode == "absolute" else "percentile"
+        self.workflow_state.dynamic_cutoff_percent = float(max(0.0, min(100.0, slider_percent)))
+        self.workflow_state.dynamic_cutoff_value = cutoff
+        self.workflow_state.dynamic_cutoff_output_column = out_col
+        self.workflow_state.dynamic_cutoff_category_column = category_col
+        self.workflow_state.effective_target_column = out_col
+        self.activity_log.log(
+            "dynamic_cutoff_applied",
+            "success",
+            "Capping dinámico aplicado.",
+            {
+                "target": target_column,
+                "mode": self.workflow_state.dynamic_cutoff_mode,
+                "slider_percent": self.workflow_state.dynamic_cutoff_percent,
+                "cutoff_value": cutoff,
+                "output_column": out_col,
+                "category_column": category_col,
+            },
+        )
+        return DynamicCutoffResult(True, f"Capping aplicado. Nueva variable: {out_col}", cutoff)
 
     def apply_cutoffs(self, enabled: bool, target_column: str, limits_text: str, output_column: str | None = None) -> CutoffResult:
         if self.current_dataset is None:
@@ -320,7 +446,18 @@ class GeostatService:
         self.workflow_state.cutoff_output_column = ""
         self.workflow_state.effective_target_column = ""
 
+    def _clear_dynamic_cutoff_state(self) -> None:
+        self.workflow_state.dynamic_cutoff_enabled = False
+        self.workflow_state.dynamic_cutoff_target_column = ""
+        self.workflow_state.dynamic_cutoff_mode = "percentile"
+        self.workflow_state.dynamic_cutoff_percent = 95.0
+        self.workflow_state.dynamic_cutoff_value = 0.0
+        self.workflow_state.dynamic_cutoff_output_column = ""
+        self.workflow_state.dynamic_cutoff_category_column = ""
+
     def _get_effective_target_column(self) -> str:
+        if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
+            return self.workflow_state.dynamic_cutoff_output_column
         if self.workflow_state.cutoffs_enabled and self.workflow_state.cutoff_output_column:
             return self.workflow_state.cutoff_output_column
         if self.variable_config is None:
@@ -676,37 +813,58 @@ class GeostatService:
         }
 
     def update_repository(self) -> RepoUpdateResult:
-        if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") != "1":
-            message = "Actualización desde la GUI deshabilitada por seguridad."
-            details = "Usa scripts/update_repo.py desde terminal con la app cerrada."
-            self.activity_log.log("repo_update_blocked", "warning", message, {"hint": details})
-            return RepoUpdateResult(False, message, details, False)
+        if getattr(self, "_repo_update_running", False):
+            return RepoUpdateResult(False, "Ya hay una actualización en curso.", "Espera a que finalice el proceso actual.", False)
+        if self.workflow_state.current_step == "Datos" and self.dataframe_write_in_progress():
+            return RepoUpdateResult(False, "Actualización no permitida durante escritura activa.", "Espera a que termine el proceso crítico y vuelve a intentar.", False)
 
+        self._repo_update_running = True
         self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
         try:
-            pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)
+            if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") == "1":
+                pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)
+                if pull_result.returncode != 0:
+                    error_output = (pull_result.stderr or pull_result.stdout).strip()
+                    return RepoUpdateResult(False, "Falló `git pull`.", error_output or "Error desconocido de git.")
+
+                submodule_result = subprocess.run(
+                    ["git", "submodule", "update", "--init", "--recursive"],
+                    cwd=PROJECT_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=120,
+                )
+                output = (pull_result.stdout or pull_result.stderr).strip()
+                submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
+                combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
+                up_to_date = "Already up to date" in output or "Ya está actualizado" in output
+                message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
+                self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
+                return RepoUpdateResult(True, message, combined, not up_to_date)
+
+            python_exec = os.getenv("PYTHON_EXECUTABLE", "python")
+            script_path = PROJECT_ROOT / "scripts" / "update_repo.py"
+            script_result = subprocess.run(
+                [python_exec, str(script_path)],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+            )
+            output = "\n".join(part for part in [script_result.stdout, script_result.stderr] if part).strip()
+            if script_result.returncode != 0:
+                return RepoUpdateResult(False, "Falló actualización segura del repositorio.", output or "Sin detalles.")
+            self.activity_log.log("repo_update_finished", "success", "Repositorio actualizado correctamente (modo seguro).", {})
+            return RepoUpdateResult(True, "Repositorio actualizado correctamente (modo seguro). Reinicia la app para aplicar cambios.", output, True)
         except Exception as exc:
             return RepoUpdateResult(False, "No se pudo ejecutar la actualización del repositorio.", f"Detalle técnico: {exc}")
+        finally:
+            self._repo_update_running = False
 
-        if pull_result.returncode != 0:
-            error_output = (pull_result.stderr or pull_result.stdout).strip()
-            return RepoUpdateResult(False, "Falló `git pull`.", error_output or "Error desconocido de git.")
-
-        submodule_result = subprocess.run(
-            ["git", "submodule", "update", "--init", "--recursive"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-        output = (pull_result.stdout or pull_result.stderr).strip()
-        submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
-        combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
-        up_to_date = "Already up to date" in output or "Ya está actualizado" in output
-        message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
-        self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
-        return RepoUpdateResult(True, message, combined, not up_to_date)
+    def dataframe_write_in_progress(self) -> bool:
+        return bool(getattr(self, "_dataframe_write_in_progress", False))
 
     def export_activity_log(self, destination_path: str) -> str:
         exported = self.activity_log.export_log(destination_path)
