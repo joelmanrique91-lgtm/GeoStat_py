@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import math
 import statistics
@@ -13,7 +14,7 @@ from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
-from app.services.visualization_service import SpatialDataBundle, prepare_spatial_sections
+from app.services.visualization_service import SwathSeries, SpatialDataBundle, compute_swath_series, prepare_spatial_sections
 from app.utils.paths import PROJECT_ROOT
 
 WORKFLOW_STEPS = ["Datos", "EDA", "Espacial"]
@@ -226,36 +227,6 @@ class GeostatService:
             self.activity_log.log("univariate_payload_empty", "warning", message, {})
             raise ValueError(message)
 
-        try:
-            spatial = prepare_spatial_sections(
-                self.current_dataset.dataframe,
-                self.variable_config.x_column,
-                self.variable_config.y_column,
-                self.variable_config.z_column,
-                self.variable_config.target_column,
-            )
-        except ValueError as exc:
-            self.activity_log.log("graph_render_failed", "error", str(exc), {"view": "Espacial"})
-            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
-            return VisualPreparationResult(False, str(exc), None)
-
-        if spatial.downsampled:
-            self.activity_log.log(
-                "visualization_downsampled",
-                "info",
-                "Vista espacial muestreada para rendimiento.",
-                {"source_points": spatial.source_points, "plotted_points": spatial.plotted_points},
-            )
-
-        self.activity_log.log("eda_dashboard_rendered", "info", "Dashboard EDA preparado.", {"rows": len(spatial.target)})
-        self.activity_log.log("spatial_dashboard_rendered", "info", "Dashboard espacial preparado.", {"rows": len(spatial.target)})
-        self.activity_log.log("section_view_rendered", "info", "Secciones XY/XZ/YZ preparadas.", {})
-        self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
-        return VisualPreparationResult(True, "Visuales preparados.", spatial)
-
-    def prepare_swath_data(self, bins: int = 20) -> dict[str, SwathSeries]:
-        if self.current_dataset is None or self.variable_config is None:
-            raise ValueError("No hay dataset/configuración suficiente para swath.")
         df = self.current_dataset.dataframe
         target = self.variable_config.target_column
         if not target or target not in df.columns:
@@ -281,7 +252,6 @@ class GeostatService:
             "Conteo de target válido calculado.",
             {"target": target, "valid_count": valid_count, "nan_count": nan_count},
         )
-        return payload
 
         clean_target = numeric_target.dropna().astype(float)
 
@@ -383,8 +353,9 @@ class GeostatService:
                 if not domain_df.empty:
                     counts = domain_df[domain_col].value_counts()
                     top = counts.head(max_domain_categories)
-                    labels = [str(v) for v in top.index.tolist()]
-                    grouped_values = [domain_df.loc[domain_df[domain_col] == label, "target"].astype(float).tolist() for label in top.index.tolist()]
+                    selected_categories = top.index.tolist()
+                    labels = [str(v) for v in selected_categories]
+                    grouped_values = [domain_df.loc[domain_df[domain_col] == cat, "target"].astype(float).tolist() for cat in selected_categories]
                     labels = [lbl for lbl, vals in zip(labels, grouped_values) if vals]
                     grouped_values = [vals for vals in grouped_values if vals]
                     simplified = len(counts) > max_domain_categories
@@ -470,6 +441,23 @@ class GeostatService:
         )
         return payload
 
+    def prepare_swath_data(self, bins: int = 20) -> dict[str, SwathSeries]:
+        if self.current_dataset is None or self.variable_config is None:
+            raise ValueError("No hay dataset/configuración suficiente para swath.")
+
+        dataframe = self.current_dataset.dataframe
+        target_col = self.variable_config.target_column
+        if not target_col or target_col not in dataframe.columns:
+            raise ValueError(f"Target no válido para swath: '{target_col}'.")
+
+        payload = {
+            "x": compute_swath_series(dataframe, self.variable_config.x_column, target_col, bins=bins),
+            "y": compute_swath_series(dataframe, self.variable_config.y_column, target_col, bins=bins),
+            "z": compute_swath_series(dataframe, self.variable_config.z_column, target_col, bins=bins),
+        }
+        self.activity_log.log("swath_payload_prepared", "success", "Series swath preparadas.", {"bins": bins, "target": target_col})
+        return payload
+
     def build_eda_summary(self) -> str:
         if self.current_dataset is None:
             return "No hay dataset cargado para EDA."
@@ -553,6 +541,12 @@ class GeostatService:
         }
 
     def update_repository(self) -> RepoUpdateResult:
+        if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") != "1":
+            message = "Actualización desde la GUI deshabilitada por seguridad."
+            details = "Usa scripts/update_repo.py desde terminal con la app cerrada."
+            self.activity_log.log("repo_update_blocked", "warning", message, {"hint": details})
+            return RepoUpdateResult(False, message, details, False)
+
         self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
         try:
             pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)

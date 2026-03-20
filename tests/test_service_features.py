@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import os
 
 try:
     import pandas  # noqa: F401
@@ -55,17 +56,32 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
 
     @patch("app.services.geostat_service.subprocess.run")
-    def test_update_repository_success(self, mock_run) -> None:
+    def test_update_repository_success_when_enabled(self, mock_run) -> None:
         mock_run.side_effect = [
             type("Result", (), {"returncode": 0, "stdout": "Already up to date.", "stderr": ""})(),
             type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
         ]
-
-        result = self.service.update_repository()
+        with patch.dict(os.environ, {"GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE": "1"}):
+            result = self.service.update_repository()
 
         self.assertTrue(result.success)
         self.assertIn("actualizado", result.message.lower())
         self.assertFalse(result.restart_recommended)
+
+    def test_update_repository_blocked_by_default(self) -> None:
+        result = self.service.update_repository()
+        self.assertFalse(result.success)
+        self.assertIn("deshabilitada", result.message.lower())
+
+    def test_prepare_univariate_returns_expected_contract(self) -> None:
+        self._load_sample_dataset()
+        self.service.set_variable_config("Easting", "Northing", "RL", "Au", "HoleID", "Lithology")
+        payload = self.service.prepare_univariate_data()
+        self.assertIsInstance(payload, dict)
+        self.assertIn("target_values", payload)
+        self.assertIn("availability", payload)
+        self.assertIn("diagnostics", payload)
+        self.assertTrue(payload["availability"]["histogram"]["available"])
 
 
 if __name__ == "__main__":
