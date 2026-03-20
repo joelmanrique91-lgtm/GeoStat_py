@@ -22,7 +22,7 @@ class DashboardGrid:
             for axis in row_axes:
                 axis.set_facecolor("#ffffff")
                 axis.grid(color="#d6deea", alpha=0.8, linestyle="--", linewidth=0.55)
-                axis.tick_params(labelsize=8)
+                axis.tick_params(labelsize=9)
                 axis.tick_params(colors="#334155")
                 for spine in axis.spines.values():
                     spine.set_color("#cbd5e1")
