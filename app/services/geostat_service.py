@@ -17,11 +17,12 @@ from app.services.activity_log_service import ActivityLogService
 from app.services.visualization_service import SwathSeries, SpatialDataBundle, compute_swath_series, prepare_spatial_sections
 from app.utils.paths import PROJECT_ROOT
 
-WORKFLOW_STEPS = ["Datos", "EDA", "Espacial"]
+WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial"]
 FUNCTIONAL_STATUS = {step: "funcional" for step in WORKFLOW_STEPS}
 STEP_EVENT_MAP = {
     "Datos": "workflow_step_data_opened",
     "EDA": "workflow_step_eda_opened",
+    "Cutoffs": "workflow_step_cutoffs_opened",
     "Espacial": "workflow_step_spatial_opened",
 }
 
@@ -54,6 +55,12 @@ class VisualPreparationResult:
     success: bool
     message: str
     spatial_data: SpatialDataBundle | None
+
+
+@dataclass
+class CutoffResult:
+    success: bool
+    message: str
 
 
 def _read_csv(path: Path):
@@ -140,6 +147,7 @@ class GeostatService:
         dataset = DatasetModel.from_dataframe(file_path=selected_path, dataframe=dataframe)
         self.current_dataset = dataset
         self.variable_config = None
+        self._clear_cutoff_state()
         self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
@@ -195,8 +203,129 @@ class GeostatService:
         self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
         self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
         self.workflow_state.active_support = "Muestra original"
+        self._clear_cutoff_state()
+        self.workflow_state.effective_target_column = target_column
         self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
         return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
+
+    def get_numeric_columns(self) -> list[str]:
+        if self.current_dataset is None:
+            return []
+        numeric_columns: list[str] = []
+        for column in self.current_dataset.columns:
+            if _is_numeric_dtype(self.current_dataset.dataframe[column]):
+                numeric_columns.append(column)
+        return numeric_columns
+
+    def get_cutoff_state(self) -> dict[str, object]:
+        default_target = self.variable_config.target_column if self.variable_config else ""
+        return {
+            "enabled": self.workflow_state.cutoffs_enabled,
+            "target_column": self.workflow_state.cutoff_target_column or default_target,
+            "limits": [float(v) for v in self.workflow_state.cutoff_limits],
+            "labels": list(self.workflow_state.cutoff_labels),
+            "output_column": self.workflow_state.cutoff_output_column,
+            "effective_target_column": self._get_effective_target_column(),
+        }
+
+    def apply_cutoffs(self, enabled: bool, target_column: str, limits_text: str, output_column: str | None = None) -> CutoffResult:
+        if self.current_dataset is None:
+            return CutoffResult(False, "No hay dataset cargado.")
+        if self.variable_config is None:
+            return CutoffResult(False, "Configura X/Y/Z/target antes de aplicar cutoffs.")
+
+        if not enabled:
+            self._clear_cutoff_state()
+            self.workflow_state.effective_target_column = self.variable_config.target_column
+            self.activity_log.log("cutoff_disabled", "info", "Cutoffs desactivados. Se usa target original.", {"target": self.variable_config.target_column})
+            return CutoffResult(True, "Cutoffs desactivados. Se mantiene variable original.")
+
+        if target_column not in self.current_dataset.columns:
+            return CutoffResult(False, "La variable seleccionada no existe en el dataset.")
+        if not _is_numeric_dtype(self.current_dataset.dataframe[target_column]):
+            return CutoffResult(False, "La variable seleccionada debe ser numérica.")
+
+        limits, parse_error = self._parse_cutoff_limits(limits_text)
+        if parse_error:
+            return CutoffResult(False, parse_error)
+
+        labels = self._build_cutoff_labels(limits)
+        output_name = (output_column or f"{target_column}_cutoff").strip()
+        if output_name in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
+            return CutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
+
+        import pandas as pd
+
+        source = _to_numeric(self.current_dataset.dataframe[target_column])
+        bins = [-math.inf, *limits, math.inf]
+        categorized = pd.cut(source, bins=bins, labels=labels, right=False, include_lowest=True)
+        self.current_dataset.dataframe[output_name] = categorized
+        if output_name not in self.current_dataset.columns:
+            self.current_dataset.columns.append(output_name)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        self.workflow_state.cutoffs_enabled = True
+        self.workflow_state.cutoff_target_column = target_column
+        self.workflow_state.cutoff_limits = [float(v) for v in limits]
+        self.workflow_state.cutoff_labels = labels
+        self.workflow_state.cutoff_output_column = output_name
+        self.workflow_state.effective_target_column = output_name
+        self.activity_log.log(
+            "cutoff_applied",
+            "success",
+            "Cutoffs aplicados y variable categorizada persistida.",
+            {"target": target_column, "output_column": output_name, "limits": limits, "labels": labels},
+        )
+        return CutoffResult(True, f"Cutoffs aplicados. Nueva variable: {output_name}")
+
+    def _parse_cutoff_limits(self, limits_text: str) -> tuple[list[float], str]:
+        raw = (limits_text or "").strip()
+        if not raw:
+            return [], "Debes ingresar al menos un cutoff."
+        tokens = [token for token in raw.replace(";", ",").split(",") if token.strip()]
+        if not tokens:
+            return [], "Debes ingresar al menos un cutoff válido."
+        values: list[float] = []
+        for token in tokens:
+            try:
+                values.append(float(token.strip()))
+            except ValueError:
+                return [], f"Cutoff inválido: '{token.strip()}'. Usa solo números."
+        unique_sorted = sorted(set(values))
+        if not unique_sorted:
+            return [], "No se detectaron cutoffs válidos."
+        if len(unique_sorted) < len(values):
+            self.activity_log.log("cutoff_duplicates_ignored", "warning", "Se ignoraron cutoffs repetidos.", {"input_count": len(values), "unique_count": len(unique_sorted)})
+        return unique_sorted, ""
+
+    def _build_cutoff_labels(self, limits: list[float]) -> list[str]:
+        if len(limits) == 1:
+            c0 = self._format_cutoff_number(limits[0])
+            return [f"< {c0}", f">= {c0}"]
+
+        labels: list[str] = [f"< {self._format_cutoff_number(limits[0])}"]
+        for left, right in zip(limits[:-1], limits[1:]):
+            labels.append(f"[{self._format_cutoff_number(left)}, {self._format_cutoff_number(right)})")
+        labels.append(f">= {self._format_cutoff_number(limits[-1])}")
+        return labels
+
+    def _format_cutoff_number(self, value: float) -> str:
+        return f"{value:.6g}"
+
+    def _clear_cutoff_state(self) -> None:
+        self.workflow_state.cutoffs_enabled = False
+        self.workflow_state.cutoff_target_column = ""
+        self.workflow_state.cutoff_limits = []
+        self.workflow_state.cutoff_labels = []
+        self.workflow_state.cutoff_output_column = ""
+        self.workflow_state.effective_target_column = ""
+
+    def _get_effective_target_column(self) -> str:
+        if self.workflow_state.cutoffs_enabled and self.workflow_state.cutoff_output_column:
+            return self.workflow_state.cutoff_output_column
+        if self.variable_config is None:
+            return ""
+        return self.variable_config.target_column
 
     def prepare_visual_data(self) -> VisualPreparationResult:
         self.activity_log.log("dashboard_render_started", "info", "Render espacial iniciado.", {"view": "Espacial"})
@@ -210,13 +339,19 @@ class GeostatService:
                 self.variable_config.x_column,
                 self.variable_config.y_column,
                 self.variable_config.z_column,
-                self.variable_config.target_column,
+                self._get_effective_target_column(),
+                allow_categorical_target=self.workflow_state.cutoffs_enabled,
             )
         except ValueError as exc:
             self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
             return VisualPreparationResult(False, str(exc), None)
 
-        self.activity_log.log("spatial_2d_rendered", "success", "Vistas espaciales 2D preparadas.", {"rows": len(spatial.target)})
+        self.activity_log.log(
+            "spatial_2d_rendered",
+            "success",
+            "Vistas espaciales 2D preparadas.",
+            {"rows": len(spatial.target), "target_column": self._get_effective_target_column()},
+        )
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
 
@@ -530,7 +665,7 @@ class GeostatService:
         if self.current_dataset is None:
             return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente", "Dominio": "No definido"}
 
-        target = self.variable_config.target_column if self.variable_config else "No definido"
+        target = self._get_effective_target_column() if self.variable_config else "No definido"
         return {
             "Dataset": self.current_dataset.file_name,
             "Muestras": str(self.current_dataset.row_count),
