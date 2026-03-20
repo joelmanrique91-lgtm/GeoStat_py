@@ -63,11 +63,7 @@ class HomePanel(ctk.CTkFrame):
         self.context_chip_vars: dict[str, ctk.StringVar] = {}
         self.kpi_value_vars: dict[str, ctk.StringVar] = {}
         self.kpi_cards: dict[str, ctk.CTkFrame] = {}
-
-        self.control_sections: dict[str, ctk.CTkFrame] = {}
-        self.workspace_title_var = ctk.StringVar(value="Vista Datos")
-        self.plot_frame: ctk.CTkFrame | None = None
-        self._cutoff_preview_after_id: str | None = None
+        self.eda_capping_switch: ctk.CTkSwitch | None = None
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -219,20 +215,25 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_data_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Datos y columnas")
-        ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="1) Cargar dataset", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 5))
 
         # compat: config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
         grid = ctk.CTkFrame(section, fg_color="transparent")
         grid.pack(fill="x", padx=6, pady=(0, 5))
         grid.grid_columnconfigure((0, 1), weight=1)
         cols = self.service.get_available_columns() or [""]
-        self._selector(grid, "X", self.x_var, cols, 0, 0)
-        self._selector(grid, "Y", self.y_var, cols, 0, 1)
-        self._selector(grid, "Z", self.z_var, cols, 2, 0)
-        self._selector(grid, "Target", self.target_var, cols, 2, 1)
-        self._selector(grid, "Hole ID", self.hole_var, cols, 4, 0)
-        self._selector(grid, "Dominio", self.domain_var, cols, 4, 1)
-        ctk.CTkButton(grid, text="Aplicar configuración", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(3, 0))
+        ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        self._selector(grid, "X", self.x_var, cols, 1, 0)
+        self._selector(grid, "Y", self.y_var, cols, 1, 1)
+        self._selector(grid, "Z", self.z_var, cols, 3, 0)
+        ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        self._selector(grid, "Target (ley)", self.target_var, cols, 5, 0)
+        ctk.CTkLabel(grid, text="4) Identificadores (opcionales)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        self._selector(grid, "Hole ID", self.hole_var, cols, 7, 0)
+        self._selector(grid, "Dominio geológico", self.domain_var, cols, 7, 1)
+        ctk.CTkLabel(grid, text="5) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=8, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkButton(grid, text="Aplicar configuración", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         return section
 
     def _build_eda_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -240,14 +241,15 @@ class HomePanel(ctk.CTkFrame):
         has_capping = self.service.has_confirmed_dynamic_capping()
         if not has_capping:
             self.eda_use_capping_var.set(False)
-        ctk.CTkSwitch(
+        self.eda_capping_switch = ctk.CTkSwitch(
             section,
             text="EDA con capping confirmado",
             variable=self.eda_use_capping_var,
             state="normal" if has_capping else "disabled",
             text_color=TXT_MAIN,
             command=self._refresh_dashboard,
-        ).pack(fill="x", padx=6, pady=(0, 4))
+        )
+        self.eda_capping_switch.pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color="#363a42", hover_color="#454b55", command=self._refresh_dashboard).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
@@ -347,13 +349,17 @@ class HomePanel(ctk.CTkFrame):
     def _render_eda_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
+        state = self.service.get_cutoff_state()
+        active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
+        capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
+        ctk.CTkLabel(wrapper, text=f"Variable activa: {active_variable} · Estado: {capping_status}", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
         try:
             data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
         except Exception as exc:
             ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
-        grid = DashboardGrid(wrapper, 2, 2, figsize=(12.2, 6.2))
+        grid = DashboardGrid(wrapper, 2, 2, figsize=(12.2, 5.9))
         ax_hist = grid.axis(0, 0)
         ax_box = grid.axis(0, 1)
         ax_prob = grid.axis(1, 0)
@@ -374,8 +380,17 @@ class HomePanel(ctk.CTkFrame):
 
         domain_data = data.get("domain_boxplot", {})
         if domain_data.get("enabled"):
-            ax_domain.boxplot(domain_data["values"], labels=domain_data["labels"], patch_artist=True)
+            paired = list(zip(domain_data["labels"], domain_data["values"]))
+            paired.sort(key=lambda item: (sum(item[1]) / len(item[1])) if item[1] else float("-inf"), reverse=True)
+            ordered_labels = [label for label, _vals in paired]
+            ordered_values = [vals for _label, vals in paired]
+            palette = ["#4e79a7", "#59a14f", "#9c755f", "#76b7b2", "#bab0ab", "#e15759", "#f28e2b", "#b07aa1", "#ff9da7", "#8cd17d"]
+            box = ax_domain.boxplot(ordered_values, labels=ordered_labels, patch_artist=True)
+            for idx, patch in enumerate(box["boxes"]):
+                patch.set_facecolor(palette[idx % len(palette)])
+                patch.set_alpha(0.8)
             ax_domain.tick_params(axis="x", rotation=22)
+            ax_domain.set_ylabel("Valor")
             ax_domain.set_title("Dominio", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
@@ -460,10 +475,18 @@ class HomePanel(ctk.CTkFrame):
 
     def _refresh_dashboard(self) -> None:
         self._refresh_context_chips()
+        self._sync_eda_capping_state()
         self._refresh_summary_cards()
         current_step = self.service.workflow_state.current_step
         self._apply_kpi_focus(current_step)
         self._show_stage_view(current_step)
+
+    def _sync_eda_capping_state(self) -> None:
+        has_capping = self.service.has_confirmed_dynamic_capping()
+        if self.eda_capping_switch is not None:
+            self.eda_capping_switch.configure(state="normal" if has_capping else "disabled")
+        if not has_capping:
+            self.eda_use_capping_var.set(False)
 
     def _refresh_context_chips(self) -> None:
         state = self.service.get_cutoff_state()
@@ -637,6 +660,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
         if result.success:
+            self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
             self._refresh_dashboard()
 
     def _refresh_summary_cards(self) -> None:
