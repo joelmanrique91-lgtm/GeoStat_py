@@ -167,8 +167,12 @@ class GeostatService:
 
         def pick(candidates: list[str]) -> str:
             for candidate in candidates:
+                normalized_candidate = candidate.lower().replace("_", "").replace(" ", "")
                 for key, original in normalized.items():
-                    if candidate in key:
+                    if len(normalized_candidate) == 1:
+                        if key == normalized_candidate:
+                            return original
+                    elif key == normalized_candidate or key.startswith(normalized_candidate):
                         return original
             return ""
 
@@ -189,6 +193,15 @@ class GeostatService:
 
     def get_autodetected_columns(self) -> dict[str, str]:
         return self.autodetected_columns.copy()
+
+    def get_domain_candidate_columns(self) -> list[str]:
+        if self.current_dataset is None:
+            return []
+        domain_columns: list[str] = []
+        for column in self.current_dataset.columns:
+            if not _is_numeric_dtype(self.current_dataset.dataframe[column]):
+                domain_columns.append(column)
+        return domain_columns
 
     def set_variable_config(
         self,
