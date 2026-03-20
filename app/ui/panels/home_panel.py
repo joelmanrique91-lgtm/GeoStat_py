@@ -227,16 +227,18 @@ class HomePanel(ctk.CTkFrame):
         grid.pack(fill="x", padx=6, pady=(0, 5))
         grid.grid_columnconfigure((0, 1), weight=1)
         cols = self.service.get_available_columns() or [""]
+        numeric_cols = self.service.get_numeric_columns() or [""]
+        domain_candidates = self.service.get_domain_candidate_columns() or [""]
         ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
         self._selector(grid, "X", self.x_var, cols, 1, 0)
         self._selector(grid, "Y", self.y_var, cols, 1, 1)
         self._selector(grid, "Z", self.z_var, cols, 3, 0)
         ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        self._selector(grid, "Target (ley)", self.target_var, cols, 5, 0)
+        self._selector(grid, "Target (ley)", self.target_var, numeric_cols, 5, 0)
         ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         ctk.CTkCheckBox(grid, text="Analizar por dominios", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=7, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
         domain_state = "normal" if bool(self.use_domain_var.get()) else "disabled"
-        self.domain_menu_widget = ctk.CTkOptionMenu(grid, variable=self.domain_var, values=cols, state=domain_state, height=24)
+        self.domain_menu_widget = ctk.CTkOptionMenu(grid, variable=self.domain_var, values=domain_candidates, state=domain_state, height=24)
         self.domain_menu_widget.grid(row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 4))
         ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=9, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         self._selector(grid, "Hole ID", self.hole_var, cols, 10, 0)
@@ -540,6 +542,7 @@ class HomePanel(ctk.CTkFrame):
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self._apply_autodetected_columns()
             self._sync_cutoff_defaults()
+            self._render_control_sections()
             self._refresh_dashboard(reason="csv_loaded")
 
     def _apply_autodetected_columns(self) -> None:
