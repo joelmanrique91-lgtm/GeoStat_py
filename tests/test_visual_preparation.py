@@ -89,6 +89,14 @@ class VisualPreparationTests(unittest.TestCase):
             self.assertEqual(payload["diagnostics"]["target_nan_count"], 1)
             self.assertTrue(payload["availability"]["histogram"]["available"])
 
+    def test_prepare_swath_data_returns_xyz_series(self) -> None:
+        self._load_numeric_dataset()
+        swath = self.service.prepare_swath_data(bins=5)
+        self.assertEqual(set(swath.keys()), {"x", "y", "z"})
+        self.assertEqual(swath["x"].axis, "x")
+        self.assertEqual(swath["y"].axis, "y")
+        self.assertEqual(swath["z"].axis, "z")
+
 
 if __name__ == "__main__":
     unittest.main()

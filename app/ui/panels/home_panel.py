@@ -93,7 +93,7 @@ class HomePanel(ctk.CTkFrame):
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8)
-        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=120, command=self._on_update_repo)
+        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo (seguro)", width=170, command=self._on_update_repo)
         self.update_repo_button.pack(side="left", padx=4)
         ctk.CTkButton(actions, text="Exportar log", width=110, command=self._on_export_log).pack(side="left", padx=4)
         ctk.CTkLabel(actions, textvariable=self.status_text).pack(side="left", padx=6)
