@@ -43,6 +43,7 @@ class HomePanel(ctk.CTkFrame):
         self.target_var = ctk.StringVar(value="")
         self.hole_var = ctk.StringVar(value="")
         self.domain_var = ctk.StringVar(value="")
+        self.use_domain_var = ctk.BooleanVar(value=False)
         self.cutoff_enabled_var = ctk.BooleanVar(value=False)
         self.cutoff_target_var = ctk.StringVar(value="")
         self.cutoff_limits_var = ctk.StringVar(value="")
@@ -64,6 +65,7 @@ class HomePanel(ctk.CTkFrame):
         self.kpi_value_vars: dict[str, ctk.StringVar] = {}
         self.kpi_cards: dict[str, ctk.CTkFrame] = {}
         self.eda_capping_switch: ctk.CTkSwitch | None = None
+        self.domain_menu_widget: ctk.CTkOptionMenu | None = None
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -217,6 +219,7 @@ class HomePanel(ctk.CTkFrame):
         section = self._section_shell(parent, "Datos y columnas")
         ctk.CTkLabel(section, text="1) Cargar dataset", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkLabel(section, textvariable=self.dataset_label, text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 6))
 
         # compat: config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
         grid = ctk.CTkFrame(section, fg_color="transparent")
@@ -229,11 +232,15 @@ class HomePanel(ctk.CTkFrame):
         self._selector(grid, "Z", self.z_var, cols, 3, 0)
         ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         self._selector(grid, "Target (ley)", self.target_var, cols, 5, 0)
-        ctk.CTkLabel(grid, text="4) Identificadores (opcionales)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        self._selector(grid, "Hole ID", self.hole_var, cols, 7, 0)
-        self._selector(grid, "Dominio geológico", self.domain_var, cols, 7, 1)
-        ctk.CTkLabel(grid, text="5) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=8, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        ctk.CTkButton(grid, text="Aplicar configuración", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkCheckBox(grid, text="Analizar por dominios", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=7, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        domain_state = "normal" if bool(self.use_domain_var.get()) else "disabled"
+        self.domain_menu_widget = ctk.CTkOptionMenu(grid, variable=self.domain_var, values=cols, state=domain_state, height=24)
+        self.domain_menu_widget.grid(row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 4))
+        ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=9, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        self._selector(grid, "Hole ID", self.hole_var, cols, 10, 0)
+        ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=12, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=13, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         return section
 
     def _build_eda_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -506,6 +513,12 @@ class HomePanel(ctk.CTkFrame):
         state = "normal" if values and values[0] else "disabled"
         ctk.CTkOptionMenu(parent, variable=variable, values=values, state=state, height=24).grid(row=row + 1, column=col, sticky="ew", padx=4, pady=(0, 4))
 
+    def _on_domain_mode_change(self) -> None:
+        if self.domain_menu_widget is not None:
+            self.domain_menu_widget.configure(state="normal" if bool(self.use_domain_var.get()) else "disabled")
+        if not self.use_domain_var.get():
+            self.domain_var.set("")
+
     def _on_load_csv(self) -> None:
         path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
         if not path:
@@ -528,16 +541,19 @@ class HomePanel(ctk.CTkFrame):
         self.target_var.set(suggestions.get("target", ""))
         self.hole_var.set(suggestions.get("hole_id", ""))
         self.domain_var.set(suggestions.get("domain", ""))
+        self.use_domain_var.set(False)
+        self._on_domain_mode_change()
 
     def _on_apply_config(self) -> None:
+        selected_domain = self.domain_var.get() if bool(self.use_domain_var.get()) and self.domain_var.get() else None
         result = self.service.set_variable_config(
-            self.x_var.get(), self.y_var.get(), self.z_var.get(), self.target_var.get(), self.hole_var.get() or None, self.domain_var.get() or None
+            self.x_var.get(), self.y_var.get(), self.z_var.get(), self.target_var.get(), self.hole_var.get() or None, selected_domain
         )
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
             self.target_label.set(f"Target: {self.target_var.get()}")
-            self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
+            self.domain_label.set(f"Dominio: {selected_domain or 'No definido'}")
             self._sync_cutoff_defaults()
             self._refresh_dashboard()
 
