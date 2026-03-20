@@ -39,6 +39,14 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_keep_class_var = ctk.BooleanVar(value=True)
         self.cutoff_metrics_var = ctk.StringVar(value="Sin preview.")
         self._cutoff_preview_after_id: str | None = None
+        self.cutoff_preview_container: ctk.CTkFrame | None = None
+        self.cutoff_card_vars: dict[str, ctk.StringVar] = {
+            "cutoff": ctk.StringVar(value="-"),
+            "percentil": ctk.StringVar(value="-"),
+            "afectadas": ctk.StringVar(value="-"),
+            "maximos": ctk.StringVar(value="-"),
+            "efectiva": ctk.StringVar(value="-"),
+        }
 
         self.log_visible = True
         self.data_panel_collapsed = False
@@ -495,7 +503,7 @@ class HomePanel(ctk.CTkFrame):
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=4)
 
         ctk.CTkLabel(left, text="Configuración manual", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
-        ctk.CTkSwitch(left, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var).pack(anchor="w", padx=8, pady=4)
+        ctk.CTkSwitch(left, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, command=self._refresh_cutoff_preview).pack(anchor="w", padx=8, pady=4)
         ctk.CTkLabel(left, text="Variable numérica objetivo").pack(anchor="w", padx=8, pady=(4, 2))
         ctk.CTkOptionMenu(left, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 6))
         ctk.CTkLabel(left, text="Cutoffs manuales").pack(anchor="w", padx=8, pady=(0, 2))
@@ -505,7 +513,7 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkButton(left, text="Confirmar cutoffs manuales", command=self._on_apply_cutoffs).pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(right, text="Exploración dinámica (P95 sugerido)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
-        ctk.CTkSwitch(right, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var).pack(anchor="w", padx=8, pady=(0, 4))
+        ctk.CTkSwitch(right, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._refresh_cutoff_preview).pack(anchor="w", padx=8, pady=(0, 4))
         ctk.CTkLabel(right, text="Modo cutoff").pack(anchor="w", padx=8, pady=(0, 2))
         ctk.CTkOptionMenu(right, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 4))
         ctk.CTkLabel(right, text="Slider exploración (0-100)").pack(anchor="w", padx=8, pady=(0, 2))
@@ -517,11 +525,24 @@ class HomePanel(ctk.CTkFrame):
 
         metrics_strip = ctk.CTkFrame(self.cutoff_stage_view)
         metrics_strip.pack(fill="x", padx=8, pady=(0, 6))
-        ctk.CTkLabel(metrics_strip, textvariable=self.cutoff_metrics_var, justify="left").pack(anchor="w", padx=8, pady=6)
+        metrics_strip.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
+        cards = [
+            ("Cutoff actual", "cutoff"),
+            ("Percentil retenido", "percentil"),
+            ("Muestras afectadas", "afectadas"),
+            ("Máx orig/trunc", "maximos"),
+            ("Variable efectiva", "efectiva"),
+        ]
+        for idx, (title, key) in enumerate(cards):
+            card = ctk.CTkFrame(metrics_strip)
+            card.grid(row=0, column=idx, sticky="nsew", padx=4, pady=4)
+            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(6, 2))
+            ctk.CTkLabel(card, textvariable=self.cutoff_card_vars[key], justify="left").pack(anchor="w", padx=6, pady=(0, 6))
+        ctk.CTkLabel(metrics_strip, textvariable=self.cutoff_metrics_var, justify="left").grid(row=1, column=0, columnspan=5, sticky="w", padx=6, pady=(0, 4))
 
-        analysis_panel = ctk.CTkFrame(self.cutoff_stage_view)
-        analysis_panel.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self._render_cutoff_preview_plots(analysis_panel)
+        self.cutoff_preview_container = ctk.CTkFrame(self.cutoff_stage_view)
+        self.cutoff_preview_container.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._refresh_cutoff_preview()
 
     def _on_apply_cutoffs(self) -> None:
         result = self.service.apply_cutoffs(
@@ -539,7 +560,15 @@ class HomePanel(ctk.CTkFrame):
     def _schedule_cutoff_preview(self) -> None:
         if self._cutoff_preview_after_id is not None:
             self.after_cancel(self._cutoff_preview_after_id)
-        self._cutoff_preview_after_id = self.after(120, lambda: self._render_step("Cutoffs"))
+        self._cutoff_preview_after_id = self.after(120, self._refresh_cutoff_preview)
+
+    def _refresh_cutoff_preview(self) -> None:
+        if self.service.workflow_state.current_step != "Cutoffs":
+            return
+        if self.cutoff_preview_container is None:
+            return
+        DashboardGrid.clear(self.cutoff_preview_container)
+        self._render_cutoff_preview_plots(self.cutoff_preview_container)
 
     def _render_cutoff_preview_plots(self, parent: ctk.CTkFrame) -> None:
         target = self.cutoff_target_var.get()
@@ -561,6 +590,11 @@ class HomePanel(ctk.CTkFrame):
             f"Truncadas: {preview['affected_count']} ({preview['affected_pct']:.2f}%) | Máx original: {preview['max_original']:.6g} | Máx truncado: {preview['max_truncated']:.6g}\n"
             f"Decisión confirmada -> dinámico: {self.service.workflow_state.dynamic_cutoff_value:.6g} | manual: {', '.join(str(v) for v in self.service.workflow_state.cutoff_limits) or '-'}"
         )
+        self.cutoff_card_vars["cutoff"].set(f"{cutoff:.6g}")
+        self.cutoff_card_vars["percentil"].set(f"{preview['retained_pct']:.2f}%")
+        self.cutoff_card_vars["afectadas"].set(f"{preview['affected_count']} ({preview['affected_pct']:.2f}%)")
+        self.cutoff_card_vars["maximos"].set(f"{preview['max_original']:.6g} / {preview['max_truncated']:.6g}")
+        self.cutoff_card_vars["efectiva"].set(self.service.get_cutoff_state().get("effective_target_column", "-") or "-")
 
         dashboard = DashboardGrid(parent, 2, 2, figsize=(11.5, 7.4))
         ax_hist = dashboard.axis(0, 0)
@@ -623,7 +657,7 @@ class HomePanel(ctk.CTkFrame):
             keep_category_column=bool(self.dynamic_keep_class_var.get()),
         )
         self.status_text.set(result.message)
-        self._append_activity(result.message)
+        self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
         if result.success:
             self._refresh_summary_cards()
             self._render_step("Cutoffs")
