@@ -69,6 +69,11 @@ class HomePanel(ctk.CTkFrame):
         self.plot_frame: ctk.CTkFrame | None = None
         self._cutoff_preview_after_id: str | None = None
 
+        self.control_sections: dict[str, ctk.CTkFrame] = {}
+        self.workspace_title_var = ctk.StringVar(value="Vista Datos")
+        self.plot_frame: ctk.CTkFrame | None = None
+        self._cutoff_preview_after_id: str | None = None
+
         self._build_layout()
         self._render_step("Datos")
 
