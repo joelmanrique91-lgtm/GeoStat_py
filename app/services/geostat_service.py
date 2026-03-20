@@ -265,7 +265,9 @@ class GeostatService:
 
         retained = numeric[numeric <= cutoff]
         truncated = numeric[numeric > cutoff]
+        capped = numeric.clip(upper=cutoff)
         capped_max = float(min(max_val, cutoff))
+        percentile_at_cutoff = float((numeric <= cutoff).sum() / len(numeric) * 100.0)
 
         sorted_vals = sorted(values)
         n = len(sorted_vals)
@@ -281,8 +283,10 @@ class GeostatService:
             "max": max_val,
             "affected_count": int(len(truncated)),
             "affected_pct": float((len(truncated) / len(values)) * 100.0),
+            "retained_pct": percentile_at_cutoff,
             "retained_values": retained.tolist(),
             "truncated_values": truncated.tolist(),
+            "capped_values": capped.tolist(),
             "max_original": max_val,
             "max_truncated": capped_max,
         }
