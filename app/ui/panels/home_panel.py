@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox
 import threading
 
 import customtkinter as ctk
+from matplotlib.ticker import ScalarFormatter
 
 from app.services.geostat_service import GeostatService
 from app.ui.panels.dashboard_grid import DashboardGrid
@@ -61,7 +62,7 @@ class HomePanel(ctk.CTkFrame):
         self.domain_layer_active_vars = [ctk.BooleanVar(value=False), ctk.BooleanVar(value=False), ctk.BooleanVar(value=False)]
         self.domain_min_samples_var = ctk.IntVar(value=1)
         self.domain_include_missing_var = ctk.BooleanVar(value=False)
-        self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para ver resumen del dominio y sus índices.")
+        self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para visualizar resumen analítico e índices de registros.")
 
         self.log_visible = False
         self.controls_collapsed = False
@@ -75,6 +76,7 @@ class HomePanel(ctk.CTkFrame):
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
+        self.workspace_subtitle_var = ctk.StringVar(value="Carga y configura columnas para habilitar el flujo analítico.")
         self.plot_frame: ctk.CTkFrame | None = None
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
@@ -105,8 +107,9 @@ class HomePanel(ctk.CTkFrame):
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 3))
         top.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ctk.CTkFont(size=14, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ctk.CTkFont(size=10), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(top, textvariable=self.workspace_subtitle_var, font=ctk.CTkFont(size=10), text_color=TXT_MUTED).grid(row=1, column=0, sticky="w", pady=(1, 0))
 
         self._build_kpi_strip(self.content_panel)
 
@@ -153,11 +156,11 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(
                 chip_frame,
                 textvariable=var,
-                corner_radius=8,
-                fg_color=BG_SOFT,
+                corner_radius=10,
+                fg_color="#2f3640",
                 text_color=TXT_MAIN,
-                padx=7,
-                pady=2,
+                padx=9,
+                pady=3,
                 font=ctk.CTkFont(size=10),
             ).grid(row=0, column=idx, padx=3, sticky="w")
 
@@ -332,15 +335,18 @@ class HomePanel(ctk.CTkFrame):
         cards = ctk.CTkFrame(block, fg_color="transparent")
         cards.pack(fill="x", padx=5, pady=4)
         keys = ["samples", "valid_count", "mean", "p50", "p90", "std", "cv", "% truncado", "cutoff actual"]
+        primary_keys = {"mean", "p90", "cutoff actual", "% truncado", "valid_count"}
         for idx, key in enumerate(keys):
             cards.grid_columnconfigure(idx, weight=1)
-            card = ctk.CTkFrame(cards, fg_color="#2b2e35", corner_radius=6)
+            card_color = "#32455d" if key in primary_keys else "#2b2e35"
+            card = ctk.CTkFrame(cards, fg_color=card_color, corner_radius=6)
             card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
             ctk.CTkLabel(card, text=key.upper(), font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
             val = ctk.StringVar(value="-")
             self.kpi_value_vars[key] = val
             self.kpi_cards[key] = card
-            ctk.CTkLabel(card, textvariable=val, text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=5, pady=(0, 2))
+            value_size = 13 if key in primary_keys else 11
+            ctk.CTkLabel(card, textvariable=val, text_color=TXT_MAIN, font=ctk.CTkFont(size=value_size, weight="bold")).pack(anchor="w", padx=5, pady=(0, 2))
 
     def _apply_kpi_focus(self, step_name: str) -> None:
         focus_by_step = {
@@ -378,6 +384,7 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "Datos":
             self.workspace_title_var.set("Vista Datos")
+            self.workspace_subtitle_var.set("Carga el CSV y valida X/Y/Z/target para continuar el workflow.")
             card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
             ctk.CTkLabel(card, text="Inicio de configuración", text_color=TXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 3))
@@ -391,20 +398,24 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "EDA":
             self.workspace_title_var.set("Vista EDA")
+            self.workspace_subtitle_var.set("Resumen univariado y distribución del target activo para diagnóstico rápido.")
             self._render_eda_view()
             return
 
         if stage == "Cutoffs":
             self.workspace_title_var.set("Vista Cutoffs")
+            self.workspace_subtitle_var.set("Evalúa impacto del capping antes de confirmar la variable operativa.")
             self._render_cutoff_view()
             return
 
         if stage == "Espacial":
             self.workspace_title_var.set("Vista Espacial")
+            self.workspace_subtitle_var.set("Revisión espacial en planta y secciones con la variable activa.")
             self._render_spatial_view()
             return
 
         self.workspace_title_var.set("Vista Dominios")
+        self.workspace_subtitle_var.set("Compara dominios por estabilidad estadística para priorización variográfica.")
         self._render_domains_view()
 
     def _render_eda_view(self) -> None:
@@ -427,14 +438,16 @@ class HomePanel(ctk.CTkFrame):
         ax_domain = grid.axis(1, 1)
 
         ax_hist.hist(data["target_values"], bins=24, color=C_ORIGINAL, edgecolor="white", alpha=0.9)
-        ax_hist.set_title("Histograma", color=PLOT_TXT)
+        ax_hist.set_title(f"Distribución de {active_variable}", color=PLOT_TXT)
+        ax_hist.set_xlabel(active_variable)
+        ax_hist.set_ylabel("Frecuencia")
 
-        ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
-        ax_box.set_title("Boxplot general", color=PLOT_TXT)
+        ax_box.boxplot(data["target_values"], vert=True, patch_artist=True, widths=0.45, showfliers=False)
+        ax_box.set_title(f"Boxplot general de {active_variable}", color=PLOT_TXT)
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
-            ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color=C_ACTIVE, alpha=0.85)
-            ax_prob.set_title("Probability plot", color=PLOT_TXT)
+            ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=13, color=C_ACTIVE, alpha=0.75)
+            ax_prob.set_title(f"Probability plot de {active_variable}", color=PLOT_TXT)
         else:
             ax_prob.axis("off")
             ax_prob.text(0.5, 0.5, "No disponible", ha="center", va="center", color=PLOT_TXT)
@@ -451,8 +464,8 @@ class HomePanel(ctk.CTkFrame):
                 patch.set_facecolor(palette[idx % len(palette)])
                 patch.set_alpha(0.8)
             ax_domain.tick_params(axis="x", rotation=22)
-            ax_domain.set_ylabel("Valor")
-            ax_domain.set_title("Dominio", color=PLOT_TXT)
+            ax_domain.set_ylabel(active_variable)
+            ax_domain.set_title(f"Distribución por dominio ({active_variable})", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
@@ -492,26 +505,31 @@ class HomePanel(ctk.CTkFrame):
         ax_yz = grid.axis(1, 0)
         ax_info = grid.axis(1, 1)
 
-        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap="viridis", s=10)
-        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=10)
-        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=10)
+        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
+        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
+        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
 
-        ax_xy.set_title("XY", color=PLOT_TXT)
-        ax_xz.set_title("XZ", color=PLOT_TXT)
-        ax_yz.set_title("YZ", color=PLOT_TXT)
+        ax_xy.set_title("Planta (XY)", color=PLOT_TXT)
+        ax_xz.set_title("Sección XZ", color=PLOT_TXT)
+        ax_yz.set_title("Sección YZ", color=PLOT_TXT)
+        plain_formatter = ScalarFormatter(useOffset=False)
+        plain_formatter.set_scientific(False)
+        for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
+            axis.set_major_formatter(plain_formatter)
 
         for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
-            grid.figure.colorbar(sc, ax=ax, shrink=0.76, label=spatial.target_label)
+            colorbar = grid.figure.colorbar(sc, ax=ax, shrink=0.76, label=spatial.target_label)
+            colorbar.ax.tick_params(labelsize=8)
 
         ax_info.axis("off")
-        msg = "Panel metadatos\n\nVistas: XY · XZ · YZ"
+        msg = "Metadatos de vista espacial\n\n• Vistas: Planta (XY), Sección XZ, Sección YZ"
         state = self.service.get_cutoff_state()
         if state["dynamic_enabled"]:
-            msg += f"\nCapping: {state['dynamic_cutoff_value']:.6g}"
+            msg += f"\n• Capping confirmado: {state['dynamic_cutoff_value']:.6g}"
         if spatial.downsampled:
-            msg += f"\nMuestreo: {spatial.plotted_points}/{spatial.source_points}"
-        msg += "\nPreparado para resaltar dominios activos."
-        ax_info.text(0.05, 0.9, msg, va="top", color=PLOT_TXT, fontsize=10, bbox={"facecolor": "#eef2f7", "edgecolor": "#cbd5e1", "boxstyle": "round,pad=0.45"})
+            msg += f"\n• Muestreo mostrado: {spatial.plotted_points:,}/{spatial.source_points:,}"
+        msg += "\n• Preparado para resaltar dominios activos."
+        ax_info.text(0.05, 0.92, msg, va="top", color=PLOT_TXT, fontsize=10, bbox={"facecolor": "#e8eef6", "edgecolor": "#b6c2d2", "boxstyle": "round,pad=0.55"})
         grid.render()
 
     def _render_domains_view(self) -> None:
@@ -535,7 +553,7 @@ class HomePanel(ctk.CTkFrame):
         plot_card.grid(row=0, column=0, sticky="nsew", padx=4, pady=(0, 4))
         records_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
         records_card.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 0))
-        ctk.CTkLabel(records_card, text="Registros del dominio seleccionado", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=8, pady=(6, 2))
+        ctk.CTkLabel(records_card, text="Detalle del dominio seleccionado", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=8, pady=(6, 2))
         ctk.CTkLabel(records_card, textvariable=self.domain_records_var, text_color=TXT_MUTED, justify="left", wraplength=980).pack(anchor="w", padx=8, pady=(0, 6))
 
         chart = DashboardGrid(plot_card, 1, 1, figsize=(12.4, 6.8))
@@ -560,11 +578,15 @@ class HomePanel(ctk.CTkFrame):
         colors = [color_map[group] for group in groups]
 
         points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors="#0f172a", linewidths=0.5, picker=True)
-        ax.set_title("Dominios candidatos · Media vs CV", color=PLOT_TXT, fontsize=14, fontweight="bold")
+        ax.set_title("Priorización de dominios para análisis variográfico", color=PLOT_TXT, fontsize=14, fontweight="bold")
         ax.set_xlabel("Media", fontsize=11)
         ax.set_ylabel("Coeficiente de variación (CV)", fontsize=11)
         ax.tick_params(labelsize=10)
         chart.figure.subplots_adjust(right=0.78, top=0.90, left=0.08, bottom=0.11)
+        global_mean = sum(x_values) / len(x_values)
+        global_cv = sum(y_values) / len(y_values)
+        ax.axvline(global_mean, color="#64748b", linestyle="--", linewidth=1.0, alpha=0.75)
+        ax.axhline(global_cv, color="#64748b", linestyle="--", linewidth=1.0, alpha=0.75)
 
         from matplotlib.lines import Line2D
         legend_handles = [Line2D([0], [0], marker="o", color="w", label=group, markerfacecolor=color_map[group], markeredgecolor="#0f172a", markersize=8) for group in unique_groups]
@@ -660,6 +682,15 @@ class HomePanel(ctk.CTkFrame):
             self.eda_capping_switch.configure(state="normal" if has_capping else "disabled")
         if not has_capping:
             self.eda_use_capping_var.set(False)
+
+    def _format_kpi_value(self, value: str, *, as_percent: bool = False) -> str:
+        try:
+            numeric = float(str(value).replace("%", ""))
+        except Exception:
+            return value
+        if as_percent:
+            return f"{numeric:,.2f}%"
+        return f"{numeric:,.2f}"
 
     def _refresh_context_chips(self) -> None:
         state = self.service.get_cutoff_state()
@@ -837,9 +868,9 @@ class HomePanel(ctk.CTkFrame):
 
         ax_hist.hist(preview["retained_values"], bins="sturges", color=C_ORIGINAL, alpha=0.86, label="Original")
         if preview["truncated_values"]:
-            ax_hist.hist(preview["truncated_values"], bins="sturges", color=C_TRUNCATED, alpha=0.82, label="Truncado")
-        ax_hist.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.5, label="Cutoff")
-        ax_hist.set_title("Histograma + cutoff", color=PLOT_TXT)
+            ax_hist.hist(preview["truncated_values"], bins="sturges", color=C_TRUNCATED, alpha=0.82, label="Capped")
+        ax_hist.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=2.0, label=f"Cutoff {cutoff:.3g}")
+        ax_hist.set_title("Distribución y umbral de capping", color=PLOT_TXT)
         ax_hist.legend(fontsize=8)
 
         retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
@@ -854,7 +885,7 @@ class HomePanel(ctk.CTkFrame):
         if trunc_x:
             ax_prob.scatter(trunc_x, trunc_y, s=9, color=C_TRUNCATED, alpha=0.85)
         ax_prob.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.4)
-        ax_prob.set_title("Probabilidad", color=PLOT_TXT)
+        ax_prob.set_title("Probability plot con cutoff", color=PLOT_TXT)
 
         original_sorted = sorted(preview["values"])
         capped_sorted = sorted(preview["capped_values"])
@@ -863,11 +894,11 @@ class HomePanel(ctk.CTkFrame):
         ax_cdf.plot(original_sorted, original_cdf, color=C_ORIGINAL, label="Original")
         ax_cdf.plot(capped_sorted, capped_cdf, color=C_ACTIVE, label="Capped")
         ax_cdf.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.2)
-        ax_cdf.set_title("Curva acumulada", color=PLOT_TXT)
+        ax_cdf.set_title("Curva acumulada: original vs capped", color=PLOT_TXT)
         ax_cdf.legend(fontsize=8)
 
-        ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True)
-        ax_before_after.set_title("Antes vs después", color=PLOT_TXT)
+        ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True, showfliers=False, widths=0.55)
+        ax_before_after.set_title("Comparación antes y después de capping", color=PLOT_TXT)
         chart.render()
 
     def _on_apply_dynamic_cutoff(self) -> None:
@@ -915,13 +946,13 @@ class HomePanel(ctk.CTkFrame):
     def _refresh_summary_cards(self) -> None:
         stats_table = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))
         stats_map = {str(k).lower(): str(v) for k, v in stats_table}
-        self.kpi_value_vars["samples"].set(stats_map.get("samples", stats_map.get("muestras", "-")))
-        self.kpi_value_vars["valid_count"].set(stats_map.get("valid_count", stats_map.get("válidos", "-")))
-        self.kpi_value_vars["mean"].set(stats_map.get("mean", stats_map.get("media", "-")))
-        self.kpi_value_vars["p50"].set(stats_map.get("p50", "-"))
-        self.kpi_value_vars["p90"].set(stats_map.get("p90", "-"))
-        self.kpi_value_vars["cv"].set(stats_map.get("cv", "-"))
-        self.kpi_value_vars["std"].set(stats_map.get("std", stats_map.get("desv", "-")))
+        self.kpi_value_vars["samples"].set(self._format_kpi_value(stats_map.get("samples", stats_map.get("muestras", "-"))))
+        self.kpi_value_vars["valid_count"].set(self._format_kpi_value(stats_map.get("valid_count", stats_map.get("válidos", "-"))))
+        self.kpi_value_vars["mean"].set(self._format_kpi_value(stats_map.get("mean", stats_map.get("media", "-"))))
+        self.kpi_value_vars["p50"].set(self._format_kpi_value(stats_map.get("p50", "-")))
+        self.kpi_value_vars["p90"].set(self._format_kpi_value(stats_map.get("p90", "-")))
+        self.kpi_value_vars["cv"].set(self._format_kpi_value(stats_map.get("cv", "-"), as_percent=True))
+        self.kpi_value_vars["std"].set(self._format_kpi_value(stats_map.get("std", stats_map.get("desv", "-"))))
 
         state = self.service.get_cutoff_state()
         cutoff_actual = "-"
@@ -938,8 +969,8 @@ class HomePanel(ctk.CTkFrame):
                 trunc_pct = "-"
         elif state["enabled"] and state["limits"]:
             cutoff_actual = ", ".join(f"{float(v):.4g}" for v in state["limits"])
-        self.kpi_value_vars["% truncado"].set(trunc_pct)
-        self.kpi_value_vars["cutoff actual"].set(cutoff_actual)
+        self.kpi_value_vars["% truncado"].set(self._format_kpi_value(trunc_pct, as_percent=True) if trunc_pct != "-" else "-")
+        self.kpi_value_vars["cutoff actual"].set(self._format_kpi_value(cutoff_actual) if cutoff_actual != "-" and "," not in cutoff_actual else cutoff_actual)
 
     def _on_update_repo(self) -> None:
         if not messagebox.askyesno("Confirmar actualización", "Esto actualizará el repositorio. ¿Continuar?"):
