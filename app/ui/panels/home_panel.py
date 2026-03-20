@@ -71,6 +71,7 @@ class HomePanel(ctk.CTkFrame):
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
         self.plot_frame: ctk.CTkFrame | None = None
         self._cutoff_preview_after_id: str | None = None
+        self._last_cutoff_preview_signature: tuple[object, ...] | None = None
 
         self._build_layout()
         self._render_step("Datos")
@@ -254,10 +255,10 @@ class HomePanel(ctk.CTkFrame):
             variable=self.eda_use_capping_var,
             state="normal" if has_capping else "disabled",
             text_color=TXT_MAIN,
-            command=self._refresh_dashboard,
+            command=self._on_toggle_eda_capping,
         )
         self.eda_capping_switch.pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color="#363a42", hover_color="#454b55", command=self._refresh_dashboard).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_refresh_eda).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -417,6 +418,7 @@ class HomePanel(ctk.CTkFrame):
         plot_card = ctk.CTkFrame(container, fg_color=BG_SOFT, corner_radius=8)
         plot_card.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(4, 0), pady=(0, 0))
         self.plot_frame = plot_card
+        self._last_cutoff_preview_signature = None
         self._refresh_cutoff_preview()
 
     def _render_spatial_view(self) -> None:
@@ -459,15 +461,20 @@ class HomePanel(ctk.CTkFrame):
         grid.render()
 
     def _on_change_step(self, step_name: str) -> None:
+        current_step = self.service.workflow_state.current_step
+        if current_step == step_name:
+            self._trace_ui_action("cambiar_vista", refresh_type="none", extra={"requested_step": step_name, "reason": "same_step_ignored"})
+            return
         self.status_text.set(self.service.set_workflow_step(step_name))
         self.step_label.set(f"Paso actual: {step_name}")
         self._append_activity(self.status_text.get())
+        self._trace_ui_action("cambiar_vista", refresh_type="dashboard_full", extra={"requested_step": step_name})
         self._render_step(step_name)
 
     def _render_step(self, step_name: str) -> None:
         self._paint_workflow_state(step_name)
         self._focus_sidebar_sections(step_name)
-        self._refresh_dashboard()
+        self._refresh_dashboard(reason="step_render")
 
     def _paint_workflow_state(self, active_step: str) -> None:
         ordered = ["Datos", "EDA", "Cutoffs", "Espacial"]
@@ -480,7 +487,8 @@ class HomePanel(ctk.CTkFrame):
             else:
                 self.workflow_buttons[step].configure(text=f"○ {step}", fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_color="#454b55")
 
-    def _refresh_dashboard(self) -> None:
+    def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
+        self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
         self._refresh_context_chips()
         self._sync_eda_capping_state()
         self._refresh_summary_cards()
@@ -497,9 +505,9 @@ class HomePanel(ctk.CTkFrame):
 
     def _refresh_context_chips(self) -> None:
         state = self.service.get_cutoff_state()
-        self.context_chip_vars["dataset"].set(self.dataset_label.get().replace("Dataset: ", "Dataset: "))
-        self.context_chip_vars["target"].set(self.target_label.get().replace("Target: ", "Target: "))
-        self.context_chip_vars["domain"].set(self.domain_label.get().replace("Dominio: ", "Dominio: "))
+        self.context_chip_vars["dataset"].set(self.dataset_label.get())
+        self.context_chip_vars["target"].set(self.target_label.get())
+        self.context_chip_vars["domain"].set(self.domain_label.get())
         self.context_chip_vars["status"].set(f"Estado: {self.step_label.get().replace('Paso actual: ', '')}")
         if state["dynamic_enabled"]:
             self.context_chip_vars["capping"].set(f"Capping activo P{state['dynamic_percent']:.0f}")
@@ -520,6 +528,7 @@ class HomePanel(ctk.CTkFrame):
             self.domain_var.set("")
 
     def _on_load_csv(self) -> None:
+        self._trace_ui_action("cargar_csv", refresh_type="none")
         path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
         if not path:
             self.service.activity_log.log("csv_load_cancelled", "info", "Carga cancelada.", {})
@@ -531,7 +540,7 @@ class HomePanel(ctk.CTkFrame):
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self._apply_autodetected_columns()
             self._sync_cutoff_defaults()
-            self._refresh_dashboard()
+            self._refresh_dashboard(reason="csv_loaded")
 
     def _apply_autodetected_columns(self) -> None:
         suggestions = self.service.get_autodetected_columns()
@@ -545,6 +554,7 @@ class HomePanel(ctk.CTkFrame):
         self._on_domain_mode_change()
 
     def _on_apply_config(self) -> None:
+        self._trace_ui_action("aplicar_configuracion", refresh_type="none")
         selected_domain = self.domain_var.get() if bool(self.use_domain_var.get()) and self.domain_var.get() else None
         result = self.service.set_variable_config(
             self.x_var.get(), self.y_var.get(), self.z_var.get(), self.target_var.get(), self.hole_var.get() or None, selected_domain
@@ -555,7 +565,7 @@ class HomePanel(ctk.CTkFrame):
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio: {selected_domain or 'No definido'}")
             self._sync_cutoff_defaults()
-            self._refresh_dashboard()
+            self._refresh_dashboard(reason="config_applied")
 
     def _sync_cutoff_defaults(self) -> None:
         self.cutoff_enabled_var.set(False)
@@ -572,6 +582,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_impact_label_var.set("Impacto: Sin preview.")
 
     def _on_apply_cutoffs(self) -> None:
+        self._trace_ui_action("aplicar_cutoffs_manuales", refresh_type="none")
         result = self.service.apply_cutoffs(
             enabled=bool(self.cutoff_enabled_var.get()),
             target_column=self.cutoff_target_var.get(),
@@ -581,7 +592,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
-            self._refresh_dashboard()
+            self._refresh_dashboard(reason="manual_cutoffs_applied")
 
     def _schedule_cutoff_preview(self) -> None:
         if self._cutoff_preview_after_id is not None:
@@ -593,8 +604,21 @@ class HomePanel(ctk.CTkFrame):
         self._schedule_cutoff_preview()
 
     def _refresh_cutoff_preview(self) -> None:
+        self._cutoff_preview_after_id = None
         if self.service.workflow_state.current_step != "Cutoffs" or self.plot_frame is None:
             return
+        preview_signature = (
+            self.cutoff_target_var.get(),
+            self.target_var.get(),
+            self.dynamic_mode_var.get(),
+            float(self.dynamic_slider_var.get()),
+            bool(self.dynamic_cutoff_enabled_var.get()),
+        )
+        if preview_signature == self._last_cutoff_preview_signature:
+            self._trace_ui_action("refresh_vista_puntual", refresh_type="cutoff_preview_skipped", extra={"reason": "no_state_change"})
+            return
+        self._last_cutoff_preview_signature = preview_signature
+        self._trace_ui_action("refresh_vista_puntual", refresh_type="cutoff_preview")
         DashboardGrid.clear(self.plot_frame)
         self._render_cutoff_preview_plots(self.plot_frame)
 
@@ -664,6 +688,7 @@ class HomePanel(ctk.CTkFrame):
         chart.render()
 
     def _on_apply_dynamic_cutoff(self) -> None:
+        self._trace_ui_action("confirmar_capping", refresh_type="none")
         mode = "absolute" if self.dynamic_mode_var.get() == "Valor absoluto" else "percentile"
         result = self.service.apply_dynamic_cutoff(
             enabled=bool(self.dynamic_cutoff_enabled_var.get()),
@@ -677,7 +702,15 @@ class HomePanel(ctk.CTkFrame):
         self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
         if result.success:
             self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
-            self._refresh_dashboard()
+            self._refresh_dashboard(reason="dynamic_cutoff_confirmed")
+
+    def _on_toggle_eda_capping(self) -> None:
+        self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_capping_switch"})
+        self._refresh_dashboard(reason="eda_capping_switch")
+
+    def _on_refresh_eda(self) -> None:
+        self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
+        self._refresh_dashboard(reason="eda_manual_button", force=True)
 
     def _refresh_summary_cards(self) -> None:
         stats_table = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))
@@ -748,3 +781,16 @@ class HomePanel(ctk.CTkFrame):
             self.log_box.grid()
         else:
             self.log_box.grid_remove()
+
+    def _trace_ui_action(self, action: str, *, refresh_type: str, extra: dict[str, object] | None = None) -> None:
+        state = self.service.get_cutoff_state()
+        details: dict[str, object] = {
+            "action": action,
+            "view": self.service.workflow_state.current_step,
+            "target_active": str(state.get("effective_target_column") or self.target_var.get() or ""),
+            "capping_confirmed": bool(self.service.has_confirmed_dynamic_capping()),
+            "refresh_type": refresh_type,
+        }
+        if extra:
+            details.update(extra)
+        self.service.activity_log.log("ui_trace", "info", f"UI acción: {action}", details)
