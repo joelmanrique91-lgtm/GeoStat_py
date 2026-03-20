@@ -11,15 +11,19 @@ from app.services.geostat_service import GeostatService
 from app.ui.panels.dashboard_grid import DashboardGrid
 
 
-BG_MAIN = "#1e1e1e"
-BG_PANEL = "#2a2a2a"
-BG_SOFT = "#242424"
-TXT_MAIN = "#eaeaea"
-TXT_MUTED = "#b5b5b5"
+BG_MAIN = "#1c1d21"
+BG_PANEL = "#25272c"
+BG_SOFT = "#2d3036"
+TXT_MAIN = "#f1f3f5"
+TXT_MUTED = "#aeb6c2"
 C_ORIGINAL = "#3b82f6"
-C_TRUNCATED = "#f97316"
+C_TRUNCATED = "#f59e0b"
 C_CUTOFF = "#ef4444"
-C_ACTIVE = "#16a34a"
+C_ACTIVE = "#2f6ea5"
+C_SUCCESS = "#5aa469"
+C_TAB_IDLE = "#30343b"
+C_TAB_DONE = "#3a485a"
+PLOT_TXT = "#1f2937"
 
 
 class HomePanel(ctk.CTkFrame):
@@ -53,11 +57,17 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_impact_label_var = ctk.StringVar(value="Impacto: -")
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
 
-        self.log_visible = True
+        self.log_visible = False
         self.controls_collapsed = False
         self.workflow_buttons: dict[str, ctk.CTkButton] = {}
         self.context_chip_vars: dict[str, ctk.StringVar] = {}
         self.kpi_value_vars: dict[str, ctk.StringVar] = {}
+        self.kpi_cards: dict[str, ctk.CTkFrame] = {}
+
+        self.control_sections: dict[str, ctk.CTkFrame] = {}
+        self.workspace_title_var = ctk.StringVar(value="Vista Datos")
+        self.plot_frame: ctk.CTkFrame | None = None
+        self._cutoff_preview_after_id: str | None = None
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -71,8 +81,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=8, pady=(7, 3))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 3))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 4))
@@ -88,10 +98,10 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel.grid_rowconfigure(2, weight=1)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        top.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 3))
         top.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(top, textvariable=self.status_text, font=ctk.CTkFont(size=11), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ctk.CTkFont(size=14, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(top, textvariable=self.status_text, font=ctk.CTkFont(size=10), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
 
         self._build_kpi_strip(self.content_panel)
 
@@ -101,34 +111,30 @@ class HomePanel(ctk.CTkFrame):
         self.view_body.grid_rowconfigure(0, weight=1)
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 6))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
             text="Ocultar/Mostrar log",
             width=130,
-            height=26,
+            height=22,
             fg_color=BG_SOFT,
             hover_color="#333333",
             command=self._toggle_log,
         ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
-        self.log_box = ctk.CTkTextbox(self.log_panel, height=52, fg_color=BG_SOFT, text_color=TXT_MAIN)
-        self.log_box.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+        self.log_box = ctk.CTkTextbox(self.log_panel, height=44, fg_color=BG_SOFT, text_color=TXT_MAIN)
+        self.log_box.grid(row=0, column=1, sticky="ew", padx=6, pady=3)
         self.log_box.insert("1.0", "Actividad reciente\n")
         self.log_box.configure(state="disabled")
+        self.log_box.grid_remove()
 
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            header,
-            text="GeoStat Py · Workspace Técnico",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color=TXT_MAIN,
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=(6, 2))
+        ctk.CTkLabel(header, text="GeoStat Py · Workspace técnico", font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(5, 1))
 
         chip_frame = ctk.CTkFrame(header, fg_color="transparent")
-        chip_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 6))
+        chip_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
         labels = {
             "dataset": "Dataset no cargado",
             "target": "Target no definido",
@@ -142,38 +148,38 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(
                 chip_frame,
                 textvariable=var,
-                corner_radius=10,
+                corner_radius=8,
                 fg_color=BG_SOFT,
                 text_color=TXT_MAIN,
-                padx=8,
-                pady=3,
-                font=ctk.CTkFont(size=11),
+                padx=7,
+                pady=2,
+                font=ctk.CTkFont(size=10),
             ).grid(row=0, column=idx, padx=3, sticky="w")
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8)
-        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=120, height=28, fg_color="#374151", hover_color="#4b5563", command=self._on_update_repo)
+        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=108, height=24, fg_color="#3a434f", hover_color="#4a5563", command=self._on_update_repo)
         self.update_repo_button.pack(side="left", padx=3)
-        ctk.CTkButton(actions, text="Exportar log", width=100, height=28, fg_color=BG_SOFT, hover_color="#333333", command=self._on_export_log).pack(side="left", padx=3)
+        ctk.CTkButton(actions, text="Exportar log", width=88, height=24, fg_color=BG_SOFT, hover_color="#3a3d44", command=self._on_export_log).pack(side="left", padx=3)
         return header
 
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
-        ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(size=12, weight="bold"), text_color=TXT_MAIN).pack(side="left", padx=(8, 6), pady=4)
+        ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(8, 6), pady=3)
         for step in ["Datos", "EDA", "Cutoffs", "Espacial"]:
-            btn = ctk.CTkButton(frame, text=step, width=102, height=28, corner_radius=10, fg_color=BG_SOFT, hover_color="#3b3b3b", command=lambda s=step: self._on_change_step(s))
-            btn.pack(side="left", padx=3, pady=4)
+            btn = ctk.CTkButton(frame, text=step, width=94, height=24, corner_radius=7, fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_width=1, border_color="#454b55", command=lambda s=step: self._on_change_step(s))
+            btn.pack(side="left", padx=3, pady=3)
             self.workflow_buttons[step] = btn
         return frame
 
     def _build_control_panel(self, parent: ctk.CTkFrame) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(parent, width=314, fg_color=BG_PANEL, corner_radius=10)
+        frame = ctk.CTkFrame(parent, width=292, fg_color=BG_PANEL, corner_radius=9)
         frame.grid_propagate(False)
 
         head = ctk.CTkFrame(frame, fg_color="transparent")
-        head.pack(fill="x", padx=8, pady=(7, 4))
-        ctk.CTkLabel(head, text="Panel de control", text_color=TXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
-        ctk.CTkButton(head, text="Colapsar" if not self.controls_collapsed else "Expandir", width=82, height=24, fg_color=BG_SOFT, hover_color="#3b3b3b", command=self._toggle_controls).pack(side="right")
+        head.pack(fill="x", padx=8, pady=(6, 3))
+        ctk.CTkLabel(head, text="Panel de control", text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        ctk.CTkButton(head, text="Colapsar" if not self.controls_collapsed else "Expandir", width=78, height=22, fg_color="#363a42", hover_color="#454b55", command=self._toggle_controls).pack(side="right")
 
         self.controls_container = ctk.CTkScrollableFrame(frame, fg_color="transparent")
         self.controls_container.pack(fill="both", expand=True, padx=8, pady=(0, 6))
@@ -205,18 +211,19 @@ class HomePanel(ctk.CTkFrame):
         self._focus_sidebar_sections(self.service.workflow_state.current_step)
 
     def _section_shell(self, parent: ctk.CTkScrollableFrame, title: str) -> ctk.CTkFrame:
-        section = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
+        section = ctk.CTkFrame(parent, fg_color="transparent")
         section.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(section, text=title, text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=8, pady=(6, 4))
+        ctk.CTkLabel(section, text=title, text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(4, 3))
+        ctk.CTkFrame(section, height=1, fg_color="#3c4048").pack(fill="x", padx=6, pady=(0, 4))
         return section
 
     def _build_data_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Datos y columnas")
-        ctk.CTkButton(section, text="Cargar CSV", height=28, fg_color="#374151", hover_color="#4b5563", command=self._on_load_csv).pack(fill="x", padx=8, pady=(0, 5))
+        ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 4))
 
         # compat: config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
         grid = ctk.CTkFrame(section, fg_color="transparent")
-        grid.pack(fill="x", padx=8, pady=(0, 6))
+        grid.pack(fill="x", padx=6, pady=(0, 5))
         grid.grid_columnconfigure((0, 1), weight=1)
         cols = self.service.get_available_columns() or [""]
         self._selector(grid, "X", self.x_var, cols, 0, 0)
@@ -225,7 +232,7 @@ class HomePanel(ctk.CTkFrame):
         self._selector(grid, "Target", self.target_var, cols, 2, 1)
         self._selector(grid, "Hole ID", self.hole_var, cols, 4, 0)
         self._selector(grid, "Dominio", self.domain_var, cols, 4, 1)
-        ctk.CTkButton(grid, text="Aplicar configuración", height=28, fg_color=C_ACTIVE, hover_color="#15803d", command=self._on_apply_config).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ctk.CTkButton(grid, text="Aplicar configuración", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(3, 0))
         return section
 
     def _build_eda_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -240,59 +247,71 @@ class HomePanel(ctk.CTkFrame):
             state="normal" if has_capping else "disabled",
             text_color=TXT_MAIN,
             command=self._refresh_dashboard,
-        ).pack(fill="x", padx=8, pady=(0, 4))
-        ctk.CTkButton(section, text="Actualizar vista", height=26, fg_color="#374151", hover_color="#4b5563", command=self._refresh_dashboard).pack(fill="x", padx=8, pady=(0, 6))
+        ).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color="#363a42", hover_color="#454b55", command=self._refresh_dashboard).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Control de capping")
         numeric_columns = self.service.get_numeric_columns()
-        ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", height=26, command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=8, pady=(0, 4))
-        ctk.CTkSwitch(section, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).pack(fill="x", padx=8, pady=(0, 4))
-        ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=26, placeholder_text="Cutoffs manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=8, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar cutoffs manuales", height=26, fg_color="#374151", hover_color="#4b5563", command=self._on_apply_cutoffs).pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", height=24, command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkSwitch(section, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=24, placeholder_text="Cutoffs manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar cutoffs manuales", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_apply_cutoffs).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_spatial_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Visualización espacial")
-        ctk.CTkLabel(section, text="Vista fija XY / XZ / YZ + metadatos.", text_color=TXT_MUTED, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=8, pady=(0, 6))
+        ctk.CTkLabel(section, text="Vista fija XY / XZ / YZ + metadatos.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 5))
         return section
 
     def _focus_sidebar_sections(self, step_name: str) -> None:
         for name, frame in self.control_sections.items():
-            frame.configure(border_width=2 if name == step_name else 0, border_color=C_ACTIVE if name == step_name else BG_SOFT)
+            frame.configure(fg_color=BG_SOFT if name == step_name else "transparent")
 
     def _build_kpi_strip(self, parent: ctk.CTkFrame) -> None:
-        block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
-        block.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=7)
+        block.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 5))
         cards = ctk.CTkFrame(block, fg_color="transparent")
-        cards.pack(fill="x", padx=6, pady=6)
+        cards.pack(fill="x", padx=5, pady=4)
         keys = ["samples", "valid_count", "mean", "p50", "p90", "std", "cv", "% truncado", "cutoff actual"]
         for idx, key in enumerate(keys):
             cards.grid_columnconfigure(idx, weight=1)
-            card = ctk.CTkFrame(cards, fg_color=BG_PANEL, corner_radius=7)
+            card = ctk.CTkFrame(cards, fg_color="#2b2e35", corner_radius=6)
             card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
-            ctk.CTkLabel(card, text=key.upper(), font=ctk.CTkFont(size=9, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(3, 0))
+            ctk.CTkLabel(card, text=key.upper(), font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
             val = ctk.StringVar(value="-")
             self.kpi_value_vars[key] = val
-            ctk.CTkLabel(card, textvariable=val, text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=5, pady=(0, 3))
+            self.kpi_cards[key] = card
+            ctk.CTkLabel(card, textvariable=val, text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=5, pady=(0, 2))
+
+    def _apply_kpi_focus(self, step_name: str) -> None:
+        focus_by_step = {
+            "Datos": {"samples", "valid_count"},
+            "EDA": {"valid_count", "mean", "p90", "cv"},
+            "Cutoffs": {"cutoff actual", "% truncado"},
+            "Espacial": {"samples", "cutoff actual"},
+        }
+        focus = focus_by_step.get(step_name, set())
+        for key, card in self.kpi_cards.items():
+            card.configure(fg_color="#344355" if key in focus else "#2b2e35")
 
     def _build_cutoff_decision_controls(self, parent: ctk.CTkFrame) -> None:
         parent.grid_columnconfigure((0, 1), weight=1)
-        ctk.CTkLabel(parent, text="Control de capping", text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 4))
+        ctk.CTkLabel(parent, text="Control de capping", text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(7, 3))
 
-        ctk.CTkOptionMenu(parent, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=28, command=lambda _v: self._schedule_cutoff_preview()).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
-        ctk.CTkEntry(parent, textvariable=self.dynamic_output_var, height=28, placeholder_text="salida capped").grid(row=1, column=1, sticky="ew", padx=8, pady=(0, 4))
+        ctk.CTkOptionMenu(parent, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=26, command=lambda _v: self._schedule_cutoff_preview()).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkEntry(parent, textvariable=self.dynamic_output_var, height=26, placeholder_text="salida capped").grid(row=1, column=1, sticky="ew", padx=8, pady=(0, 3))
 
-        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change).grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color="#4e7fad", progress_color="#4e7fad").grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
         ctk.CTkLabel(parent, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MAIN).grid(row=3, column=0, sticky="w", padx=8)
         ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=3, column=1, sticky="e", padx=8)
 
         ctk.CTkFrame(parent, height=1, fg_color="#3c3c3c").grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
-        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold"), wraplength=350, justify="left").grid(row=5, column=0, columnspan=2, sticky="w", padx=8)
+        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold"), wraplength=350, justify="left").grid(row=5, column=0, columnspan=2, sticky="w", padx=8)
 
         ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=6, column=0, sticky="w", padx=8, pady=(5, 6))
-        ctk.CTkButton(parent, text="Confirmar capping", height=30, fg_color=C_ACTIVE, hover_color="#15803d", command=self._on_apply_dynamic_cutoff).grid(row=6, column=1, sticky="ew", padx=8, pady=(5, 6))
+        ctk.CTkButton(parent, text="Confirmar capping", height=28, fg_color="#2b5f8e", hover_color="#245883", command=self._on_apply_dynamic_cutoff).grid(row=6, column=1, sticky="ew", padx=8, pady=(5, 6))
 
     def _show_stage_view(self, stage: str) -> None:
         DashboardGrid.clear(self.view_body)
@@ -303,8 +322,13 @@ class HomePanel(ctk.CTkFrame):
             self.workspace_title_var.set("Vista Datos")
             card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
-            ctk.CTkLabel(card, text="Configura dataset y columnas en el panel izquierdo.", text_color=TXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 4))
-            ctk.CTkLabel(card, text="Esta vista mantiene contexto operativo y KPI sin scroll global.", text_color=TXT_MUTED).pack(anchor="w", padx=10, pady=(0, 8))
+            ctk.CTkLabel(card, text="Inicio de configuración", text_color=TXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 3))
+            ctk.CTkLabel(card, text="1) Cargar CSV · 2) Asignar columnas · 3) Confirmar configuración.", text_color=TXT_MUTED, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10, pady=(0, 8))
+            summary = ctk.CTkFrame(card, fg_color=BG_PANEL, corner_radius=7)
+            summary.pack(fill="x", padx=10, pady=(0, 8))
+            ctk.CTkLabel(summary, textvariable=self.dataset_label, text_color=TXT_MAIN, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=8, pady=(6, 2))
+            ctk.CTkLabel(summary, textvariable=self.target_label, text_color=TXT_MAIN, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=8, pady=2)
+            ctk.CTkLabel(summary, textvariable=self.domain_label, text_color=TXT_MAIN, font=ctk.CTkFont(size=11)).pack(anchor="w", padx=8, pady=(2, 6))
             return
 
         if stage == "EDA":
@@ -336,26 +360,26 @@ class HomePanel(ctk.CTkFrame):
         ax_domain = grid.axis(1, 1)
 
         ax_hist.hist(data["target_values"], bins=24, color=C_ORIGINAL, edgecolor="white", alpha=0.9)
-        ax_hist.set_title("Histograma", color=TXT_MAIN)
+        ax_hist.set_title("Histograma", color=PLOT_TXT)
 
         ax_box.boxplot(data["target_values"], vert=True, patch_artist=True)
-        ax_box.set_title("Boxplot general", color=TXT_MAIN)
+        ax_box.set_title("Boxplot general", color=PLOT_TXT)
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=10, color=C_ACTIVE, alpha=0.85)
-            ax_prob.set_title("Probability plot", color=TXT_MAIN)
+            ax_prob.set_title("Probability plot", color=PLOT_TXT)
         else:
             ax_prob.axis("off")
-            ax_prob.text(0.5, 0.5, "No disponible", ha="center", va="center", color=TXT_MAIN)
+            ax_prob.text(0.5, 0.5, "No disponible", ha="center", va="center", color=PLOT_TXT)
 
         domain_data = data.get("domain_boxplot", {})
         if domain_data.get("enabled"):
             ax_domain.boxplot(domain_data["values"], labels=domain_data["labels"], patch_artist=True)
             ax_domain.tick_params(axis="x", rotation=22)
-            ax_domain.set_title("Dominio", color=TXT_MAIN)
+            ax_domain.set_title("Dominio", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
-            ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=TXT_MAIN, wrap=True)
+            ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
         grid.render()
 
     def _render_cutoff_view(self) -> None:
@@ -395,9 +419,9 @@ class HomePanel(ctk.CTkFrame):
         sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=10)
         sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=10)
 
-        ax_xy.set_title("XY", color=TXT_MAIN)
-        ax_xz.set_title("XZ", color=TXT_MAIN)
-        ax_yz.set_title("YZ", color=TXT_MAIN)
+        ax_xy.set_title("XY", color=PLOT_TXT)
+        ax_xz.set_title("XZ", color=PLOT_TXT)
+        ax_yz.set_title("YZ", color=PLOT_TXT)
 
         for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
             grid.figure.colorbar(sc, ax=ax, shrink=0.76, label=spatial.target_label)
@@ -409,7 +433,7 @@ class HomePanel(ctk.CTkFrame):
             msg += f"\nCapping: {state['dynamic_cutoff_value']:.6g}"
         if spatial.downsampled:
             msg += f"\nMuestreo: {spatial.plotted_points}/{spatial.source_points}"
-        ax_info.text(0.05, 0.9, msg, va="top", color=TXT_MAIN, fontsize=10, bbox={"facecolor": BG_SOFT, "edgecolor": "#4a4a4a", "boxstyle": "round,pad=0.45"})
+        ax_info.text(0.05, 0.9, msg, va="top", color=PLOT_TXT, fontsize=10, bbox={"facecolor": "#eef2f7", "edgecolor": "#cbd5e1", "boxstyle": "round,pad=0.45"})
         grid.render()
 
     def _on_change_step(self, step_name: str) -> None:
@@ -428,16 +452,18 @@ class HomePanel(ctk.CTkFrame):
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
             if idx < active_idx:
-                self.workflow_buttons[step].configure(text=f"✓ {step}", fg_color="#14532d", hover_color="#166534")
+                self.workflow_buttons[step].configure(text=f"✓ {step}", fg_color=C_TAB_DONE, hover_color="#455468", border_color="#5a687a")
             elif idx == active_idx:
-                self.workflow_buttons[step].configure(text=f"● {step}", fg_color=C_ACTIVE, hover_color="#15803d")
+                self.workflow_buttons[step].configure(text=f"● {step}", fg_color=C_ACTIVE, hover_color="#255b87", border_color="#4d7fae")
             else:
-                self.workflow_buttons[step].configure(text=f"○ {step}", fg_color=BG_SOFT, hover_color="#3b3b3b")
+                self.workflow_buttons[step].configure(text=f"○ {step}", fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_color="#454b55")
 
     def _refresh_dashboard(self) -> None:
         self._refresh_context_chips()
         self._refresh_summary_cards()
-        self._show_stage_view(self.service.workflow_state.current_step)
+        current_step = self.service.workflow_state.current_step
+        self._apply_kpi_focus(current_step)
+        self._show_stage_view(current_step)
 
     def _refresh_context_chips(self) -> None:
         state = self.service.get_cutoff_state()
@@ -453,9 +479,9 @@ class HomePanel(ctk.CTkFrame):
             self.context_chip_vars["capping"].set("Capping inactivo")
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
-        ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ctk.CTkFont(size=11)).grid(row=row, column=col, sticky="w", padx=4)
+        ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=row, column=col, sticky="w", padx=4)
         state = "normal" if values and values[0] else "disabled"
-        ctk.CTkOptionMenu(parent, variable=variable, values=values, state=state, height=26).grid(row=row + 1, column=col, sticky="ew", padx=4, pady=(0, 4))
+        ctk.CTkOptionMenu(parent, variable=variable, values=values, state=state, height=24).grid(row=row + 1, column=col, sticky="ew", padx=4, pady=(0, 4))
 
     def _on_load_csv(self) -> None:
         path = filedialog.askopenfilename(title="Seleccionar CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
@@ -527,10 +553,6 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
         self._schedule_cutoff_preview()
 
-    def _on_slider_change(self, _value: float) -> None:
-        self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
-        self._schedule_cutoff_preview()
-
     def _refresh_cutoff_preview(self) -> None:
         if self.service.workflow_state.current_step != "Cutoffs" or self.plot_frame is None:
             return
@@ -571,7 +593,7 @@ class HomePanel(ctk.CTkFrame):
         if preview["truncated_values"]:
             ax_hist.hist(preview["truncated_values"], bins="sturges", color=C_TRUNCATED, alpha=0.82, label="Truncado")
         ax_hist.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.5, label="Cutoff")
-        ax_hist.set_title("Histograma + cutoff", color=TXT_MAIN)
+        ax_hist.set_title("Histograma + cutoff", color=PLOT_TXT)
         ax_hist.legend(fontsize=8)
 
         retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
@@ -586,7 +608,7 @@ class HomePanel(ctk.CTkFrame):
         if trunc_x:
             ax_prob.scatter(trunc_x, trunc_y, s=9, color=C_TRUNCATED, alpha=0.85)
         ax_prob.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.4)
-        ax_prob.set_title("Probabilidad", color=TXT_MAIN)
+        ax_prob.set_title("Probabilidad", color=PLOT_TXT)
 
         original_sorted = sorted(preview["values"])
         capped_sorted = sorted(preview["capped_values"])
@@ -595,11 +617,11 @@ class HomePanel(ctk.CTkFrame):
         ax_cdf.plot(original_sorted, original_cdf, color=C_ORIGINAL, label="Original")
         ax_cdf.plot(capped_sorted, capped_cdf, color=C_ACTIVE, label="Capped")
         ax_cdf.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.2)
-        ax_cdf.set_title("Curva acumulada", color=TXT_MAIN)
+        ax_cdf.set_title("Curva acumulada", color=PLOT_TXT)
         ax_cdf.legend(fontsize=8)
 
         ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True)
-        ax_before_after.set_title("Antes vs después", color=TXT_MAIN)
+        ax_before_after.set_title("Antes vs después", color=PLOT_TXT)
         chart.render()
 
     def _on_apply_dynamic_cutoff(self) -> None:

@@ -14,17 +14,17 @@ class DashboardGrid:
     def __init__(self, parent: ctk.CTkFrame, rows: int, cols: int, figsize: tuple[float, float] = (8.0, 5.2)) -> None:
         self.parent = parent
         self.figure = Figure(figsize=figsize, dpi=100)
-        self.figure.patch.set_facecolor("#1e1e1e")
+        self.figure.patch.set_facecolor("#f7f8fb")
         self.axes = self.figure.subplots(rows, cols, squeeze=False)
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.parent)
         for row_axes in self.axes:
             for axis in row_axes:
-                axis.set_facecolor("#2a2a2a")
-                axis.grid(color="#4a4a4a", alpha=0.25, linestyle="--", linewidth=0.5)
+                axis.set_facecolor("#ffffff")
+                axis.grid(color="#d6deea", alpha=0.8, linestyle="--", linewidth=0.55)
                 axis.tick_params(labelsize=8)
-                axis.tick_params(colors="#eaeaea")
+                axis.tick_params(colors="#334155")
                 for spine in axis.spines.values():
-                    spine.set_color("#666666")
+                    spine.set_color("#cbd5e1")
 
     def axis(self, row: int, col: int):
         return self.axes[row][col]
