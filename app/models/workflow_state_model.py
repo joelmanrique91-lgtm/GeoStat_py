@@ -23,3 +23,7 @@ class WorkflowStateModel:
     dynamic_cutoff_value: float = 0.0
     dynamic_cutoff_output_column: str = ""
     dynamic_cutoff_category_column: str = ""
+    domain_layers_order: list[str] = field(default_factory=list)
+    domain_active_layers: list[str] = field(default_factory=list)
+    domain_output_column: str = ""
+    domain_min_samples: int = 1

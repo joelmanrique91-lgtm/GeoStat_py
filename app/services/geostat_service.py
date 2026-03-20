@@ -17,13 +17,14 @@ from app.services.activity_log_service import ActivityLogService
 from app.services.visualization_service import SwathSeries, SpatialDataBundle, compute_swath_series, prepare_spatial_sections
 from app.utils.paths import PROJECT_ROOT
 
-WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial"]
+WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]
 FUNCTIONAL_STATUS = {step: "funcional" for step in WORKFLOW_STEPS}
 STEP_EVENT_MAP = {
     "Datos": "workflow_step_data_opened",
     "EDA": "workflow_step_eda_opened",
     "Cutoffs": "workflow_step_cutoffs_opened",
     "Espacial": "workflow_step_spatial_opened",
+    "Dominios": "workflow_step_domains_opened",
 }
 
 
@@ -156,6 +157,7 @@ class GeostatService:
         self.variable_config = None
         self._clear_cutoff_state()
         self._clear_dynamic_cutoff_state()
+        self._clear_domain_state()
         self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
@@ -203,6 +205,125 @@ class GeostatService:
                 domain_columns.append(column)
         return domain_columns
 
+    def get_domain_layer_candidates(self, max_low_cardinality: int = 20) -> list[str]:
+        if self.current_dataset is None:
+            return []
+        df = self.current_dataset.dataframe
+        candidates: list[str] = []
+        for column in self.current_dataset.columns:
+            series = df[column]
+            is_explicit_category = str(series.dtype) == "category"
+            distinct = int(series.nunique(dropna=True))
+            is_low_cardinality_numeric = _is_numeric_dtype(series) and 1 < distinct <= max_low_cardinality
+            if is_explicit_category or (not _is_numeric_dtype(series)) or is_low_cardinality_numeric:
+                candidates.append(column)
+        return candidates
+
+    def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1) -> CutoffResult:
+        if self.current_dataset is None:
+            return CutoffResult(False, "No hay dataset cargado.")
+        if self.variable_config is None:
+            return CutoffResult(False, "Configura X/Y/Z/target antes de definir dominios.")
+        allowed = set(self.get_domain_layer_candidates())
+        unique_ordered: list[str] = []
+        for layer in ordered_layers[:3]:
+            if layer and layer in allowed and layer not in unique_ordered:
+                unique_ordered.append(layer)
+        active_unique = [layer for layer in active_layers if layer in unique_ordered][:3]
+        if not active_unique:
+            self.workflow_state.domain_layers_order = unique_ordered
+            self.workflow_state.domain_active_layers = []
+            self.workflow_state.domain_output_column = ""
+            self.workflow_state.domain_min_samples = max(1, int(min_samples))
+            self.workflow_state.active_domain = "No definido"
+            return CutoffResult(True, "Constructor de dominios actualizado (sin capas activas).")
+
+        output_column = "domain_composite"
+        frame = self.current_dataset.dataframe
+        text_layers = frame[active_unique].copy()
+        for layer in active_unique:
+            text_layers[layer] = text_layers[layer].fillna("NA").astype(str).map(lambda value: f"{layer}_{value}")
+        frame[output_column] = text_layers.agg(" | ".join, axis=1)
+        if output_column not in self.current_dataset.columns:
+            self.current_dataset.columns.append(output_column)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        self.workflow_state.domain_layers_order = unique_ordered
+        self.workflow_state.domain_active_layers = active_unique
+        self.workflow_state.domain_output_column = output_column
+        self.workflow_state.domain_min_samples = max(1, int(min_samples))
+        self.workflow_state.active_domain = " | ".join(active_unique)
+        self.activity_log.log(
+            "domain_configuration_applied",
+            "success",
+            "Configuración de dominios aplicada.",
+            {
+                "ordered_layers": unique_ordered,
+                "active_layers": active_unique,
+                "output_column": output_column,
+                "min_samples": self.workflow_state.domain_min_samples,
+            },
+        )
+        return CutoffResult(True, "Dominios actualizados correctamente.")
+
+    def get_domain_state(self) -> dict[str, object]:
+        return {
+            "ordered_layers": list(self.workflow_state.domain_layers_order),
+            "active_layers": list(self.workflow_state.domain_active_layers),
+            "output_column": self.workflow_state.domain_output_column,
+            "min_samples": int(self.workflow_state.domain_min_samples),
+            "effective_target_column": self._get_effective_target_column(),
+            "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
+        }
+
+    def prepare_domain_statistics(self) -> dict[str, object]:
+        if self.current_dataset is None or self.variable_config is None:
+            raise ValueError("No hay dataset/configuración suficiente para Dominios.")
+        output_column = self.workflow_state.domain_output_column
+        active_layers = list(self.workflow_state.domain_active_layers)
+        if not output_column or output_column not in self.current_dataset.dataframe.columns or not active_layers:
+            return {"items": [], "selection_column": output_column, "active_layers": active_layers}
+
+        target_column = self._get_effective_target_column()
+        df = self.current_dataset.dataframe[[output_column, target_column]].copy()
+        df[target_column] = _to_numeric(df[target_column])
+        df = df.dropna(subset=[output_column, target_column])
+        if df.empty:
+            return {"items": [], "selection_column": output_column, "active_layers": active_layers}
+
+        total = len(df)
+        min_samples = max(1, int(self.workflow_state.domain_min_samples))
+        items: list[dict[str, object]] = []
+        grouped = df.groupby(output_column, dropna=False)
+        for domain_name, chunk in grouped:
+            count = int(len(chunk))
+            if count < min_samples:
+                continue
+            mean_val = float(chunk[target_column].mean())
+            std_val = float(chunk[target_column].std(ddof=0))
+            cv_val = float(std_val / mean_val) if mean_val != 0 else 0.0
+            indexes = [int(index) for index in chunk.index.tolist()]
+            items.append(
+                {
+                    "domain": str(domain_name),
+                    "count": count,
+                    "mean": mean_val,
+                    "std": std_val,
+                    "cv": cv_val,
+                    "pct_total": float((count / total) * 100.0),
+                    "indexes": indexes,
+                }
+            )
+        items.sort(key=lambda row: row["mean"])
+        return {
+            "items": items,
+            "selection_column": output_column,
+            "active_layers": active_layers,
+            "target_column": target_column,
+            "total_rows": int(total),
+            "min_samples": min_samples,
+        }
+
     def set_variable_config(
         self,
         x_column: str,
@@ -226,6 +347,7 @@ class GeostatService:
         self.workflow_state.active_support = "Muestra original"
         self._clear_cutoff_state()
         self._clear_dynamic_cutoff_state()
+        self._clear_domain_state()
         self.workflow_state.effective_target_column = target_column
         self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
         return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
@@ -474,6 +596,12 @@ class GeostatService:
         self.workflow_state.dynamic_cutoff_value = 0.0
         self.workflow_state.dynamic_cutoff_output_column = ""
         self.workflow_state.dynamic_cutoff_category_column = ""
+
+    def _clear_domain_state(self) -> None:
+        self.workflow_state.domain_layers_order = []
+        self.workflow_state.domain_active_layers = []
+        self.workflow_state.domain_output_column = ""
+        self.workflow_state.domain_min_samples = 1
 
     def _get_effective_target_column(self) -> str:
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
