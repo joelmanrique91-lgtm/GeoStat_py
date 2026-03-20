@@ -101,6 +101,15 @@ def _to_numeric(series):
     return pd.to_numeric(series, errors="coerce")
 
 
+def _is_missing_category(value: object) -> bool:
+    if value is None:
+        return True
+    normalized = str(value).strip().lower()
+    if normalized in {"", "na", "n/a", "null", "none", "nan"}:
+        return True
+    return False
+
+
 class GeostatService:
     def __init__(self, adapter: GeostatSpyAdapter, activity_log: ActivityLogService | None = None) -> None:
         self.adapter = adapter
@@ -219,7 +228,7 @@ class GeostatService:
                 candidates.append(column)
         return candidates
 
-    def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1) -> CutoffResult:
+    def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         if self.current_dataset is None:
             return CutoffResult(False, "No hay dataset cargado.")
         if self.variable_config is None:
@@ -235,15 +244,27 @@ class GeostatService:
             self.workflow_state.domain_active_layers = []
             self.workflow_state.domain_output_column = ""
             self.workflow_state.domain_min_samples = max(1, int(min_samples))
+            self.workflow_state.domain_include_missing = bool(include_missing)
             self.workflow_state.active_domain = "No definido"
             return CutoffResult(True, "Constructor de dominios actualizado (sin capas activas).")
 
         output_column = "domain_composite"
         frame = self.current_dataset.dataframe
         text_layers = frame[active_unique].copy()
+        missing_mask = None
         for layer in active_unique:
-            text_layers[layer] = text_layers[layer].fillna("NA").astype(str).map(lambda value: f"{layer}_{value}")
-        frame[output_column] = text_layers.agg(" | ".join, axis=1)
+            layer_values = text_layers[layer]
+            mask = layer_values.map(_is_missing_category)
+            missing_mask = mask if missing_mask is None else (missing_mask | mask)
+            text_layers[layer] = layer_values.map(
+                lambda value: f"{layer}_Missing" if _is_missing_category(value) else f"{layer}_{str(value).strip()}"
+            )
+
+        composed = text_layers.agg(" | ".join, axis=1)
+        if include_missing:
+            frame[output_column] = composed
+        else:
+            frame[output_column] = composed.where(~missing_mask, other=None)
         if output_column not in self.current_dataset.columns:
             self.current_dataset.columns.append(output_column)
             self.current_dataset.column_count = len(self.current_dataset.columns)
@@ -252,6 +273,7 @@ class GeostatService:
         self.workflow_state.domain_active_layers = active_unique
         self.workflow_state.domain_output_column = output_column
         self.workflow_state.domain_min_samples = max(1, int(min_samples))
+        self.workflow_state.domain_include_missing = bool(include_missing)
         self.workflow_state.active_domain = " | ".join(active_unique)
         self.activity_log.log(
             "domain_configuration_applied",
@@ -262,6 +284,7 @@ class GeostatService:
                 "active_layers": active_unique,
                 "output_column": output_column,
                 "min_samples": self.workflow_state.domain_min_samples,
+                "include_missing": bool(include_missing),
             },
         )
         return CutoffResult(True, "Dominios actualizados correctamente.")
@@ -272,6 +295,7 @@ class GeostatService:
             "active_layers": list(self.workflow_state.domain_active_layers),
             "output_column": self.workflow_state.domain_output_column,
             "min_samples": int(self.workflow_state.domain_min_samples),
+            "include_missing": bool(self.workflow_state.domain_include_missing),
             "effective_target_column": self._get_effective_target_column(),
             "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
         }
@@ -312,6 +336,7 @@ class GeostatService:
                     "cv": cv_val,
                     "pct_total": float((count / total) * 100.0),
                     "indexes": indexes,
+                    "primary_group": str(domain_name).split(" | ")[0],
                 }
             )
         items.sort(key=lambda row: row["mean"])
@@ -602,6 +627,7 @@ class GeostatService:
         self.workflow_state.domain_active_layers = []
         self.workflow_state.domain_output_column = ""
         self.workflow_state.domain_min_samples = 1
+        self.workflow_state.domain_include_missing = False
 
     def _get_effective_target_column(self) -> str:
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:

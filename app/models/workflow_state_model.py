@@ -27,3 +27,4 @@ class WorkflowStateModel:
     domain_active_layers: list[str] = field(default_factory=list)
     domain_output_column: str = ""
     domain_min_samples: int = 1
+    domain_include_missing: bool = False

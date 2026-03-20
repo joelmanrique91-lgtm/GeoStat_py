@@ -60,7 +60,8 @@ class HomePanel(ctk.CTkFrame):
         self.domain_layer_vars = [ctk.StringVar(value=""), ctk.StringVar(value=""), ctk.StringVar(value="")]
         self.domain_layer_active_vars = [ctk.BooleanVar(value=False), ctk.BooleanVar(value=False), ctk.BooleanVar(value=False)]
         self.domain_min_samples_var = ctk.IntVar(value=1)
-        self.domain_records_var = ctk.StringVar(value="Selecciona un punto para inspeccionar registros.")
+        self.domain_include_missing_var = ctk.BooleanVar(value=False)
+        self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para ver resumen del dominio y sus índices.")
 
         self.log_visible = False
         self.controls_collapsed = False
@@ -202,6 +203,7 @@ class HomePanel(ctk.CTkFrame):
     def _render_control_sections(self) -> None:
         for child in self.controls_container.winfo_children():
             child.destroy()
+        self.column_menus = {}
         if self.controls_collapsed:
             ctk.CTkLabel(self.controls_container, text="Panel colapsado", text_color=TXT_MUTED).pack(anchor="w", padx=8, pady=8)
             return
@@ -235,21 +237,33 @@ class HomePanel(ctk.CTkFrame):
         cols = self.service.get_available_columns() or [""]
         numeric_cols = self.service.get_numeric_columns() or [""]
         domain_candidates = self.service.get_domain_candidate_columns() or [""]
-        ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
-        self._selector(grid, "X", self.x_var, cols, 1, 0, key="x")
-        self._selector(grid, "Y", self.y_var, cols, 1, 1, key="y")
-        self._selector(grid, "Z", self.z_var, cols, 3, 0, key="z")
-        ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        self._selector(grid, "Target (ley)", self.target_var, numeric_cols, 5, 0, key="target")
-        ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        ctk.CTkCheckBox(grid, text="Analizar por dominios", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=7, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        row = 0
+        ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        row += 1
+        self._selector(grid, "X", self.x_var, cols, row, 0, key="x")
+        self._selector(grid, "Y", self.y_var, cols, row, 1, key="y")
+        row += 2
+        self._selector(grid, "Z", self.z_var, cols, row, 0, key="z")
+        row += 2
+        ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        row += 1
+        self._selector(grid, "Target (ley)", self.target_var, numeric_cols, row, 0, key="target")
+        row += 2
+        ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        row += 1
+        ctk.CTkCheckBox(grid, text="Analizar por dominios", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        row += 1
         domain_state = "normal" if bool(self.use_domain_var.get()) else "disabled"
         self.domain_menu_widget = ctk.CTkOptionMenu(grid, variable=self.domain_var, values=domain_candidates, state=domain_state, height=24)
-        self.domain_menu_widget.grid(row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 4))
-        ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=9, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        self._selector(grid, "Hole ID", self.hole_var, cols, 10, 0, key="hole")
-        ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=12, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
-        ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=13, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        self.domain_menu_widget.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 4))
+        row += 1
+        ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        row += 1
+        self._selector(grid, "Hole ID", self.hole_var, cols, row, 0, key="hole")
+        row += 2
+        ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        row += 1
+        ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         return section
 
     def _build_eda_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -290,6 +304,7 @@ class HomePanel(ctk.CTkFrame):
         ordered = list(state.get("ordered_layers", []))
         active = set(state.get("active_layers", []))
         self.domain_min_samples_var.set(int(state.get("min_samples", 1)))
+        self.domain_include_missing_var.set(bool(state.get("include_missing", False)))
         ctk.CTkLabel(section, text="Hasta 3 capas categóricas con orden jerárquico.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
         for idx in range(3):
             if idx < len(ordered) and ordered[idx] in candidates:
@@ -303,6 +318,7 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkOptionMenu(row, variable=self.domain_layer_vars[idx], values=candidates, state="normal" if candidates[0] else "disabled", height=24).pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(section, text="Excluir dominios con menos de N muestras", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(4, 2))
         ctk.CTkEntry(section, textvariable=self.domain_min_samples_var, height=24).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkCheckBox(section, text="Incluir categorías faltantes", variable=self.domain_include_missing_var, text_color=TXT_MAIN).pack(anchor="w", padx=6, pady=(0, 4))
         ctk.CTkButton(section, text="Aplicar constructor", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains).pack(fill="x", padx=6, pady=(2, 4))
         return section
 
@@ -527,12 +543,44 @@ class HomePanel(ctk.CTkFrame):
         x_values = [float(row["mean"]) for row in rows]
         y_values = [float(row["cv"]) for row in rows]
         names = [str(row["domain"]) for row in rows]
-        points = ax.scatter(x_values, y_values, s=46, c="#4e79a7", alpha=0.9, picker=True)
-        ax.set_title("Dominios candidatos · Media vs CV", color=PLOT_TXT, fontsize=12)
-        ax.set_xlabel("Media", fontsize=10)
-        ax.set_ylabel("Coeficiente de variación (CV)", fontsize=10)
-        for xv, yv, label in zip(x_values, y_values, names):
-            ax.text(xv, yv, label, fontsize=8, color="#1f2937")
+        counts = [int(row["count"]) for row in rows]
+        min_n = min(counts)
+        max_n = max(counts)
+        size_min = 70.0
+        size_max = 550.0
+        if max_n == min_n:
+            sizes = [220.0 for _ in counts]
+        else:
+            sizes = [size_min + ((size_max - size_min) * ((value**0.5 - min_n**0.5) / ((max_n**0.5 - min_n**0.5) or 1.0))) for value in counts]
+
+        groups = [str(row.get("primary_group", "Otros")) for row in rows]
+        palette = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ab"]
+        unique_groups = sorted(set(groups))
+        color_map = {group: palette[idx % len(palette)] for idx, group in enumerate(unique_groups)}
+        colors = [color_map[group] for group in groups]
+
+        points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors="#0f172a", linewidths=0.5, picker=True)
+        ax.set_title("Dominios candidatos · Media vs CV", color=PLOT_TXT, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Media", fontsize=11)
+        ax.set_ylabel("Coeficiente de variación (CV)", fontsize=11)
+        ax.tick_params(labelsize=10)
+        chart.figure.subplots_adjust(right=0.78, top=0.90, left=0.08, bottom=0.11)
+
+        from matplotlib.lines import Line2D
+        legend_handles = [Line2D([0], [0], marker="o", color="w", label=group, markerfacecolor=color_map[group], markeredgecolor="#0f172a", markersize=8) for group in unique_groups]
+        ax.legend(handles=legend_handles, title="Capa principal", loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True, fontsize=8, title_fontsize=9)
+        for idx, (xv, yv, label) in enumerate(zip(x_values, y_values, names)):
+            dx = 0.012 * (max(x_values) - min(x_values) + 1e-6)
+            dy = 0.012 * (max(y_values) - min(y_values) + 1e-6) * (1 if idx % 2 == 0 else -1)
+            ax.text(
+                xv + dx,
+                yv + dy,
+                label,
+                fontsize=9,
+                color="#0f172a",
+                alpha=0.95,
+                bbox={"facecolor": "#ffffff", "edgecolor": "#cbd5e1", "alpha": 0.72, "boxstyle": "round,pad=0.18"},
+            )
 
         tooltip = ax.annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points", bbox={"boxstyle": "round", "fc": "#eef2f7", "ec": "#94a3b8"}, fontsize=8)
         tooltip.set_visible(False)
@@ -562,7 +610,9 @@ class HomePanel(ctk.CTkFrame):
             idx = int(event.ind[0])
             row = rows[idx]
             preview_indexes = ", ".join(str(value) for value in row["indexes"][:24])
-            self.domain_records_var.set(f"{row['domain']} · N={row['count']} · índices: {preview_indexes}")
+            self.domain_records_var.set(
+                f"Dominio: {row['domain']} | N={row['count']} | Media={row['mean']:.4g} | CV={row['cv']:.4g} | Índices: {preview_indexes}"
+            )
 
         chart.canvas.mpl_connect("motion_notify_event", on_move)
         chart.canvas.mpl_connect("pick_event", on_pick)
@@ -841,11 +891,17 @@ class HomePanel(ctk.CTkFrame):
         self._trace_ui_action("aplicar_dominios", refresh_type="none")
         ordered = [var.get() for var in self.domain_layer_vars]
         active = [self.domain_layer_vars[idx].get() for idx, flag in enumerate(self.domain_layer_active_vars) if bool(flag.get())]
-        result = self.service.configure_domains(ordered_layers=ordered, active_layers=active, min_samples=int(self.domain_min_samples_var.get() or 1))
+        result = self.service.configure_domains(
+            ordered_layers=ordered,
+            active_layers=active,
+            min_samples=int(self.domain_min_samples_var.get() or 1),
+            include_missing=bool(self.domain_include_missing_var.get()),
+        )
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
             self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
+            self.domain_records_var.set("Selecciona una burbuja para ver índices y resumen del dominio.")
             self._refresh_dashboard(reason="domains_applied")
 
     def _on_toggle_eda_capping(self) -> None:
