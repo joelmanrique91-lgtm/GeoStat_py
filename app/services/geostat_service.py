@@ -244,6 +244,9 @@ class GeostatService:
             "dynamic_category_column": self.workflow_state.dynamic_cutoff_category_column,
         }
 
+    def has_confirmed_dynamic_capping(self) -> bool:
+        return bool(self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column)
+
     def prepare_dynamic_cutoff_preview(self, target_column: str, mode: str, slider_percent: float) -> dict[str, object]:
         if self.current_dataset is None:
             raise ValueError("No hay dataset cargado.")
@@ -496,7 +499,7 @@ class GeostatService:
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
 
-    def prepare_univariate_data(self, max_domain_categories: int = 10) -> dict:
+    def prepare_univariate_data(self, max_domain_categories: int = 10, use_effective_target: bool = False) -> dict:
         if self.current_dataset is None or self.variable_config is None:
             message = "No hay dataset/configuración suficiente para EDA."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {})
@@ -504,7 +507,7 @@ class GeostatService:
             raise ValueError(message)
 
         df = self.current_dataset.dataframe
-        target = self.variable_config.target_column
+        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
         if not target or target not in df.columns:
             message = f"Target no válido para EDA univariado: '{target}'."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
@@ -734,7 +737,7 @@ class GeostatService:
         self.activity_log.log("swath_payload_prepared", "success", "Series swath preparadas.", {"bins": bins, "target": target_col})
         return payload
 
-    def build_eda_summary(self) -> str:
+    def build_eda_summary(self, use_effective_target: bool = False) -> str:
         if self.current_dataset is None:
             return "No hay dataset cargado para EDA."
         base = (
@@ -745,15 +748,15 @@ class GeostatService:
         )
         if self.variable_config is None:
             return base + "Selecciona X/Y/Z/target para habilitar estadísticas del target."
-        target = self.variable_config.target_column
+        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
         df = self.current_dataset.dataframe
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return base + "Target no numérico: estadísticas limitadas."
         stats = self._target_statistics()
         return base + f"Target {target}: válidos={stats['valid_count']} | nulos={stats['null_pct']:.2f}% | mean={stats['mean']:.4g}"
 
-    def _target_statistics(self) -> dict[str, float]:
-        target = self.variable_config.target_column
+    def _target_statistics(self, use_effective_target: bool = False) -> dict[str, float]:
+        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
         df = self.current_dataset.dataframe
         total = len(df)
         clean = df[target].dropna().astype(float)
@@ -773,15 +776,15 @@ class GeostatService:
             "skewness": float(clean.skew()) if len(clean) > 2 else math.nan,
         }
 
-    def get_target_statistics_table(self) -> list[tuple[str, str]]:
+    def get_target_statistics_table(self, use_effective_target: bool = False) -> list[tuple[str, str]]:
         if self.current_dataset is None or self.variable_config is None:
             return []
-        target = self.variable_config.target_column
+        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
         df = self.current_dataset.dataframe
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return []
 
-        stats = self._target_statistics()
+        stats = self._target_statistics(use_effective_target=use_effective_target)
         return [
             ("dataset", self.current_dataset.file_name),
             ("samples", str(self.current_dataset.row_count)),

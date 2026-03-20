@@ -38,6 +38,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_output_var = ctk.StringVar(value="")
         self.dynamic_keep_class_var = ctk.BooleanVar(value=True)
         self.cutoff_metrics_var = ctk.StringVar(value="Sin preview.")
+        self.eda_use_capping_var = ctk.BooleanVar(value=False)
         self._cutoff_preview_after_id: str | None = None
         self.cutoff_preview_container: ctk.CTkFrame | None = None
         self.cutoff_card_vars: dict[str, ctk.StringVar] = {
@@ -204,6 +205,24 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_analysis_step(self, step_name: str) -> None:
         ctk.CTkLabel(self.center_panel, text=f"Etapa {step_name}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        if step_name == "EDA":
+            state = self.service.get_cutoff_state()
+            has_capping = self.service.has_confirmed_dynamic_capping()
+            if not has_capping:
+                self.eda_use_capping_var.set(False)
+            ctk.CTkSwitch(
+                self.center_panel,
+                text="EDA con capping confirmado de Paso 3",
+                variable=self.eda_use_capping_var,
+                state="normal" if has_capping else "disabled",
+                command=lambda: self._render_step("EDA"),
+            ).pack(fill="x", padx=8, pady=(0, 4))
+            active_view = "capping confirmado" if self.eda_use_capping_var.get() and has_capping else "variable original"
+            ctk.CTkLabel(
+                self.center_panel,
+                text=f"Vista EDA activa: {active_view}\nVariable efectiva actual: {state['effective_target_column'] or '-'}",
+                justify="left",
+            ).pack(anchor="w", padx=8, pady=(0, 8))
         ctk.CTkButton(self.center_panel, text="Actualizar vista", command=lambda: self._render_step(step_name)).pack(fill="x", padx=8, pady=(0, 8))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int) -> None:
@@ -250,7 +269,7 @@ class HomePanel(ctk.CTkFrame):
         DashboardGrid.clear(tab)
         self.service.activity_log.log("eda_univariate_render_started", "info", "Render Univariado iniciado.", {})
         try:
-            data = self.service.prepare_univariate_data(max_domain_categories=10)
+            data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
         except Exception as exc:
             self.service.activity_log.log("eda_univariate_render_failed", "error", str(exc), {})
             self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Univariado.", {"reason": str(exc)})
@@ -393,10 +412,10 @@ class HomePanel(ctk.CTkFrame):
     def _set_summary_tab_content(self) -> None:
         tab = self.eda_tabs.tab("Resumen")
         DashboardGrid.clear(tab)
-        table_data = self.service.get_target_statistics_table()
+        table_data = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))
         if not table_data:
             self.service.activity_log.log("empty_state_shown", "warning", "Estado vacío mostrado en Resumen EDA.", {})
-            ctk.CTkLabel(tab, text=self.service.build_eda_summary(), justify="left").pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(tab, text=self.service.build_eda_summary(use_effective_target=bool(self.eda_use_capping_var.get())), justify="left").pack(anchor="w", padx=8, pady=8)
             return
 
         grid = ctk.CTkFrame(tab)
@@ -627,23 +646,21 @@ class HomePanel(ctk.CTkFrame):
         ax_prob.grid(alpha=0.25)
 
         ax_before_after = dashboard.axis(1, 0)
-        ax_before_after.hist(preview["values"], bins="sturges", alpha=0.45, color="#9c755f", label="Original")
-        ax_before_after.hist(preview["capped_values"], bins="sturges", alpha=0.65, color="#59a14f", label="Capped")
-        ax_before_after.set_title("Comparación antes/después")
+        original_sorted = sorted(preview["values"])
+        capped_sorted = sorted(preview["capped_values"])
+        original_cdf = [(idx + 1) / len(original_sorted) for idx in range(len(original_sorted))]
+        capped_cdf = [(idx + 1) / len(capped_sorted) for idx in range(len(capped_sorted))]
+        ax_before_after.plot(original_sorted, original_cdf, color="#9c755f", label="Original")
+        ax_before_after.plot(capped_sorted, capped_cdf, color="#59a14f", label="Capped")
+        ax_before_after.axvline(cutoff, color="#e45756", linestyle="--", linewidth=1.2)
+        ax_before_after.set_title("Curva acumulada original vs capped")
+        ax_before_after.set_ylabel("F(x)")
         ax_before_after.legend(fontsize=8)
 
         ax_decision = dashboard.axis(1, 1)
-        ax_decision.axis("off")
-        ax_decision.text(
-            0.02,
-            0.95,
-            "Zona de decisión\n"
-            "1) Explorar con slider + gráficos\n"
-            "2) Revisar impacto en cola alta\n"
-            "3) Confirmar con botón explícito\n"
-            "4) Continuar a Espacial con variable efectiva",
-            va="top",
-        )
+        ax_decision.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True)
+        ax_decision.set_title("Boxplot antes/después")
+        ax_decision.tick_params(axis="x", rotation=15)
         dashboard.render()
 
     def _on_apply_dynamic_cutoff(self) -> None:
