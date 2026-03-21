@@ -133,6 +133,116 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("diagnostics", payload)
         self.assertTrue(payload["availability"]["histogram"]["available"])
 
+    def test_prepare_univariate_uses_snapshot_resolution_for_effective_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_snapshot_effective.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,100\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+            expected = self.service.get_analysis_context_snapshot()["resolved_target_column"]
+
+            with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
+                payload = self.service.prepare_univariate_data(use_effective_target=True)
+
+            self.assertGreaterEqual(snapshot_mock.call_count, 1)
+            self.assertEqual(payload["diagnostics"]["target"], expected)
+
+    def test_prepare_univariate_fails_without_dataset_or_variable_config(self) -> None:
+        with self.assertRaisesRegex(ValueError, "No hay dataset/configuración suficiente para EDA."):
+            self.service.prepare_univariate_data()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_no_config.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            with self.assertRaisesRegex(ValueError, "No hay dataset/configuración suficiente para EDA."):
+                self.service.prepare_univariate_data()
+
+    def test_prepare_univariate_fails_when_resolved_target_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_missing_resolved.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped_missing",
+                    keep_category_column=False,
+                ).success
+            )
+            self.service.current_dataset.dataframe.drop(columns=["target_capped_missing"], inplace=True)
+
+            snapshot = self.service.get_analysis_context_snapshot()
+            self.assertEqual(snapshot["blocking_reason"], "missing_resolved_target_column")
+            with self.assertRaisesRegex(ValueError, "Target no válido para EDA univariado"):
+                self.service.prepare_univariate_data(use_effective_target=True)
+
+    def test_prepare_univariate_blocks_non_numeric_resolved_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_non_numeric_resolved.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,3\n2,2,2,5\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_cutoffs(
+                    enabled=True,
+                    target_column="target",
+                    limits_text="2,4",
+                    output_column="target_cutoff_manual",
+                ).success
+            )
+
+            snapshot = self.service.get_analysis_context_snapshot()
+            self.assertEqual(snapshot["resolved_target_type"], "categorical")
+            with self.assertRaisesRegex(ValueError, "Target no numérico para EDA univariado"):
+                self.service.prepare_univariate_data(use_effective_target=True)
+
+    def test_prepare_univariate_base_target_regression_still_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_base_regression.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+
+            payload = self.service.prepare_univariate_data(use_effective_target=False)
+            self.assertEqual(payload["diagnostics"]["target"], "target")
+            self.assertEqual(payload["diagnostics"]["target_valid_count"], 3)
+
+    def test_prepare_univariate_effective_dynamic_target_regression_still_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_effective_regression.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,10\n1,1,1,100\n2,2,2,30\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+
+            payload = self.service.prepare_univariate_data(use_effective_target=True)
+            self.assertEqual(payload["diagnostics"]["target"], "target_capped")
+            self.assertGreater(payload["diagnostics"]["target_valid_count"], 0)
+
     def test_statistics_table_safe_when_target_numeric_without_valid_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = Path(tmp_dir) / "nan_target.csv"
@@ -323,6 +433,92 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(state["dynamic_output_column"], "target_capped_p50")
             self.assertEqual(state["dynamic_category_column"], "target_capped_p50_class")
             self.assertEqual(state["effective_target_column"], "target_capped_p50")
+
+    def test_analysis_context_snapshot_contract_without_dataset(self) -> None:
+        context = self.service.get_analysis_context_snapshot()
+        self.assertEqual(
+            set(context.keys()),
+            {
+                "base_target_column",
+                "effective_target_column",
+                "resolved_target_column",
+                "resolved_target_type",
+                "active_domain_column",
+                "active_domain_filter",
+                "current_step",
+                "readiness",
+                "blocking_reason",
+            },
+        )
+        self.assertEqual(context["readiness"], "blocked")
+        self.assertEqual(context["blocking_reason"], "missing_dataset")
+        self.assertEqual(context["current_step"], "Datos")
+
+    def test_analysis_context_snapshot_base_effective_consistency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "snapshot_consistency.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,100\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+
+            base_context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(base_context["base_target_column"], "target")
+            self.assertEqual(base_context["effective_target_column"], "target")
+            self.assertEqual(base_context["resolved_target_column"], "target")
+            self.assertEqual(base_context["resolved_target_type"], "numeric")
+            self.assertEqual(base_context["readiness"], "ready")
+            self.assertEqual(base_context["blocking_reason"], "")
+
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+            capped_context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(capped_context["base_target_column"], "target")
+            self.assertEqual(capped_context["effective_target_column"], "target_capped")
+            self.assertEqual(capped_context["resolved_target_column"], "target_capped")
+            self.assertEqual(capped_context["resolved_target_type"], "numeric")
+
+    def test_analysis_context_snapshot_persists_domain_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "snapshot_domain_filter.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n2,2,2,3,a\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            applied = self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}})
+            self.assertTrue(applied.success)
+            self.assertTrue(self.service.set_active_domain("A").success)
+
+            context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(context["active_domain_filter"], "A")
+            self.assertEqual(context["active_domain_column"], "domain_estimation")
+
+    def test_summary_cards_target_matches_context_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "summary_context_regression.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,3\n2,2,2,5\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_cutoffs(
+                    enabled=True,
+                    target_column="target",
+                    limits_text="2,4",
+                    output_column="target_cutoff_manual",
+                ).success
+            )
+
+            context = self.service.get_analysis_context_snapshot()
+            cards = self.service.get_summary_cards()
+            self.assertEqual(cards["Target"], context["resolved_target_column"])
+            self.assertEqual(cards["Dataset"], self.service.current_dataset.file_name)
+            self.assertEqual(cards["Muestras"], str(self.service.current_dataset.row_count))
 
     def test_prepare_domain_statistics_contract_without_active_layers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

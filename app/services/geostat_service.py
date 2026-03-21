@@ -777,6 +777,11 @@ class GeostatService:
             self.variable_config.domain_column = None
 
     def _get_effective_target_column(self) -> str:
+        """Resolve effective target with legacy precedence.
+
+        Precedence is intentionally conservative and mirrors current behavior:
+        dynamic cutoff output > manual cutoff output > base target from variable config.
+        """
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
             return self.workflow_state.dynamic_cutoff_output_column
         if self.workflow_state.cutoffs_enabled and self.workflow_state.cutoff_output_column:
@@ -784,6 +789,49 @@ class GeostatService:
         if self.variable_config is None:
             return ""
         return self.variable_config.target_column
+
+    def get_analysis_context_snapshot(self) -> dict[str, object]:
+        """Return a read-only snapshot of the currently active analysis context."""
+        base_target_column = self.variable_config.target_column if self.variable_config else ""
+        effective_target_column = self._get_effective_target_column()
+        resolved_target_column = effective_target_column or base_target_column
+        active_domain_column = (
+            self.workflow_state.domain_output_column
+            or (self.variable_config.domain_column if self.variable_config else "")
+            or ""
+        )
+
+        readiness = "ready"
+        blocking_reason = ""
+        if self.current_dataset is None:
+            readiness = "blocked"
+            blocking_reason = "missing_dataset"
+        elif self.variable_config is None:
+            readiness = "blocked"
+            blocking_reason = "missing_variable_config"
+        elif not resolved_target_column or resolved_target_column not in self.current_dataset.dataframe.columns:
+            readiness = "blocked"
+            blocking_reason = "missing_resolved_target_column"
+
+        resolved_target_type = "unknown"
+        if (
+            readiness == "ready"
+            and self.current_dataset is not None
+            and resolved_target_column in self.current_dataset.dataframe.columns
+        ):
+            resolved_target_type = "numeric" if _is_numeric_dtype(self.current_dataset.dataframe[resolved_target_column]) else "categorical"
+
+        return {
+            "base_target_column": base_target_column,
+            "effective_target_column": effective_target_column,
+            "resolved_target_column": resolved_target_column,
+            "resolved_target_type": resolved_target_type,
+            "active_domain_column": active_domain_column,
+            "active_domain_filter": self.workflow_state.active_domain_filter,
+            "current_step": self.workflow_state.current_step,
+            "readiness": readiness,
+            "blocking_reason": blocking_reason,
+        }
 
     def _get_filtered_dataframe(self):
         if self.current_dataset is None:
@@ -831,8 +879,8 @@ class GeostatService:
         use_effective_target: bool = False,
         domain_filter: str | None = None,
     ) -> dict:
-        if self.current_dataset is None or self.variable_config is None:
-            message = "No hay dataset/configuración suficiente para EDA."
+        target, message = self._resolve_eda_target_column(use_effective_target=use_effective_target, require_numeric=True)
+        if message:
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {})
             self.activity_log.log("univariate_payload_empty", "warning", message, {})
             raise ValueError(message)
@@ -846,12 +894,6 @@ class GeostatService:
                 df = df.iloc[0:0]
         elif self.workflow_state.active_domain_filter:
             df = self._get_filtered_dataframe()
-        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
-        if not target or target not in df.columns:
-            message = f"Target no válido para EDA univariado: '{target}'."
-            self.activity_log.log("eda_univariate_payload_empty", "warning", message, {"target": target})
-            self.activity_log.log("univariate_payload_empty", "warning", message, {"target": target})
-            raise ValueError(message)
 
         numeric_target = _to_numeric(df[target])
         total_rows = int(len(df))
@@ -1064,7 +1106,7 @@ class GeostatService:
         )
         if self.variable_config is None:
             return base + "Selecciona X/Y/Z/target para habilitar estadísticas del target."
-        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
+        target, _ = self._resolve_eda_target_column(use_effective_target=use_effective_target, require_numeric=False)
         df = self.current_dataset.dataframe
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return base + "Target no numérico: estadísticas limitadas."
@@ -1072,16 +1114,20 @@ class GeostatService:
         return base + f"Target {target}: válidos={stats['valid_count']} | nulos={stats['null_pct']:.2f}% | mean={stats['mean']:.4g}"
 
     def _target_statistics(self, use_effective_target: bool = False) -> dict[str, float]:
-        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
+        target, message = self._resolve_eda_target_column(use_effective_target=use_effective_target, require_numeric=True)
+        if message:
+            raise ValueError(message)
         df = self._get_filtered_dataframe()
         total = len(df)
-        clean = df[target].dropna().astype(float)
+        clean = _to_numeric(df[target]).dropna().astype(float)
         return _compute_target_statistics(clean, total)
 
     def get_target_statistics_table(self, use_effective_target: bool = False) -> list[tuple[str, str]]:
-        if self.current_dataset is None or self.variable_config is None:
+        if self.current_dataset is None:
             return []
-        target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
+        target, message = self._resolve_eda_target_column(use_effective_target=use_effective_target, require_numeric=True)
+        if message:
+            return []
         df = self.current_dataset.dataframe
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return []
@@ -1108,11 +1154,28 @@ class GeostatService:
             ("kurtosis", f"{stats['kurtosis']:.5g}"),
         ]
 
+    def _resolve_eda_target_column(self, use_effective_target: bool, require_numeric: bool) -> tuple[str, str]:
+        snapshot = self.get_analysis_context_snapshot()
+        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
+            return "", "No hay dataset/configuración suficiente para EDA."
+        if self.current_dataset is None or self.variable_config is None:
+            return "", "No hay dataset/configuración suficiente para EDA."
+
+        target = str(snapshot["resolved_target_column"] if use_effective_target else snapshot["base_target_column"])
+        if not target or target not in self.current_dataset.dataframe.columns:
+            return target, f"Target no válido para EDA univariado: '{target}'."
+        if require_numeric:
+            series = self.current_dataset.dataframe[target]
+            if not _is_numeric_dtype(series) and not _to_numeric(series).notna().any():
+                return target, f"Target no numérico para EDA univariado: '{target}'."
+        return target, ""
+
     def get_summary_cards(self) -> dict[str, str]:
         if self.current_dataset is None:
             return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente", "Dominio": "No definido"}
 
-        target = self._get_effective_target_column() if self.variable_config else "No definido"
+        context = self.get_analysis_context_snapshot()
+        target = str(context["resolved_target_column"] or "No definido")
         return {
             "Dataset": self.current_dataset.file_name,
             "Muestras": str(self.current_dataset.row_count),
