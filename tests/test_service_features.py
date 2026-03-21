@@ -434,6 +434,17 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(state["dynamic_category_column"], "target_capped_p50_class")
             self.assertEqual(state["effective_target_column"], "target_capped_p50")
 
+    def test_get_cutoff_state_reads_snapshot_as_official_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "cutoff_snapshot_source.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
+                state = self.service.get_cutoff_state()
+            self.assertGreaterEqual(snapshot_mock.call_count, 1)
+            self.assertEqual(state["effective_target_column"], self.service.get_analysis_context_snapshot()["resolved_target_column"])
+
     def test_analysis_context_snapshot_contract_without_dataset(self) -> None:
         context = self.service.get_analysis_context_snapshot()
         self.assertEqual(
@@ -532,6 +543,64 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(payload["items"], [])
             self.assertEqual(payload["selection_column"], "")
             self.assertEqual(payload["active_layers"], [])
+
+    def test_get_domain_state_reads_snapshot_and_workflow_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_state_sources.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+
+            with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
+                with patch.object(self.service, "get_workflow_readiness", wraps=self.service.get_workflow_readiness) as readiness_mock:
+                    state = self.service.get_domain_state()
+
+            self.assertGreaterEqual(snapshot_mock.call_count, 1)
+            self.assertGreaterEqual(readiness_mock.call_count, 1)
+            snapshot = self.service.get_analysis_context_snapshot()
+            self.assertEqual(state["effective_target_column"], snapshot["resolved_target_column"])
+            self.assertEqual(state["active_domain_filter"], snapshot["active_domain_filter"])
+            self.assertIn("domains_ready", state)
+            self.assertEqual(state["domains_ready"], self.service.get_workflow_readiness()["stages"]["domains"]["ready"])
+
+    def test_legacy_effective_target_helper_keeps_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "legacy_effective_helper.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,100\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertEqual(self.service._get_effective_target_column(), self.service.get_analysis_context_snapshot()["resolved_target_column"])
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+            self.assertEqual(self.service._get_effective_target_column(), self.service.get_analysis_context_snapshot()["resolved_target_column"])
+
+    def test_prepare_univariate_active_filter_uses_snapshot_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_snapshot_filter_source.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n2,2,2,3,a\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
+            )
+            self.assertTrue(self.service.set_active_domain("A").success)
+
+            with patch.object(self.service, "_get_filtered_dataframe", wraps=self.service._get_filtered_dataframe) as filtered_mock:
+                payload = self.service.prepare_univariate_data()
+
+            self.assertGreaterEqual(filtered_mock.call_count, 1)
+            args, _ = filtered_mock.call_args
+            self.assertTrue(args)
+            self.assertEqual(args[0].get("active_domain_filter"), "A")
+            self.assertEqual(payload["diagnostics"]["total_rows"], 2)
 
     def test_prepare_domain_statistics_uses_snapshot_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

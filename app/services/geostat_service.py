@@ -414,6 +414,7 @@ class GeostatService:
 
     def get_domain_state(self) -> dict[str, object]:
         snapshot = self.get_analysis_context_snapshot()
+        workflow = self.get_workflow_readiness()
         return {
             "ordered_layers": list(self.workflow_state.domain_layers_order),
             "active_layers": list(self.workflow_state.domain_active_layers),
@@ -423,8 +424,9 @@ class GeostatService:
             "effective_target_column": str(snapshot["resolved_target_column"]),
             "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
             "domain_definition": dict(self.workflow_state.domain_definition),
-            "active_domain_filter": self.workflow_state.active_domain_filter,
+            "active_domain_filter": str(snapshot["active_domain_filter"]),
             "domain_estimation_values": self.get_domain_estimation_values(),
+            "domains_ready": bool(workflow["stages"]["domains"]["ready"]),
         }
 
     def prepare_domain_statistics(self) -> dict[str, object]:
@@ -583,14 +585,15 @@ class GeostatService:
         return [column for column in self.current_dataset.columns if not _is_numeric_dtype(self.current_dataset.dataframe[column])]
 
     def get_cutoff_state(self) -> dict[str, object]:
-        default_target = self.variable_config.target_column if self.variable_config else ""
+        snapshot = self.get_analysis_context_snapshot()
+        default_target = str(snapshot["base_target_column"])
         return {
             "enabled": self.workflow_state.cutoffs_enabled,
             "target_column": self.workflow_state.cutoff_target_column or default_target,
             "limits": [float(v) for v in self.workflow_state.cutoff_limits],
             "labels": list(self.workflow_state.cutoff_labels),
             "output_column": self.workflow_state.cutoff_output_column,
-            "effective_target_column": self._get_effective_target_column(),
+            "effective_target_column": str(snapshot["resolved_target_column"]),
             "dynamic_enabled": self.workflow_state.dynamic_cutoff_enabled,
             "dynamic_target_column": self.workflow_state.dynamic_cutoff_target_column or default_target,
             "dynamic_mode": self.workflow_state.dynamic_cutoff_mode,
@@ -834,6 +837,9 @@ class GeostatService:
 
         Precedence is intentionally conservative and mirrors current behavior:
         dynamic cutoff output > manual cutoff output > base target from variable config.
+
+        This helper remains for backward-compatible internal usage.
+        New consumers should prefer `get_analysis_context_snapshot()`.
         """
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
             return self.workflow_state.dynamic_cutoff_output_column
@@ -844,7 +850,10 @@ class GeostatService:
         return self.variable_config.target_column
 
     def get_analysis_context_snapshot(self) -> dict[str, object]:
-        """Return a read-only snapshot of the currently active analysis context."""
+        """Return the official read-only analysis context contract.
+
+        This is the preferred public source for active target/domain context.
+        """
         base_target_column = self.variable_config.target_column if self.variable_config else ""
         effective_target_column = self._get_effective_target_column()
         resolved_target_column = effective_target_column or base_target_column
@@ -887,6 +896,7 @@ class GeostatService:
         }
 
     def get_workflow_readiness(self) -> dict[str, object]:
+        """Return the official workflow-level readiness/blocking contract."""
         snapshot = self.get_analysis_context_snapshot()
         has_dataset = bool(self.current_dataset is not None)
         has_variable_config = bool(self.variable_config is not None)
@@ -1061,7 +1071,7 @@ class GeostatService:
             "spatial_2d_rendered",
             "success",
             "Vistas espaciales 2D preparadas.",
-            {"rows": len(spatial.target), "target_column": self._get_effective_target_column()},
+            {"rows": len(spatial.target), "target_column": str(self.get_analysis_context_snapshot()["resolved_target_column"])},
         )
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
@@ -1079,14 +1089,15 @@ class GeostatService:
             raise ValueError(message)
 
         df = self.current_dataset.dataframe
+        snapshot = self.get_analysis_context_snapshot()
         requested_filter = (domain_filter or "").strip()
         if requested_filter:
             if DOMAIN_ESTIMATION_COLUMN in df.columns:
                 df = df[df[DOMAIN_ESTIMATION_COLUMN].astype(str) == requested_filter]
             else:
                 df = df.iloc[0:0]
-        elif self.workflow_state.active_domain_filter:
-            df = self._get_filtered_dataframe()
+        elif str(snapshot["active_domain_filter"]).strip():
+            df = self._get_filtered_dataframe(snapshot)
 
         numeric_target = _to_numeric(df[target])
         total_rows = int(len(df))
