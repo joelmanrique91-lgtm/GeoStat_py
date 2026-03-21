@@ -68,10 +68,48 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("actualizado", result.message.lower())
         self.assertFalse(result.restart_recommended)
 
+    @patch("app.services.geostat_service.subprocess.run")
+    def test_update_repository_fails_when_submodule_update_fails(self, mock_run) -> None:
+        mock_run.side_effect = [
+            type("Result", (), {"returncode": 0, "stdout": "Already up to date.", "stderr": ""})(),
+            type("Result", (), {"returncode": 1, "stdout": "", "stderr": "submodule boom"})(),
+        ]
+        with patch.dict(os.environ, {"GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE": "1"}):
+            result = self.service.update_repository()
+
+        self.assertFalse(result.success)
+        self.assertIn("submódulos", result.message.lower())
+        self.assertIn("submodule boom", result.details)
+
     def test_update_repository_blocked_by_default(self) -> None:
         result = self.service.update_repository()
         self.assertFalse(result.success)
         self.assertIn("deshabilitada", result.message.lower())
+
+    def test_build_eda_summary_uses_effective_target_statistics_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "capping_case.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,10\n1,1,1,100\n", encoding="utf-8")
+            result = self.service.load_csv(str(csv_path))
+            self.assertTrue(result.success)
+            cfg = self.service.set_variable_config("x", "y", "z", "target")
+            self.assertTrue(cfg.success)
+
+            capping = self.service.apply_dynamic_cutoff(
+                enabled=True,
+                target_column="target",
+                mode="percentile",
+                slider_percent=50.0,
+                output_column="target_capped",
+                keep_category_column=False,
+            )
+            self.assertTrue(capping.success)
+
+            summary = self.service.build_eda_summary(use_effective_target=True)
+            self.assertIn("Target target_capped", summary)
+
+            expected_mean = float(self.service.current_dataset.dataframe["target_capped"].dropna().astype(float).mean())
+            self.assertIn(f"mean={expected_mean:.4g}", summary)
 
     def test_prepare_univariate_returns_expected_contract(self) -> None:
         self._load_sample_dataset()
