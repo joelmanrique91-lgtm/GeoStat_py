@@ -135,6 +135,238 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(table["null_pct"], "100")
             self.assertEqual(table["mean"], "nan")
 
+    def test_prepare_univariate_contract_keys_and_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_contract.csv"
+            csv_path.write_text(
+                "x,y,z,target,dom\n0,0,0,10,a\n1,1,1,12,b\n2,2,2,foo,b\n3,3,3,13,a\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+
+            payload = self.service.prepare_univariate_data(max_domain_categories=5)
+
+            expected_top_keys = {
+                "target_values",
+                "probplot_x",
+                "probplot_y",
+                "probability_failed",
+                "domain_boxplot",
+                "availability",
+                "diagnostics",
+            }
+            self.assertEqual(set(payload.keys()), expected_top_keys)
+            self.assertIsInstance(payload["target_values"], list)
+            self.assertIsInstance(payload["probplot_x"], list)
+            self.assertIsInstance(payload["probplot_y"], list)
+            self.assertIsInstance(payload["probability_failed"], bool)
+            self.assertIsInstance(payload["domain_boxplot"], dict)
+            self.assertIsInstance(payload["availability"], dict)
+            self.assertIsInstance(payload["diagnostics"], dict)
+
+            self.assertEqual(
+                set(payload["availability"].keys()),
+                {"histogram", "boxplot", "probability"},
+            )
+            for comp in ("histogram", "boxplot", "probability"):
+                self.assertIn("available", payload["availability"][comp])
+                self.assertIn("message", payload["availability"][comp])
+                self.assertIsInstance(payload["availability"][comp]["available"], bool)
+                self.assertIsInstance(payload["availability"][comp]["message"], str)
+
+            self.assertEqual(
+                set(payload["domain_boxplot"].keys()),
+                {"enabled", "labels", "values", "message", "valid_rows", "valid_categories"},
+            )
+            self.assertIsInstance(payload["domain_boxplot"]["enabled"], bool)
+            self.assertIsInstance(payload["domain_boxplot"]["labels"], list)
+            self.assertIsInstance(payload["domain_boxplot"]["values"], list)
+            self.assertIsInstance(payload["domain_boxplot"]["message"], str)
+            self.assertIsInstance(payload["domain_boxplot"]["valid_rows"], int)
+            self.assertIsInstance(payload["domain_boxplot"]["valid_categories"], int)
+
+            self.assertEqual(
+                set(payload["diagnostics"].keys()),
+                {
+                    "target",
+                    "domain",
+                    "total_rows",
+                    "target_valid_count",
+                    "target_nan_count",
+                    "domain_valid_rows",
+                    "domain_valid_categories",
+                },
+            )
+            self.assertIsInstance(payload["diagnostics"]["target"], str)
+            self.assertIsInstance(payload["diagnostics"]["domain"], str)
+            self.assertIsInstance(payload["diagnostics"]["total_rows"], int)
+            self.assertIsInstance(payload["diagnostics"]["target_valid_count"], int)
+            self.assertIsInstance(payload["diagnostics"]["target_nan_count"], int)
+            self.assertIsInstance(payload["diagnostics"]["domain_valid_rows"], int)
+            self.assertIsInstance(payload["diagnostics"]["domain_valid_categories"], int)
+
+    def test_prepare_univariate_contract_preserved_when_domain_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "univariate_no_domain.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+
+            payload = self.service.prepare_univariate_data()
+            self.assertIn("domain_boxplot", payload)
+            self.assertEqual(
+                set(payload["domain_boxplot"].keys()),
+                {"enabled", "labels", "values", "message", "valid_rows", "valid_categories"},
+            )
+            self.assertFalse(payload["domain_boxplot"]["enabled"])
+            self.assertIsInstance(payload["domain_boxplot"]["message"], str)
+            self.assertGreaterEqual(payload["domain_boxplot"]["valid_rows"], 0)
+            self.assertGreaterEqual(payload["domain_boxplot"]["valid_categories"], 0)
+
+    def test_get_cutoff_state_contract_without_cutoffs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "cutoff_state_base.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,2\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+
+            state = self.service.get_cutoff_state()
+            expected_keys = {
+                "enabled",
+                "target_column",
+                "limits",
+                "labels",
+                "output_column",
+                "effective_target_column",
+                "dynamic_enabled",
+                "dynamic_target_column",
+                "dynamic_mode",
+                "dynamic_percent",
+                "dynamic_cutoff_value",
+                "dynamic_output_column",
+                "dynamic_category_column",
+            }
+            self.assertEqual(set(state.keys()), expected_keys)
+            self.assertFalse(state["enabled"])
+            self.assertEqual(state["target_column"], "target")
+            self.assertEqual(state["limits"], [])
+            self.assertEqual(state["labels"], [])
+            self.assertEqual(state["output_column"], "")
+            self.assertEqual(state["effective_target_column"], "target")
+            self.assertFalse(state["dynamic_enabled"])
+            self.assertEqual(state["dynamic_target_column"], "target")
+            self.assertEqual(state["dynamic_mode"], "percentile")
+            self.assertEqual(state["dynamic_percent"], 95.0)
+            self.assertEqual(state["dynamic_cutoff_value"], 0.0)
+            self.assertEqual(state["dynamic_output_column"], "")
+            self.assertEqual(state["dynamic_category_column"], "")
+
+    def test_get_cutoff_state_contract_with_manual_cutoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "cutoff_state_manual.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,3\n2,2,2,5\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            result = self.service.apply_cutoffs(
+                enabled=True,
+                target_column="target",
+                limits_text="2,4",
+                output_column="target_cutoff_manual",
+            )
+            self.assertTrue(result.success)
+
+            state = self.service.get_cutoff_state()
+            self.assertTrue(state["enabled"])
+            self.assertEqual(state["target_column"], "target")
+            self.assertEqual(state["limits"], [2.0, 4.0])
+            self.assertEqual(state["labels"], ["< 2", "[2, 4)", ">= 4"])
+            self.assertEqual(state["output_column"], "target_cutoff_manual")
+            self.assertEqual(state["effective_target_column"], "target_cutoff_manual")
+            self.assertFalse(state["dynamic_enabled"])
+
+    def test_get_cutoff_state_contract_with_dynamic_cutoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "cutoff_state_dynamic.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,100\n2,2,2,3\n3,3,3,4\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+
+            result = self.service.apply_dynamic_cutoff(
+                enabled=True,
+                target_column="target",
+                mode="percentile",
+                slider_percent=50.0,
+                output_column="target_capped_p50",
+                keep_category_column=True,
+            )
+            self.assertTrue(result.success)
+
+            state = self.service.get_cutoff_state()
+            self.assertTrue(state["dynamic_enabled"])
+            self.assertEqual(state["dynamic_target_column"], "target")
+            self.assertEqual(state["dynamic_mode"], "percentile")
+            self.assertEqual(state["dynamic_percent"], 50.0)
+            self.assertGreater(state["dynamic_cutoff_value"], 0.0)
+            self.assertEqual(state["dynamic_output_column"], "target_capped_p50")
+            self.assertEqual(state["dynamic_category_column"], "target_capped_p50_class")
+            self.assertEqual(state["effective_target_column"], "target_capped_p50")
+
+    def test_prepare_domain_statistics_contract_without_active_layers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_empty.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(set(payload.keys()), {"items", "selection_column", "active_layers"})
+            self.assertEqual(payload["items"], [])
+            self.assertEqual(payload["selection_column"], "")
+            self.assertEqual(payload["active_layers"], [])
+
+    def test_prepare_domain_statistics_contract_with_configured_domains(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_full.csv"
+            csv_path.write_text(
+                "x,y,z,target,dom,zone\n0,0,0,1,a,z1\n1,1,1,2,a,z1\n2,2,2,4,b,z2\n3,3,3,6,b,z2\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            applied = self.service.configure_domains(
+                ordered_layers=["dom", "zone"],
+                active_layers=["dom", "zone"],
+                min_samples=1,
+                include_missing=False,
+            )
+            self.assertTrue(applied.success)
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(
+                set(payload.keys()),
+                {"items", "selection_column", "active_layers", "target_column", "total_rows", "min_samples"},
+            )
+            self.assertEqual(payload["selection_column"], "domain_composite")
+            self.assertEqual(payload["active_layers"], ["dom", "zone"])
+            self.assertEqual(payload["target_column"], "target")
+            self.assertEqual(payload["total_rows"], 4)
+            self.assertEqual(payload["min_samples"], 1)
+            self.assertIsInstance(payload["items"], list)
+            self.assertGreater(len(payload["items"]), 0)
+
+            required_item_keys = {"domain", "count", "mean", "std", "cv", "pct_total", "indexes", "primary_group"}
+            for item in payload["items"]:
+                self.assertEqual(set(item.keys()), required_item_keys)
+                self.assertIsInstance(item["domain"], str)
+                self.assertIsInstance(item["count"], int)
+                self.assertIsInstance(item["mean"], float)
+                self.assertIsInstance(item["std"], float)
+                self.assertIsInstance(item["cv"], float)
+                self.assertIsInstance(item["pct_total"], float)
+                self.assertIsInstance(item["indexes"], list)
+                self.assertIsInstance(item["primary_group"], str)
+
 
 if __name__ == "__main__":
     unittest.main()
