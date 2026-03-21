@@ -413,13 +413,14 @@ class GeostatService:
         return sorted([value for value in values if value])
 
     def get_domain_state(self) -> dict[str, object]:
+        snapshot = self.get_analysis_context_snapshot()
         return {
             "ordered_layers": list(self.workflow_state.domain_layers_order),
             "active_layers": list(self.workflow_state.domain_active_layers),
             "output_column": self.workflow_state.domain_output_column,
             "min_samples": int(self.workflow_state.domain_min_samples),
             "include_missing": bool(self.workflow_state.domain_include_missing),
-            "effective_target_column": self._get_effective_target_column(),
+            "effective_target_column": str(snapshot["resolved_target_column"]),
             "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
             "domain_definition": dict(self.workflow_state.domain_definition),
             "active_domain_filter": self.workflow_state.active_domain_filter,
@@ -427,17 +428,20 @@ class GeostatService:
         }
 
     def prepare_domain_statistics(self) -> dict[str, object]:
-        if self.current_dataset is None or self.variable_config is None:
-            raise ValueError("No hay dataset/configuración suficiente para Dominios.")
-        output_column = self.workflow_state.domain_output_column or (
-            DOMAIN_ESTIMATION_COLUMN if DOMAIN_ESTIMATION_COLUMN in self.current_dataset.dataframe.columns else ""
-        )
-        active_layers = list(self.workflow_state.domain_active_layers)
-        if not output_column or output_column not in self.current_dataset.dataframe.columns:
-            return {"items": [], "selection_column": output_column, "active_layers": active_layers}
+        context, message = self._resolve_domain_statistics_context()
+        if message:
+            if message == "No hay dataset/configuración suficiente para Dominios.":
+                raise ValueError(message)
+            return {
+                "items": [],
+                "selection_column": str(context["selection_column"]),
+                "active_layers": list(context["active_layers"]),
+            }
 
-        target_column = self._get_effective_target_column()
-        df = self.current_dataset.dataframe[[output_column, target_column]].copy()
+        output_column = str(context["selection_column"])
+        active_layers = list(context["active_layers"])
+        target_column = str(context["target_column"])
+        df = context["dataframe"][[output_column, target_column]].copy()
         df[target_column] = _to_numeric(df[target_column])
         df = df.dropna(subset=[output_column, target_column])
         if df.empty:
@@ -476,6 +480,55 @@ class GeostatService:
             "total_rows": int(total),
             "min_samples": min_samples,
         }
+
+    def _resolve_domain_statistics_context(self) -> tuple[dict[str, object], str]:
+        base_context: dict[str, object] = {
+            "selection_column": self.workflow_state.domain_output_column,
+            "active_layers": list(self.workflow_state.domain_active_layers),
+            "target_column": "",
+            "dataframe": None,
+        }
+        snapshot = self.get_analysis_context_snapshot()
+        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
+            return base_context, "No hay dataset/configuración suficiente para Dominios."
+        if self.current_dataset is None or self.variable_config is None:
+            return base_context, "No hay dataset/configuración suficiente para Dominios."
+
+        dataframe = self.current_dataset.dataframe
+        selection_column = str(self.workflow_state.domain_output_column or "")
+        active_domain_column = str(snapshot["active_domain_column"] or "").strip()
+        if not selection_column:
+            if DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+                selection_column = DOMAIN_ESTIMATION_COLUMN
+
+        base_context["selection_column"] = selection_column
+        base_context["target_column"] = str(snapshot["resolved_target_column"])
+        base_context["dataframe"] = dataframe
+
+        if not selection_column or selection_column not in dataframe.columns:
+            return base_context, "domain_column_missing"
+        target_column = str(snapshot["resolved_target_column"])
+        if not target_column or target_column not in dataframe.columns:
+            return base_context, "resolved_target_missing"
+
+        active_filter = str(snapshot["active_domain_filter"]).strip()
+        if active_filter:
+            filter_column = active_domain_column or selection_column
+            if filter_column not in dataframe.columns:
+                if DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+                    filter_column = DOMAIN_ESTIMATION_COLUMN
+                else:
+                    return base_context, f"Filtro de dominio activo sobre columna inexistente: '{filter_column}'."
+            dataframe = dataframe[dataframe[filter_column].astype(str) == active_filter]
+        if dataframe.empty:
+            return base_context, "filtered_dataframe_empty"
+
+        target_series = dataframe[target_column]
+        if not _is_numeric_dtype(target_series) and not _to_numeric(target_series).notna().any():
+            return base_context, "non_numeric_target_for_domain_stats"
+
+        base_context["dataframe"] = dataframe
+        return base_context, ""
 
     def set_variable_config(
         self,
@@ -831,6 +884,106 @@ class GeostatService:
             "current_step": self.workflow_state.current_step,
             "readiness": readiness,
             "blocking_reason": blocking_reason,
+        }
+
+    def get_workflow_readiness(self) -> dict[str, object]:
+        snapshot = self.get_analysis_context_snapshot()
+        has_dataset = bool(self.current_dataset is not None)
+        has_variable_config = bool(self.variable_config is not None)
+        dataframe = self.current_dataset.dataframe if self.current_dataset is not None else None
+        resolved_target_column = str(snapshot["resolved_target_column"])
+        resolved_target_exists = bool(dataframe is not None and resolved_target_column and resolved_target_column in dataframe.columns)
+
+        def _stage(ready: bool, blocking_reasons: list[str], warnings: list[str] | None = None) -> dict[str, object]:
+            return {
+                "ready": bool(ready),
+                "blocking_reasons": list(blocking_reasons),
+                "warnings": list(warnings or []),
+            }
+
+        data_reasons: list[str] = []
+        if not has_dataset:
+            data_reasons.append("missing_dataset")
+
+        eda_reasons: list[str] = []
+        if not has_dataset:
+            eda_reasons.append("missing_dataset")
+        if not has_variable_config:
+            eda_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config and not resolved_target_exists:
+            eda_reasons.append("missing_resolved_target_column")
+
+        cutoffs_reasons: list[str] = []
+        if not has_dataset:
+            cutoffs_reasons.append("missing_dataset")
+        if not has_variable_config:
+            cutoffs_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config and self.variable_config.target_column not in self.current_dataset.dataframe.columns:
+            cutoffs_reasons.append("missing_base_target_column")
+
+        spatial_reasons: list[str] = []
+        if not has_dataset:
+            spatial_reasons.append("missing_dataset")
+        if not has_variable_config:
+            spatial_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config:
+            missing_xyz = [
+                col
+                for col in [self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column]
+                if col not in self.current_dataset.dataframe.columns
+            ]
+            if missing_xyz:
+                spatial_reasons.append("missing_spatial_columns")
+        if has_dataset and has_variable_config and not resolved_target_exists:
+            spatial_reasons.append("missing_resolved_target_column")
+
+        domains_reasons: list[str] = []
+        domain_warnings: list[str] = []
+        if not has_dataset:
+            domains_reasons.append("missing_dataset")
+        if not has_variable_config:
+            domains_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config:
+            domain_column = str(self.workflow_state.domain_output_column or "")
+            if not domain_column and DOMAIN_ESTIMATION_COLUMN in self.current_dataset.dataframe.columns:
+                domain_column = DOMAIN_ESTIMATION_COLUMN
+            if not domain_column or domain_column not in self.current_dataset.dataframe.columns:
+                domains_reasons.append("missing_domain_column")
+            if not resolved_target_exists:
+                domains_reasons.append("missing_resolved_target_column")
+            elif not _is_numeric_dtype(self.current_dataset.dataframe[resolved_target_column]) and not _to_numeric(
+                self.current_dataset.dataframe[resolved_target_column]
+            ).notna().any():
+                domains_reasons.append("non_numeric_target_for_domain_stats")
+
+            active_filter = str(snapshot["active_domain_filter"]).strip()
+            if active_filter:
+                filter_column = str(snapshot["active_domain_column"]).strip() or domain_column
+                if filter_column and filter_column not in self.current_dataset.dataframe.columns and DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.dataframe.columns:
+                    domains_reasons.append("invalid_active_domain_filter_column")
+                if filter_column and filter_column in self.current_dataset.dataframe.columns:
+                    filtered = self.current_dataset.dataframe[self.current_dataset.dataframe[filter_column].astype(str) == active_filter]
+                    if filtered.empty:
+                        domain_warnings.append("active_domain_filter_empty_result")
+
+        return {
+            "current_step": self.workflow_state.current_step,
+            "analysis_context": snapshot,
+            "base_state": {
+                "has_dataset": has_dataset,
+                "has_variable_config": has_variable_config,
+                "resolved_target_column": resolved_target_column,
+                "resolved_target_type": str(snapshot["resolved_target_type"]),
+                "active_domain_column": str(snapshot["active_domain_column"]),
+                "active_domain_filter": str(snapshot["active_domain_filter"]),
+            },
+            "stages": {
+                "data": _stage(not data_reasons, data_reasons),
+                "eda": _stage(not eda_reasons, eda_reasons),
+                "cutoffs": _stage(not cutoffs_reasons, cutoffs_reasons),
+                "spatial": _stage(not spatial_reasons, spatial_reasons),
+                "domains": _stage(not domains_reasons, domains_reasons, warnings=domain_warnings),
+            },
         }
 
     def _get_filtered_dataframe(self, context_snapshot: dict[str, object] | None = None):
@@ -1215,13 +1368,14 @@ class GeostatService:
             return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente", "Dominio": "No definido"}
 
         context = self.get_analysis_context_snapshot()
+        workflow = self.get_workflow_readiness()
         target = str(context["resolved_target_column"] or "No definido")
         return {
             "Dataset": self.current_dataset.file_name,
             "Muestras": str(self.current_dataset.row_count),
             "Columnas": str(self.current_dataset.column_count),
             "Target": target,
-            "Estado": "Listo" if self.variable_config else "Configurar variables",
+            "Estado": "Listo" if bool(workflow["stages"]["eda"]["ready"]) else "Configurar variables",
             "Dominio": self.workflow_state.active_domain,
         }
 

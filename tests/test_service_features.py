@@ -533,6 +533,131 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(payload["selection_column"], "")
             self.assertEqual(payload["active_layers"], [])
 
+    def test_prepare_domain_statistics_uses_snapshot_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_snapshot.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
+            )
+
+            with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
+                payload = self.service.prepare_domain_statistics()
+            self.assertGreaterEqual(snapshot_mock.call_count, 1)
+            self.assertEqual(payload["selection_column"], "domain_estimation")
+
+    def test_prepare_domain_statistics_respects_active_domain_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_filter.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,a\n2,2,2,4,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
+            )
+            self.assertTrue(self.service.set_active_domain("A").success)
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload["selection_column"], "domain_estimation")
+            self.assertEqual(payload["total_rows"], 2)
+            self.assertEqual([item["domain"] for item in payload["items"]], ["A"])
+
+    def test_prepare_domain_statistics_empty_when_filter_column_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_missing_filter_column.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.service.workflow_state.active_domain_filter = "A"
+            self.service.variable_config.domain_column = "missing_filter_col"
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload, {"items": [], "selection_column": "", "active_layers": []})
+
+    def test_prepare_domain_statistics_empty_when_resolved_target_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_missing_target.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped_missing",
+                    keep_category_column=False,
+                ).success
+            )
+            self.service.current_dataset.dataframe.drop(columns=["target_capped_missing"], inplace=True)
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload["items"], [])
+            self.assertEqual(payload["selection_column"], "")
+
+    def test_prepare_domain_statistics_empty_when_dataframe_filtered_to_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_empty_after_filter.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
+            )
+            self.service.workflow_state.active_domain_filter = "ZZZ"
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload, {"items": [], "selection_column": "domain_estimation", "active_layers": []})
+
+    def test_prepare_domain_statistics_with_effective_target_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_effective_target.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,3,a\n2,2,2,5,b\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
+            )
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload["target_column"], "target_capped")
+            self.assertGreater(payload["total_rows"], 0)
+
+    def test_prepare_domain_statistics_legacy_domain_composite_still_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_stats_legacy_composite.csv"
+            csv_path.write_text(
+                "x,y,z,target,dom,zone\n0,0,0,1,a,z1\n1,1,1,2,a,z1\n2,2,2,4,b,z2\n3,3,3,6,b,z2\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(
+                self.service.configure_domains(
+                    ordered_layers=["dom", "zone"],
+                    active_layers=["dom", "zone"],
+                    min_samples=1,
+                    include_missing=False,
+                ).success
+            )
+
+            payload = self.service.prepare_domain_statistics()
+            self.assertEqual(payload["selection_column"], "domain_composite")
+            self.assertGreater(len(payload["items"]), 0)
+
     def test_prepare_domain_statistics_contract_with_configured_domains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = Path(tmp_dir) / "domain_stats_full.csv"
