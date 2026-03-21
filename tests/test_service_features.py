@@ -324,6 +324,92 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(state["dynamic_category_column"], "target_capped_p50_class")
             self.assertEqual(state["effective_target_column"], "target_capped_p50")
 
+    def test_analysis_context_snapshot_contract_without_dataset(self) -> None:
+        context = self.service.get_analysis_context_snapshot()
+        self.assertEqual(
+            set(context.keys()),
+            {
+                "base_target_column",
+                "effective_target_column",
+                "resolved_target_column",
+                "resolved_target_type",
+                "active_domain_column",
+                "active_domain_filter",
+                "current_step",
+                "readiness",
+                "blocking_reason",
+            },
+        )
+        self.assertEqual(context["readiness"], "blocked")
+        self.assertEqual(context["blocking_reason"], "missing_dataset")
+        self.assertEqual(context["current_step"], "Datos")
+
+    def test_analysis_context_snapshot_base_effective_consistency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "snapshot_consistency.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,100\n2,2,2,3\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+
+            base_context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(base_context["base_target_column"], "target")
+            self.assertEqual(base_context["effective_target_column"], "target")
+            self.assertEqual(base_context["resolved_target_column"], "target")
+            self.assertEqual(base_context["resolved_target_type"], "numeric")
+            self.assertEqual(base_context["readiness"], "ready")
+            self.assertEqual(base_context["blocking_reason"], "")
+
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped",
+                    keep_category_column=False,
+                ).success
+            )
+            capped_context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(capped_context["base_target_column"], "target")
+            self.assertEqual(capped_context["effective_target_column"], "target_capped")
+            self.assertEqual(capped_context["resolved_target_column"], "target_capped")
+            self.assertEqual(capped_context["resolved_target_type"], "numeric")
+
+    def test_analysis_context_snapshot_persists_domain_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "snapshot_domain_filter.csv"
+            csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,b\n2,2,2,3,a\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            applied = self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}})
+            self.assertTrue(applied.success)
+            self.assertTrue(self.service.set_active_domain("A").success)
+
+            context = self.service.get_analysis_context_snapshot()
+            self.assertEqual(context["active_domain_filter"], "A")
+            self.assertEqual(context["active_domain_column"], "domain_estimation")
+
+    def test_summary_cards_target_matches_context_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "summary_context_regression.csv"
+            csv_path.write_text("x,y,z,target\n0,0,0,1\n1,1,1,3\n2,2,2,5\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            self.assertTrue(
+                self.service.apply_cutoffs(
+                    enabled=True,
+                    target_column="target",
+                    limits_text="2,4",
+                    output_column="target_cutoff_manual",
+                ).success
+            )
+
+            context = self.service.get_analysis_context_snapshot()
+            cards = self.service.get_summary_cards()
+            self.assertEqual(cards["Target"], context["resolved_target_column"])
+            self.assertEqual(cards["Dataset"], self.service.current_dataset.file_name)
+            self.assertEqual(cards["Muestras"], str(self.service.current_dataset.row_count))
+
     def test_prepare_domain_statistics_contract_without_active_layers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = Path(tmp_dir) / "domain_stats_empty.csv"
