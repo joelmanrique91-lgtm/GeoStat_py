@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.ui.panels.home_panel import _build_active_step_hint, _build_context_chip_texts, _build_workflow_stage_label
+from app.ui.panels.home_panel import _build_active_step_hint, _build_context_chip_texts, _build_visual_context_line, _build_workflow_stage_label
 
 
 class HomePanelSemanticsTests(unittest.TestCase):
@@ -60,6 +60,17 @@ class HomePanelSemanticsTests(unittest.TestCase):
         self.assertIn("Target activo: target_capped", texts["target"])
         self.assertIn("Dominio/filtro: domain_estimation · A", texts["domain"])
         self.assertIn("Bloqueos: 1", texts["status"])
+
+    def test_visual_context_line_includes_global_and_local_context(self) -> None:
+        snapshot = {
+            "resolved_target_column": "target_capped",
+            "active_domain_column": "domain_estimation",
+            "active_domain_filter": "A",
+        }
+        line = _build_visual_context_line(snapshot, local_override="dom")
+        self.assertIn("Target global: target_capped", line)
+        self.assertIn("Override local: dom", line)
+        self.assertIn("Dominio/filtro: domain_estimation · A", line)
 
 
 if __name__ == "__main__":

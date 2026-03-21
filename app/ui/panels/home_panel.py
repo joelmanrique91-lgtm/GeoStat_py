@@ -105,6 +105,17 @@ def _build_context_chip_texts(snapshot: dict[str, object], readiness: dict[str, 
     }
 
 
+def _build_visual_context_line(snapshot: dict[str, object], *, local_override: str | None = None) -> str:
+    resolved_target = str(snapshot.get("resolved_target_column") or "No definido")
+    domain_col = str(snapshot.get("active_domain_column") or "No definido")
+    domain_filter = str(snapshot.get("active_domain_filter") or "Todos")
+    parts = [f"Target global: {resolved_target}"]
+    if local_override and local_override != resolved_target:
+        parts.append(f"Override local: {local_override}")
+    parts.append(f"Dominio/filtro: {domain_col} · {domain_filter}")
+    return " | ".join(parts)
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -581,9 +592,10 @@ class HomePanel(ctk.CTkFrame):
         snapshot = self.service.get_analysis_context_snapshot()
         active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(
             wrapper,
-            text=f"Target resuelto global: {snapshot['resolved_target_column']} · Variable en vista: {active_variable} · {capping_status}",
+            text=f"{_build_visual_context_line(snapshot, local_override=active_variable)} · {capping_status}",
             text_color=TXT_MUTED,
             font=ctk.CTkFont(size=10),
         ).pack(anchor="w", padx=6, pady=(0, 4))
@@ -599,6 +611,7 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
         grid = DashboardGrid(wrapper, 2, 2, figsize=(12.2, 5.9))
         ax_hist = grid.axis(0, 0)
         ax_box = grid.axis(0, 1)
@@ -634,8 +647,8 @@ class HomePanel(ctk.CTkFrame):
         add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.83)
         if cutoff_val is not None:
             add_reference_line(ax_hist, cutoff_val, label=f"Cutoff {cutoff_val:.3g}", color=SEM_ORANGE, y_pos=0.76)
-        ax_hist.set_title("Distribución de ley", color=PLOT_TXT)
-        ax_hist.text(0.01, 1.02, "Comparación entre variable original y operativa", transform=ax_hist.transAxes, color=TXT_MUTED, fontsize=8)
+        ax_hist.set_title(f"Distribución de {active_variable}", color=PLOT_TXT)
+        ax_hist.text(0.01, 1.02, "Comparación entre base y variable operativa", transform=ax_hist.transAxes, color=TXT_MUTED, fontsize=8)
         ax_hist.set_xlabel("Ley Cu (%)")
         ax_hist.set_ylabel("Frecuencia (n)")
         ax_hist.legend(loc="upper right", fontsize=8, frameon=False)
@@ -657,7 +670,7 @@ class HomePanel(ctk.CTkFrame):
         ax_box.axvline(p50, color=SEM_GREEN, linestyle="-", linewidth=1.1, alpha=0.9)
         ax_box.axvline(p90, color=SEM_ORANGE, linestyle="--", linewidth=1.1, alpha=0.9)
         ax_box.set_yticks([])
-        ax_box.set_title("Rango univariado y outliers", color=PLOT_TXT)
+        ax_box.set_title(f"Rango y outliers de {active_variable}", color=PLOT_TXT)
         ax_box.set_xlabel("Ley Cu (%)")
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
@@ -678,7 +691,7 @@ class HomePanel(ctk.CTkFrame):
                 ax_prob.scatter(tail_x, tail_y, s=16, color=SEM_ORANGE, alpha=0.9, label="Cola alta")
                 ax_prob.annotate("Desvío de cola", xy=(tail_x[-1], tail_y[-1]), xytext=(8, 8), textcoords="offset points", color=SEM_ORANGE, fontsize=8)
             ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
-            ax_prob.set_title("QQ Plot (Normal Score)", color=PLOT_TXT)
+            ax_prob.set_title(f"QQ Plot de {active_variable}", color=PLOT_TXT)
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
             ax_prob.legend(loc="upper left", fontsize=8, frameon=False)
@@ -699,7 +712,7 @@ class HomePanel(ctk.CTkFrame):
                 patch.set_edgecolor(BORDER_SOFT)
             ax_domain.tick_params(axis="x", rotation=22)
             ax_domain.set_ylabel("Ley Cu (%)")
-            ax_domain.set_title("Comparativo por dominio (ordenado por media)", color=PLOT_TXT)
+            ax_domain.set_title(f"Comparativo por dominio ({active_variable})", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
@@ -717,8 +730,15 @@ class HomePanel(ctk.CTkFrame):
         grid.render()
 
     def _render_cutoff_view(self) -> None:
-        container = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
-        container.grid(row=0, column=0, sticky="nsew")
+        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+        wrapper.grid(row=0, column=0, sticky="nsew")
+        snapshot = self.service.get_analysis_context_snapshot()
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot)} · Ajustes de capping locales en esta vista.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
+
+        container = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
+        container.pack(fill="both", expand=True)
         container.grid_columnconfigure((0, 1), weight=1)
         container.grid_rowconfigure((0, 1), weight=1)
 
@@ -736,6 +756,9 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         snapshot = self.service.get_analysis_context_snapshot()
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(0, 2))
         try:
             color_by = self.spatial_color_var.get() or None
             result = self.service.prepare_visual_data(color_by=color_by)
@@ -760,9 +783,9 @@ class HomePanel(ctk.CTkFrame):
         sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
         sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
 
-        ax_xy.set_title("Planta (XY)", color=PLOT_TXT)
-        ax_xz.set_title("Sección XZ", color=PLOT_TXT)
-        ax_yz.set_title("Sección YZ", color=PLOT_TXT)
+        ax_xy.set_title("Planta XY (vista operativa)", color=PLOT_TXT)
+        ax_xz.set_title("Sección XZ (detalle vertical)", color=PLOT_TXT)
+        ax_yz.set_title("Sección YZ (detalle vertical)", color=PLOT_TXT)
         ax_xy.set_xlabel("X")
         ax_xy.set_ylabel("Y")
         ax_xz.set_xlabel("X")
@@ -800,9 +823,13 @@ class HomePanel(ctk.CTkFrame):
     def _render_domains_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
-        wrapper.grid_rowconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(1, weight=0)
+        wrapper.grid_rowconfigure(0, weight=0)
+        wrapper.grid_rowconfigure(1, weight=1)
+        wrapper.grid_rowconfigure(2, weight=0)
         wrapper.grid_columnconfigure(0, weight=1)
+        snapshot = self.service.get_analysis_context_snapshot()
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text=_build_visual_context_line(snapshot), text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=0, sticky="w", padx=6, pady=(18, 2))
         try:
             payload = self.service.prepare_domain_statistics()
         except Exception as exc:
@@ -814,10 +841,11 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(wrapper, text="Define al menos un dominio para comenzar", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 2))
         plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        plot_card.grid(row=0, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        plot_card.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
         records_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        records_card.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 0))
+        records_card.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 0))
         ctk.CTkLabel(records_card, text="Detalle del dominio seleccionado", text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=8, pady=(6, 2))
         ctk.CTkLabel(records_card, textvariable=self.domain_records_var, text_color=TXT_MUTED, justify="left", wraplength=980).pack(anchor="w", padx=8, pady=(0, 6))
 
