@@ -40,6 +40,25 @@ class VisualPreparationTests(unittest.TestCase):
         self.assertEqual(len(result.spatial_data.y), 3)
         self.assertEqual(len(result.spatial_data.z), 3)
 
+    def test_prepare_visual_data_uses_snapshot_context(self) -> None:
+        self._load_numeric_dataset()
+        with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
+            result = self.service.prepare_visual_data()
+        self.assertTrue(result.success)
+        self.assertGreaterEqual(snapshot_mock.call_count, 1)
+
+    def test_prepare_visual_data_respects_active_domain_filter_from_snapshot(self) -> None:
+        self._load_numeric_dataset()
+        applied = self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}})
+        self.assertTrue(applied.success)
+        self.assertTrue(self.service.set_active_domain("A").success)
+
+        snapshot = self.service.get_analysis_context_snapshot()
+        self.assertEqual(snapshot["active_domain_filter"], "A")
+        result = self.service.prepare_visual_data()
+        self.assertTrue(result.success)
+        self.assertEqual(len(result.spatial_data.target), 2)
+
     def test_statistics_table_contains_expected_metrics(self) -> None:
         self._load_numeric_dataset()
         table = dict(self.service.get_target_statistics_table())
@@ -77,6 +96,71 @@ class VisualPreparationTests(unittest.TestCase):
             result = self.service.prepare_visual_data()
             self.assertFalse(result.success)
             self.assertIn("Target no numérico", result.message)
+
+    def test_prepare_visual_data_fails_when_resolved_target_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            p = Path(tmp_dir) / "data.csv"
+            p.write_text("x,y,z,target\n1,2,3,10\n2,3,4,11\n", encoding="utf-8")
+            self.service.load_csv(str(p))
+            self.service.set_variable_config("x", "y", "z", "target")
+            self.assertTrue(
+                self.service.apply_dynamic_cutoff(
+                    enabled=True,
+                    target_column="target",
+                    mode="percentile",
+                    slider_percent=50.0,
+                    output_column="target_capped_missing",
+                    keep_category_column=False,
+                ).success
+            )
+            self.service.current_dataset.dataframe.drop(columns=["target_capped_missing"], inplace=True)
+            result = self.service.prepare_visual_data()
+            self.assertFalse(result.success)
+            self.assertIn("Target no válido para secciones espaciales", result.message)
+
+    def test_prepare_visual_data_fails_when_active_domain_column_missing(self) -> None:
+        self._load_numeric_dataset()
+        self.service.workflow_state.active_domain_filter = "A"
+        self.service.variable_config.domain_column = "missing_domain_col"
+        result = self.service.prepare_visual_data()
+        self.assertFalse(result.success)
+        self.assertIn("Filtro de dominio activo sobre columna inexistente", result.message)
+
+    def test_prepare_visual_data_color_by_override_is_respected(self) -> None:
+        self._load_numeric_dataset()
+        result = self.service.prepare_visual_data(color_by="dom")
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.spatial_data)
+        self.assertEqual(result.spatial_data.target_label, "Target (categorías)")
+
+    def test_prepare_visual_data_fails_for_invalid_color_by(self) -> None:
+        self._load_numeric_dataset()
+        result = self.service.prepare_visual_data(color_by="nope")
+        self.assertFalse(result.success)
+        self.assertIn("La columna de color no existe", result.message)
+
+    def test_prepare_visual_data_fails_when_spatial_columns_missing(self) -> None:
+        self._load_numeric_dataset()
+        self.service.current_dataset.dataframe.drop(columns=["x"], inplace=True)
+        result = self.service.prepare_visual_data()
+        self.assertFalse(result.success)
+        self.assertIn("Columnas faltantes para secciones", result.message)
+
+    def test_prepare_visual_data_with_effective_target_regression(self) -> None:
+        self._load_numeric_dataset()
+        self.assertTrue(
+            self.service.apply_dynamic_cutoff(
+                enabled=True,
+                target_column="target",
+                mode="percentile",
+                slider_percent=50.0,
+                output_column="target_capped",
+                keep_category_column=False,
+            ).success
+        )
+        result = self.service.prepare_visual_data()
+        self.assertTrue(result.success)
+        self.assertEqual(len(result.spatial_data.target), 3)
 
     def test_univariate_coerces_numeric_strings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
