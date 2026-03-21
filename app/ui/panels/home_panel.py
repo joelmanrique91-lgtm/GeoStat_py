@@ -60,10 +60,14 @@ class HomePanel(ctk.CTkFrame):
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
         self.domain_base_var = ctk.StringVar(value="")
         self.domain_name_var = ctk.StringVar(value="")
-        self.domain_category_values_var = ctk.StringVar(value="")
         self.spatial_color_var = ctk.StringVar(value="")
         self.domain_filter_var = ctk.StringVar(value="Todos")
         self.domain_definition_local: dict[str, list[str]] = {}
+        self.domain_feedback_var = ctk.StringVar(value="Define dominios para comenzar.")
+        self.domain_selected_categories: set[str] = set()
+        self.domain_category_checkbox_vars: dict[str, ctk.BooleanVar] = {}
+        self.domain_assign_button: ctk.CTkButton | None = None
+        self.domain_apply_button: ctk.CTkButton | None = None
         self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para visualizar resumen analítico e índices de registros.")
 
         self.log_visible = False
@@ -82,6 +86,7 @@ class HomePanel(ctk.CTkFrame):
         self.plot_frame: ctk.CTkFrame | None = None
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
+        self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
         self._build_layout()
         self._render_step("Datos")
@@ -330,18 +335,46 @@ class HomePanel(ctk.CTkFrame):
         candidates = self.service.get_domain_candidate_columns() or [""]
         if not self.domain_base_var.get() and candidates and candidates[0]:
             self.domain_base_var.set(candidates[0])
+        if self.domain_base_var.get() not in candidates:
+            self.domain_base_var.set(candidates[0] if candidates else "")
+            self.domain_selected_categories = set()
         ctk.CTkLabel(section, text="Variable base", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkOptionMenu(section, variable=self.domain_base_var, values=candidates, state="normal" if candidates[0] else "disabled", height=24).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkLabel(section, text="Categorías (separadas por coma)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkEntry(section, textvariable=self.domain_category_values_var, height=24, placeholder_text="A, B, C").pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkOptionMenu(
+            section,
+            variable=self.domain_base_var,
+            values=candidates,
+            state="normal" if candidates[0] else "disabled",
+            height=24,
+            command=lambda _value: self._on_domain_base_changed(),
+        ).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Selecciona categorías", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        categories_box = ctk.CTkScrollableFrame(section, height=140, fg_color=BG_SOFT)
+        categories_box.pack(fill="x", padx=6, pady=(0, 4))
+        self.domain_category_checkbox_vars = {}
+        category_counts = self._get_domain_category_counts()
+        if not category_counts:
+            ctk.CTkLabel(categories_box, text="No hay categorías disponibles.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=4, pady=4)
+        for category, count in category_counts:
+            var = ctk.BooleanVar(value=category in self.domain_selected_categories)
+            self.domain_category_checkbox_vars[category] = var
+            ctk.CTkCheckBox(
+                categories_box,
+                text=f"{category} (n={count})",
+                variable=var,
+                command=lambda cat=category: self._on_toggle_domain_category(cat),
+                text_color=TXT_MAIN,
+            ).pack(anchor="w", padx=4, pady=1)
         ctk.CTkLabel(section, text="Nombre dominio", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkEntry(section, textvariable=self.domain_name_var, height=24, placeholder_text="D1").pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Asignar dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_assign_domain).pack(fill="x", padx=6, pady=(0, 4))
-        preview = "Sin dominios definidos." if not self.domain_definition_local else "\n".join(
-            f"{domain} = {{{', '.join(categories)}}}" for domain, categories in self.domain_definition_local.items()
-        )
-        ctk.CTkLabel(section, text=preview, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains).pack(fill="x", padx=6, pady=(2, 4))
+        self.domain_assign_button = ctk.CTkButton(section, text="Asignar dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_assign_domain)
+        self.domain_assign_button.pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Dominios definidos:", text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=6, pady=(2, 2))
+        summary = self._build_domain_definition_summary()
+        ctk.CTkLabel(section, text=summary, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 4))
+        self.domain_apply_button = ctk.CTkButton(section, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains)
+        self.domain_apply_button.pack(fill="x", padx=6, pady=(2, 4))
+        ctk.CTkLabel(section, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 2))
+        self._update_domain_action_states()
         return section
 
     def _focus_sidebar_sections(self, step_name: str) -> None:
@@ -583,7 +616,7 @@ class HomePanel(ctk.CTkFrame):
 
         rows = payload.get("items", [])
         if not rows:
-            ctk.CTkLabel(wrapper, text="No hay dominios activos. Configura capas y aplica el constructor.", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(wrapper, text="Define al menos un dominio para comenzar", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
         plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
@@ -763,6 +796,28 @@ class HomePanel(ctk.CTkFrame):
                 unique.append(option)
         return unique
 
+    def _get_domain_category_counts(self) -> list[tuple[str, int]]:
+        dataset = self.service.current_dataset
+        base = self.domain_base_var.get().strip()
+        if dataset is None or not base or base not in dataset.dataframe.columns:
+            return []
+        counts = dataset.dataframe[base].dropna().astype(str).str.strip().value_counts()
+        return [(str(cat), int(count)) for cat, count in counts.items() if str(cat)]
+
+    def _domain_inputs_valid(self) -> bool:
+        return bool(self.domain_base_var.get().strip() and self.domain_name_var.get().strip() and self.domain_selected_categories)
+
+    def _update_domain_action_states(self) -> None:
+        assign_state = "normal" if self._domain_inputs_valid() else "disabled"
+        apply_state = "normal" if self.domain_definition_local else "disabled"
+        if self.domain_assign_button is not None:
+            self.domain_assign_button.configure(state=assign_state)
+        if self.domain_apply_button is not None:
+            self.domain_apply_button.configure(state=apply_state)
+
+    def _on_domain_name_changed(self, *_args) -> None:
+        self._update_domain_action_states()
+
     def _on_domain_mode_change(self) -> None:
         if self.domain_menu_widget is not None:
             self.domain_menu_widget.configure(state="normal" if bool(self.use_domain_var.get()) else "disabled")
@@ -781,6 +836,8 @@ class HomePanel(ctk.CTkFrame):
         if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self.domain_definition_local = {}
+            self.domain_selected_categories = set()
+            self.domain_feedback_var.set("Selecciona categorías y asigna un nombre de dominio.")
             self._apply_autodetected_columns()
             self._sync_cutoff_defaults()
             self._render_control_sections()
@@ -969,16 +1026,44 @@ class HomePanel(ctk.CTkFrame):
             self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
             self._refresh_dashboard(reason="dynamic_cutoff_confirmed")
 
+    def _build_domain_definition_summary(self) -> str:
+        if not self.domain_definition_local:
+            return "Define al menos un dominio para comenzar"
+        counts_map = dict(self._get_domain_category_counts())
+        lines: list[str] = []
+        for domain_name, categories in self.domain_definition_local.items():
+            total = sum(int(counts_map.get(cat, 0)) for cat in categories)
+            lines.append(f"{domain_name} → [{', '.join(categories)}] (n={total})")
+        return "\n".join(lines)
+
+    def _on_domain_base_changed(self) -> None:
+        self.domain_selected_categories = set()
+        self.domain_feedback_var.set("Selecciona categorías y asigna un nombre de dominio.")
+        self._render_control_sections()
+
+    def _on_toggle_domain_category(self, category: str) -> None:
+        var = self.domain_category_checkbox_vars.get(category)
+        if var is None:
+            return
+        if bool(var.get()):
+            self.domain_selected_categories.add(category)
+        else:
+            self.domain_selected_categories.discard(category)
+        self._update_domain_action_states()
+
     def _on_assign_domain(self) -> None:
         domain_name = self.domain_name_var.get().strip()
-        categories = [token.strip() for token in self.domain_category_values_var.get().replace(";", ",").split(",") if token.strip()]
-        if not domain_name or not categories:
-            self.status_text.set("Debes indicar nombre de dominio y categorías.")
+        categories = sorted(self.domain_selected_categories)
+        if not self.domain_base_var.get().strip() or not domain_name or not categories:
+            self.status_text.set("Debes seleccionar categorías y asignar un nombre al dominio")
+            self.domain_feedback_var.set("Debes seleccionar categorías y asignar un nombre al dominio")
             return
         merged = list(dict.fromkeys([*self.domain_definition_local.get(domain_name, []), *categories]))
         self.domain_definition_local[domain_name] = merged
         self.domain_name_var.set("")
-        self.domain_category_values_var.set("")
+        self.domain_selected_categories = set()
+        self.status_text.set(f"Dominio {domain_name} creado correctamente")
+        self.domain_feedback_var.set(f"Dominio {domain_name} creado correctamente")
         self._render_control_sections()
 
     def _on_apply_domain_filter(self) -> None:
@@ -990,10 +1075,20 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_apply_domains(self) -> None:
         self._trace_ui_action("aplicar_dominios", refresh_type="none")
+        if not self.domain_definition_local:
+            self.status_text.set("Define al menos un dominio para comenzar")
+            self.domain_feedback_var.set("Define al menos un dominio para comenzar")
+            return
         definition = {"variable_base": self.domain_base_var.get().strip(), "domains": dict(self.domain_definition_local)}
         result = self.service.apply_domain_definition(definition)
-        self.status_text.set(result.message)
-        self._append_activity(result.message)
+        if result.success:
+            self.status_text.set("Dominios aplicados al dataset")
+            self.domain_feedback_var.set("Dominios aplicados al dataset")
+            self._append_activity("Dominios aplicados al dataset")
+        else:
+            self.status_text.set(result.message)
+            self.domain_feedback_var.set(result.message)
+            self._append_activity(result.message)
         if result.success:
             self.domain_label.set("Dominio: domain_estimation")
             self.domain_records_var.set("Selecciona una burbuja para ver índices y resumen del dominio.")
