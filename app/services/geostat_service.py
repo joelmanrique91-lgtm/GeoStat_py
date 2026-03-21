@@ -164,6 +164,7 @@ def _compute_target_statistics(clean, total: int) -> dict[str, float]:
             "p90": math.nan,
             "max": math.nan,
             "skewness": math.nan,
+            "kurtosis": math.nan,
         }
     mean = float(clean.mean())
     std = float(clean.std())
@@ -181,6 +182,7 @@ def _compute_target_statistics(clean, total: int) -> dict[str, float]:
         "p90": float(clean.quantile(0.90)),
         "max": float(clean.max()),
         "skewness": float(clean.skew()) if len(clean) > 2 else math.nan,
+        "kurtosis": float(clean.kurt()) if len(clean) > 3 else math.nan,
     }
 
 
@@ -1103,6 +1105,7 @@ class GeostatService:
             ("p90", f"{stats['p90']:.5g}"),
             ("max", f"{stats['max']:.5g}"),
             ("skewness", f"{stats['skewness']:.5g}"),
+            ("kurtosis", f"{stats['kurtosis']:.5g}"),
         ]
 
     def get_summary_cards(self) -> dict[str, str]:
