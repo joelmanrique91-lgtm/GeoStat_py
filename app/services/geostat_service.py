@@ -833,25 +833,65 @@ class GeostatService:
             "blocking_reason": blocking_reason,
         }
 
-    def _get_filtered_dataframe(self):
+    def _get_filtered_dataframe(self, context_snapshot: dict[str, object] | None = None):
         if self.current_dataset is None:
             return None
+        snapshot = context_snapshot or self.get_analysis_context_snapshot()
         dataframe = self.current_dataset.dataframe
-        active_filter = (self.workflow_state.active_domain_filter or "").strip()
-        if not active_filter or DOMAIN_ESTIMATION_COLUMN not in dataframe.columns:
+        active_filter = str(snapshot.get("active_domain_filter", "")).strip()
+        if not active_filter:
             return dataframe
-        return dataframe[dataframe[DOMAIN_ESTIMATION_COLUMN].astype(str) == active_filter]
+        active_domain_column = str(snapshot.get("active_domain_column", "")).strip() or DOMAIN_ESTIMATION_COLUMN
+        if active_domain_column not in dataframe.columns and DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+            active_domain_column = DOMAIN_ESTIMATION_COLUMN
+        if active_domain_column not in dataframe.columns:
+            return dataframe
+        return dataframe[dataframe[active_domain_column].astype(str) == active_filter]
+
+    def _resolve_spatial_visual_context(self, color_by: str | None) -> tuple[object | None, str, bool, str]:
+        snapshot = self.get_analysis_context_snapshot()
+        if snapshot["readiness"] == "blocked":
+            if snapshot["blocking_reason"] == "missing_resolved_target_column":
+                missing_target = str(snapshot["resolved_target_column"])
+                return None, "", False, f"Target no válido para secciones espaciales: '{missing_target}'."
+            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
+        if self.current_dataset is None or self.variable_config is None:
+            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
+
+        dataframe = self.current_dataset.dataframe
+        resolved_target = str(snapshot["resolved_target_column"])
+        if not resolved_target or resolved_target not in dataframe.columns:
+            return None, "", False, f"Target no válido para secciones espaciales: '{resolved_target}'."
+
+        active_filter = str(snapshot["active_domain_filter"]).strip()
+        active_domain_column = str(snapshot["active_domain_column"]).strip() or DOMAIN_ESTIMATION_COLUMN
+        if active_filter and active_domain_column not in dataframe.columns:
+            if DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+                active_domain_column = DOMAIN_ESTIMATION_COLUMN
+            else:
+                return None, "", False, f"Filtro de dominio activo sobre columna inexistente: '{active_domain_column}'."
+
+        filtered = self._get_filtered_dataframe(
+            {
+                "active_domain_filter": active_filter,
+                "active_domain_column": active_domain_column,
+            }
+        )
+
+        color_column = (color_by or "").strip() or resolved_target
+        if color_column not in dataframe.columns:
+            return None, "", False, f"La columna de color no existe: '{color_column}'."
+        allow_categorical = bool(color_column != resolved_target or self.workflow_state.cutoffs_enabled)
+        return filtered, color_column, allow_categorical, ""
 
     def prepare_visual_data(self, color_by: str | None = None) -> VisualPreparationResult:
         self.activity_log.log("dashboard_render_started", "info", "Render espacial iniciado.", {"view": "Espacial"})
-        if self.current_dataset is None or self.variable_config is None:
-            message = "No hay dataset/configuración suficiente para renderizar visuales."
+        dataframe, color_column, allow_categorical, context_error = self._resolve_spatial_visual_context(color_by)
+        if context_error:
+            message = context_error
             self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Espacial"})
             return VisualPreparationResult(False, message, None)
         try:
-            dataframe = self._get_filtered_dataframe()
-            color_column = (color_by or "").strip() or self._get_effective_target_column()
-            allow_categorical = bool(color_column != self._get_effective_target_column() or self.workflow_state.cutoffs_enabled)
             spatial = prepare_spatial_sections(
                 dataframe,
                 self.variable_config.x_column,
