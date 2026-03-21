@@ -233,7 +233,6 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 5))
         ctk.CTkLabel(section, textvariable=self.dataset_label, text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 6))
 
-        # compat: config_grid = ctk.CTkFrame(self.center_panel, fg_color="transparent")
         grid = ctk.CTkFrame(section, fg_color="transparent")
         grid.pack(fill="x", padx=6, pady=(0, 5))
         grid.grid_columnconfigure((0, 1), weight=1)

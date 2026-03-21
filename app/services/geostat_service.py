@@ -110,6 +110,79 @@ def _is_missing_category(value: object) -> bool:
     return False
 
 
+def _normalize_identifier(value: str) -> str:
+    """Normalize identifiers for resilient column matching."""
+    return value.lower().replace("_", "").replace(" ", "")
+
+
+def _build_univariate_availability(target: str, valid_count: int, probability_min_samples: int = 3) -> dict[str, dict[str, object]]:
+    histogram_available = valid_count > 0
+    boxplot_available = valid_count > 0
+    probability_available = valid_count >= probability_min_samples
+    return {
+        "histogram": {
+            "available": histogram_available,
+            "message": ""
+            if histogram_available
+            else f"Histograma no disponible: target {target} no tiene valores numéricos válidos.",
+        },
+        "boxplot": {
+            "available": boxplot_available,
+            "message": ""
+            if boxplot_available
+            else f"Boxplot general no disponible: target {target} no tiene valores numéricos válidos.",
+        },
+        "probability": {
+            "available": probability_available,
+            "message": ""
+            if probability_available
+            else f"Probability plot no disponible: menos de {probability_min_samples} valores válidos.",
+        },
+    }
+
+
+def _empty_domain_payload(message: str = "") -> dict[str, object]:
+    return {"enabled": False, "labels": [], "values": [], "message": message, "valid_rows": 0, "valid_categories": 0}
+
+
+def _compute_target_statistics(clean, total: int) -> dict[str, float]:
+    """Compute descriptive target metrics while preserving output contract."""
+    if clean.empty:
+        null_pct = float(((total - len(clean)) / total) * 100.0) if total else 0.0
+        return {
+            "valid_count": 0.0,
+            "null_pct": null_pct,
+            "mean": math.nan,
+            "std": math.nan,
+            "cv": math.nan,
+            "min": math.nan,
+            "p10": math.nan,
+            "p25": math.nan,
+            "p50": math.nan,
+            "p75": math.nan,
+            "p90": math.nan,
+            "max": math.nan,
+            "skewness": math.nan,
+        }
+    mean = float(clean.mean())
+    std = float(clean.std())
+    return {
+        "valid_count": float(len(clean)),
+        "null_pct": float(((total - len(clean)) / total) * 100.0) if total else 0.0,
+        "mean": mean,
+        "std": std,
+        "cv": float(std / mean) if mean != 0 else 0.0,
+        "min": float(clean.min()),
+        "p10": float(clean.quantile(0.10)),
+        "p25": float(clean.quantile(0.25)),
+        "p50": float(clean.quantile(0.50)),
+        "p75": float(clean.quantile(0.75)),
+        "p90": float(clean.quantile(0.90)),
+        "max": float(clean.max()),
+        "skewness": float(clean.skew()) if len(clean) > 2 else math.nan,
+    }
+
+
 class GeostatService:
     def __init__(self, adapter: GeostatSpyAdapter, activity_log: ActivityLogService | None = None) -> None:
         self.adapter = adapter
@@ -174,11 +247,11 @@ class GeostatService:
         return LoadCsvResult(True, "CSV cargado correctamente.", details, dataset)
 
     def autodetect_columns(self, columns: list[str], dataframe) -> dict[str, str]:
-        normalized = {col.lower().replace("_", "").replace(" ", ""): col for col in columns}
+        normalized = {_normalize_identifier(col): col for col in columns}
 
         def pick(candidates: list[str]) -> str:
             for candidate in candidates:
-                normalized_candidate = candidate.lower().replace("_", "").replace(" ", "")
+                normalized_candidate = _normalize_identifier(candidate)
                 for key, original in normalized.items():
                     if len(normalized_candidate) == 1:
                         if key == normalized_candidate:
@@ -701,31 +774,11 @@ class GeostatService:
 
         clean_target = numeric_target.dropna().astype(float)
 
-        histogram_available = valid_count > 0
-        boxplot_available = valid_count > 0
         probability_min_samples = 3
-        probability_available = valid_count >= probability_min_samples
-
-        availability = {
-            "histogram": {
-                "available": histogram_available,
-                "message": ""
-                if histogram_available
-                else f"Histograma no disponible: target {target} no tiene valores numéricos válidos.",
-            },
-            "boxplot": {
-                "available": boxplot_available,
-                "message": ""
-                if boxplot_available
-                else f"Boxplot general no disponible: target {target} no tiene valores numéricos válidos.",
-            },
-            "probability": {
-                "available": probability_available,
-                "message": ""
-                if probability_available
-                else f"Probability plot no disponible: menos de {probability_min_samples} valores válidos.",
-            },
-        }
+        availability = _build_univariate_availability(target, valid_count, probability_min_samples=probability_min_samples)
+        histogram_available = bool(availability["histogram"]["available"])
+        boxplot_available = bool(availability["boxplot"]["available"])
+        probability_available = bool(availability["probability"]["available"])
 
         for key, event_name, detail in [
             ("histogram", "univariate_histogram_available", "histograma"),
@@ -773,7 +826,7 @@ class GeostatService:
                     {"component": "probability", "target": target, "valid_count": valid_count},
                 )
 
-        domain_payload = {"enabled": False, "labels": [], "values": [], "message": "", "valid_rows": 0, "valid_categories": 0}
+        domain_payload = _empty_domain_payload()
         domain_col = self.variable_config.domain_column
         if not domain_col:
             domain_payload["message"] = "Boxplot por dominio no disponible: no hay dominio seleccionado."
@@ -833,14 +886,11 @@ class GeostatService:
                             {"component": "domain_boxplot", "domain": domain_col, "valid_rows": valid_rows},
                         )
                 else:
-                    domain_payload = {
-                        "enabled": False,
-                        "labels": [],
-                        "values": [],
-                        "message": f"Boxplot por dominio no disponible: {domain_col} no tiene filas válidas con target numérico.",
-                        "valid_rows": valid_rows,
-                        "valid_categories": valid_categories,
-                    }
+                    domain_payload = _empty_domain_payload(
+                        message=f"Boxplot por dominio no disponible: {domain_col} no tiene filas válidas con target numérico."
+                    )
+                    domain_payload["valid_rows"] = valid_rows
+                    domain_payload["valid_categories"] = valid_categories
                     self.activity_log.log(
                         "univariate_component_unavailable",
                         "warning",
@@ -927,21 +977,7 @@ class GeostatService:
         df = self.current_dataset.dataframe
         total = len(df)
         clean = df[target].dropna().astype(float)
-        return {
-            "valid_count": float(len(clean)),
-            "null_pct": float(((total - len(clean)) / total) * 100.0) if total else 0.0,
-            "mean": float(clean.mean()),
-            "std": float(clean.std()),
-            "cv": float(clean.std() / clean.mean()) if float(clean.mean()) != 0 else 0.0,
-            "min": float(clean.min()),
-            "p10": float(clean.quantile(0.10)),
-            "p25": float(clean.quantile(0.25)),
-            "p50": float(clean.quantile(0.50)),
-            "p75": float(clean.quantile(0.75)),
-            "p90": float(clean.quantile(0.90)),
-            "max": float(clean.max()),
-            "skewness": float(clean.skew()) if len(clean) > 2 else math.nan,
-        }
+        return _compute_target_statistics(clean, total)
 
     def get_target_statistics_table(self, use_effective_target: bool = False) -> list[tuple[str, str]]:
         if self.current_dataset is None or self.variable_config is None:
@@ -991,47 +1027,35 @@ class GeostatService:
             return RepoUpdateResult(False, "Ya hay una actualización en curso.", "Espera a que finalice el proceso actual.", False)
         if self.workflow_state.current_step == "Datos" and self.dataframe_write_in_progress():
             return RepoUpdateResult(False, "Actualización no permitida durante escritura activa.", "Espera a que termine el proceso crítico y vuelve a intentar.", False)
+        if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") != "1":
+            message = "Actualización de repositorio deshabilitada en runtime por seguridad."
+            details = "Cierra la app y ejecuta `python scripts/update_repo.py` desde terminal."
+            self.activity_log.log("repo_update_blocked", "warning", message, {"recommended_command": "python scripts/update_repo.py"})
+            return RepoUpdateResult(False, message, details, False)
 
         self._repo_update_running = True
         self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
         try:
-            if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") == "1":
-                pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)
-                if pull_result.returncode != 0:
-                    error_output = (pull_result.stderr or pull_result.stdout).strip()
-                    return RepoUpdateResult(False, "Falló `git pull`.", error_output or "Error desconocido de git.")
+            pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)
+            if pull_result.returncode != 0:
+                error_output = (pull_result.stderr or pull_result.stdout).strip()
+                return RepoUpdateResult(False, "Falló `git pull`.", error_output or "Error desconocido de git.")
 
-                submodule_result = subprocess.run(
-                    ["git", "submodule", "update", "--init", "--recursive"],
-                    cwd=PROJECT_ROOT,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=120,
-                )
-                output = (pull_result.stdout or pull_result.stderr).strip()
-                submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
-                combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
-                up_to_date = "Already up to date" in output or "Ya está actualizado" in output
-                message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
-                self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
-                return RepoUpdateResult(True, message, combined, not up_to_date)
-
-            python_exec = os.getenv("PYTHON_EXECUTABLE", "python")
-            script_path = PROJECT_ROOT / "scripts" / "update_repo.py"
-            script_result = subprocess.run(
-                [python_exec, str(script_path)],
+            submodule_result = subprocess.run(
+                ["git", "submodule", "update", "--init", "--recursive"],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=180,
+                timeout=120,
             )
-            output = "\n".join(part for part in [script_result.stdout, script_result.stderr] if part).strip()
-            if script_result.returncode != 0:
-                return RepoUpdateResult(False, "Falló actualización segura del repositorio.", output or "Sin detalles.")
-            self.activity_log.log("repo_update_finished", "success", "Repositorio actualizado correctamente (modo seguro).", {})
-            return RepoUpdateResult(True, "Repositorio actualizado correctamente (modo seguro). Reinicia la app para aplicar cambios.", output, True)
+            output = (pull_result.stdout or pull_result.stderr).strip()
+            submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
+            combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
+            up_to_date = "Already up to date" in output or "Ya está actualizado" in output
+            message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
+            self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
+            return RepoUpdateResult(True, message, combined, not up_to_date)
         except Exception as exc:
             return RepoUpdateResult(False, "No se pudo ejecutar la actualización del repositorio.", f"Detalle técnico: {exc}")
         finally:
