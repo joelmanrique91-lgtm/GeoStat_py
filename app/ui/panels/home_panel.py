@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from tkinter import filedialog, messagebox
 import threading
 
@@ -386,14 +387,25 @@ class HomePanel(ctk.CTkFrame):
         block.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 5))
         cards = ctk.CTkFrame(block, fg_color="transparent")
         cards.pack(fill="x", padx=5, pady=4)
-        keys = ["samples", "valid_count", "mean", "p50", "p90", "std", "cv", "% truncado", "cutoff actual"]
+        labels_by_key = {
+            "samples": "Muestras",
+            "valid_count": "N válido",
+            "mean": "Media",
+            "p50": "P50",
+            "p90": "P90",
+            "std": "Desviación estándar",
+            "cv": "Coeficiente de variación (%)",
+            "% truncado": "% truncado",
+            "cutoff actual": "Cutoff actual",
+        }
+        keys = list(labels_by_key.keys())
         primary_keys = {"mean", "p90", "cutoff actual", "% truncado", "valid_count"}
         for idx, key in enumerate(keys):
             cards.grid_columnconfigure(idx, weight=1)
             card_color = "#32455d" if key in primary_keys else "#2b2e35"
             card = ctk.CTkFrame(cards, fg_color=card_color, corner_radius=6)
             card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
-            ctk.CTkLabel(card, text=key.upper(), font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
+            ctk.CTkLabel(card, text=labels_by_key[key], font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
             val = ctk.StringVar(value="-")
             self.kpi_value_vars[key] = val
             self.kpi_cards[key] = card
@@ -501,17 +513,58 @@ class HomePanel(ctk.CTkFrame):
         ax_prob = grid.axis(1, 0)
         ax_domain = grid.axis(1, 1)
 
-        ax_hist.hist(data["target_values"], bins=24, color=C_ORIGINAL, edgecolor="white", alpha=0.9)
-        ax_hist.set_title(f"Distribución de {active_variable}", color=PLOT_TXT)
-        ax_hist.set_xlabel(active_variable)
-        ax_hist.set_ylabel("Frecuencia")
+        values = [float(v) for v in data["target_values"]]
+        sorted_values = sorted(values)
+        n_values = len(sorted_values)
+        bins = min(60, max(20, int(math.sqrt(n_values) * 2)))
+        p50 = sorted_values[int(0.50 * (n_values - 1))]
+        p90 = sorted_values[int(0.90 * (n_values - 1))]
+        p99 = sorted_values[int(0.99 * (n_values - 1))]
+        mean_val = sum(sorted_values) / n_values
+        ax_hist.hist(values, bins=bins, color=C_ORIGINAL, edgecolor="white", alpha=0.68)
+        ax_hist.axvline(mean_val, color="#0f172a", linestyle="--", linewidth=1.2, label="Media")
+        ax_hist.axvline(p50, color="#16a34a", linestyle="-", linewidth=1.2, label="P50")
+        ax_hist.axvline(p90, color="#f97316", linestyle="-", linewidth=1.2, label="P90")
+        ax_hist.set_title(f"Histograma de ley Cu (%) · {active_variable}", color=PLOT_TXT)
+        ax_hist.set_xlabel("Ley Cu (%)")
+        ax_hist.set_ylabel("Frecuencia (n)")
+        ax_hist.legend(loc="upper right", fontsize=8)
+        if sorted_values[-1] > p99 * 1.3:
+            ax_hist.set_xlim(left=sorted_values[0], right=p99)
+            ax_hist.text(
+                0.01,
+                0.98,
+                "Vista truncada a P99 para mejorar resolución.",
+                transform=ax_hist.transAxes,
+                va="top",
+                ha="left",
+                fontsize=8,
+                color="#334155",
+            )
 
-        ax_box.boxplot(data["target_values"], vert=True, patch_artist=True, widths=0.45, showfliers=False)
-        ax_box.set_title(f"Boxplot general de {active_variable}", color=PLOT_TXT)
+        ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.45, showfliers=True)
+        jitter_y = [1 + ((idx % 9) - 4) * 0.012 for idx in range(n_values)]
+        ax_box.scatter(values, jitter_y, s=7, color=C_ACTIVE, alpha=0.35, edgecolors="none")
+        ax_box.axvline(p50, color="#16a34a", linestyle="-", linewidth=1.1)
+        ax_box.axvline(p90, color="#f97316", linestyle="-", linewidth=1.1)
+        ax_box.set_yticks([])
+        ax_box.set_title(f"Boxplot de ley Cu (%) · {active_variable}", color=PLOT_TXT)
+        ax_box.set_xlabel("Ley Cu (%)")
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
-            ax_prob.scatter(data["probplot_x"], data["probplot_y"], s=13, color=C_ACTIVE, alpha=0.75)
-            ax_prob.set_title(f"Probability plot de {active_variable}", color=PLOT_TXT)
+            prob_x = [float(v) for v in data["probplot_x"]]
+            prob_y = [float(v) for v in data["probplot_y"]]
+            qmin, qmax = min(prob_x), max(prob_x)
+            ymin, ymax = min(prob_y), max(prob_y)
+            slope = (ymax - ymin) / (qmax - qmin) if qmax != qmin else 1.0
+            intercept = ymin - slope * qmin
+            ref_line = [slope * q + intercept for q in prob_x]
+            ax_prob.scatter(prob_x, prob_y, s=13, color=C_ACTIVE, alpha=0.75, label="Datos")
+            ax_prob.plot(prob_x, ref_line, color="#dc2626", linestyle="--", linewidth=1.1, label="Referencia normal")
+            ax_prob.set_title(f"QQ Plot (Normal Score) · {active_variable}", color=PLOT_TXT)
+            ax_prob.set_xlabel("Cuantiles normales")
+            ax_prob.set_ylabel("Ley Cu (%)")
+            ax_prob.legend(loc="upper left", fontsize=8)
         else:
             ax_prob.axis("off")
             ax_prob.text(0.5, 0.5, "No disponible", ha="center", va="center", color=PLOT_TXT)
@@ -528,11 +581,22 @@ class HomePanel(ctk.CTkFrame):
                 patch.set_facecolor(palette[idx % len(palette)])
                 patch.set_alpha(0.8)
             ax_domain.tick_params(axis="x", rotation=22)
-            ax_domain.set_ylabel(active_variable)
-            ax_domain.set_title(f"Distribución por dominio ({active_variable})", color=PLOT_TXT)
+            ax_domain.set_ylabel("Ley Cu (%)")
+            ax_domain.set_title(f"Boxplot por dominio ({active_variable})", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
+
+        stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
+        try:
+            cv_ratio = float(stats_table.get("cv", "nan"))
+            skewness = float(stats_table.get("skewness", "nan"))
+            diagnostic = "Distribución aproximadamente simétrica."
+            if cv_ratio >= 0.75 or abs(skewness) >= 1.0:
+                diagnostic = f"Distribución sesgada/variable (CV={cv_ratio*100:.1f}%, skew={skewness:.2f}). Recomendada transformación (log o normal score) antes de kriging."
+            ctk.CTkLabel(wrapper, text=diagnostic, text_color=TXT_MUTED, font=ctk.CTkFont(size=10), wraplength=900, justify="left").pack(anchor="w", padx=6, pady=(2, 0))
+        except Exception:
+            pass
         grid.render()
 
     def _render_cutoff_view(self) -> None:
@@ -1110,7 +1174,11 @@ class HomePanel(ctk.CTkFrame):
         self.kpi_value_vars["mean"].set(self._format_kpi_value(stats_map.get("mean", stats_map.get("media", "-"))))
         self.kpi_value_vars["p50"].set(self._format_kpi_value(stats_map.get("p50", "-")))
         self.kpi_value_vars["p90"].set(self._format_kpi_value(stats_map.get("p90", "-")))
-        self.kpi_value_vars["cv"].set(self._format_kpi_value(stats_map.get("cv", "-"), as_percent=True))
+        cv_raw = stats_map.get("cv", "-")
+        try:
+            self.kpi_value_vars["cv"].set(f"{float(str(cv_raw).replace('%', '')) * 100:.2f}%")
+        except Exception:
+            self.kpi_value_vars["cv"].set(cv_raw)
         self.kpi_value_vars["std"].set(self._format_kpi_value(stats_map.get("std", stats_map.get("desv", "-"))))
 
         state = self.service.get_cutoff_state()
