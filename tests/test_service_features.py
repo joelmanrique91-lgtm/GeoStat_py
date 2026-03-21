@@ -83,6 +83,20 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("diagnostics", payload)
         self.assertTrue(payload["availability"]["histogram"]["available"])
 
+    def test_statistics_table_safe_when_target_numeric_without_valid_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "nan_target.csv"
+            csv_path.write_text("x,y,z,target\n1,2,3,\n4,5,6,\n", encoding="utf-8")
+            result = self.service.load_csv(str(csv_path))
+            self.assertTrue(result.success)
+            cfg = self.service.set_variable_config("x", "y", "z", "target")
+            self.assertTrue(cfg.success)
+
+            table = dict(self.service.get_target_statistics_table())
+            self.assertEqual(table["valid_count"], "0")
+            self.assertEqual(table["null_pct"], "100")
+            self.assertEqual(table["mean"], "nan")
+
 
 if __name__ == "__main__":
     unittest.main()
