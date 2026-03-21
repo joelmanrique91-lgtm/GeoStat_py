@@ -37,6 +37,29 @@ class GeometryManagerRegressionTests(unittest.TestCase):
         method_source = ast.get_source_segment(source, target_method) or ""
         self.assertNotIn("self.center_panel", method_source)
 
+    def test_cutoff_controls_include_manual_enable_switch(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        target_method: ast.FunctionDef | None = None
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == "HomePanel":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "_build_cutoff_controls":
+                        target_method = item
+                        break
+        self.assertIsNotNone(target_method, "_build_cutoff_controls debe existir en HomePanel.")
+        method_source = ast.get_source_segment(source, target_method) or ""
+        self.assertIn("cutoff_enabled_var", method_source)
+        self.assertIn("Activar cutoffs manuales", method_source)
+
+    def test_methodological_guardrail_texts_present(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertIn("no implica independencia espacial", source)
+        self.assertIn("no inferencia de continuidad", source)
+        self.assertIn("Screening exploratorio: no reemplaza decisión minera final", source)
+        self.assertIn("Comparación exploratoria de dominios", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -439,6 +439,16 @@ class GeostatService:
         invalid = [col for col in selected if col not in self.current_dataset.columns]
         if invalid:
             return ColumnSelectionResult(False, "La selección contiene columnas no válidas.", f"Columnas inválidas: {', '.join(invalid)}")
+        coordinate_columns = [x_column, y_column, z_column]
+        if len(set(coordinate_columns)) != len(coordinate_columns):
+            return ColumnSelectionResult(False, "X, Y, Z deben ser columnas diferentes.", "No se permiten coordenadas duplicadas.")
+        non_numeric_coordinates = [col for col in coordinate_columns if not _is_numeric_dtype(self.current_dataset.dataframe[col])]
+        if non_numeric_coordinates:
+            return ColumnSelectionResult(
+                False,
+                "X, Y, Z deben ser columnas numéricas.",
+                f"Columnas no numéricas: {', '.join(non_numeric_coordinates)}",
+            )
 
         self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
         self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"

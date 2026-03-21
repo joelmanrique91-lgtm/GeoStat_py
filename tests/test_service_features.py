@@ -55,6 +55,18 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIsNotNone(self.service.variable_config)
         self.assertEqual(self.service.workflow_state.active_support, "Muestra original")
 
+    def test_set_variable_config_rejects_duplicate_xyz_columns(self) -> None:
+        self._load_sample_dataset()
+        result = self.service.set_variable_config("Easting", "Easting", "RL", "Au", "HoleID", "Lithology")
+        self.assertFalse(result.success)
+        self.assertIn("diferentes", result.message.lower())
+
+    def test_set_variable_config_rejects_non_numeric_xyz_columns(self) -> None:
+        self._load_sample_dataset()
+        result = self.service.set_variable_config("Lithology", "Northing", "RL", "Au", "HoleID", "Lithology")
+        self.assertFalse(result.success)
+        self.assertIn("numéricas", result.message.lower())
+
     @patch("app.services.geostat_service.subprocess.run")
     def test_update_repository_success_when_enabled(self, mock_run) -> None:
         mock_run.side_effect = [

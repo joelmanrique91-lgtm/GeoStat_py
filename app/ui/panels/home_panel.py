@@ -289,6 +289,7 @@ class HomePanel(ctk.CTkFrame):
         section = self._section_shell(parent, "Control de capping")
         numeric_columns = self.service.get_numeric_columns()
         ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", height=24, command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkSwitch(section, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkSwitch(section, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=24, placeholder_text="Cutoffs manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkButton(section, text="Aplicar cutoffs manuales", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_apply_cutoffs).pack(fill="x", padx=6, pady=(0, 5))
@@ -362,19 +363,25 @@ class HomePanel(ctk.CTkFrame):
     def _build_cutoff_decision_controls(self, parent: ctk.CTkFrame) -> None:
         parent.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkLabel(parent, text="Control de capping", text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(7, 3))
+        ctk.CTkLabel(
+            parent,
+            text="Screening exploratorio: no reemplaza decisión minera final.",
+            text_color=TXT_MUTED,
+            font=ctk.CTkFont(size=10),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 3))
 
-        ctk.CTkOptionMenu(parent, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=26, command=lambda _v: self._schedule_cutoff_preview()).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 3))
-        ctk.CTkEntry(parent, textvariable=self.dynamic_output_var, height=26, placeholder_text="salida capped").grid(row=1, column=1, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkOptionMenu(parent, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=26, command=lambda _v: self._schedule_cutoff_preview()).grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkEntry(parent, textvariable=self.dynamic_output_var, height=26, placeholder_text="salida capped").grid(row=2, column=1, sticky="ew", padx=8, pady=(0, 3))
 
-        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color="#4e7fad", progress_color="#4e7fad").grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
-        ctk.CTkLabel(parent, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MAIN).grid(row=3, column=0, sticky="w", padx=8)
-        ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=3, column=1, sticky="e", padx=8)
+        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color="#4e7fad", progress_color="#4e7fad").grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkLabel(parent, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MAIN).grid(row=4, column=0, sticky="w", padx=8)
+        ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=4, column=1, sticky="e", padx=8)
 
-        ctk.CTkFrame(parent, height=1, fg_color="#3c3c3c").grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
-        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold"), wraplength=350, justify="left").grid(row=5, column=0, columnspan=2, sticky="w", padx=8)
+        ctk.CTkFrame(parent, height=1, fg_color="#3c3c3c").grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
+        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold"), wraplength=350, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
 
-        ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=6, column=0, sticky="w", padx=8, pady=(5, 6))
-        ctk.CTkButton(parent, text="Confirmar capping", height=28, fg_color="#2b5f8e", hover_color="#245883", command=self._on_apply_dynamic_cutoff).grid(row=6, column=1, sticky="ew", padx=8, pady=(5, 6))
+        ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=7, column=0, sticky="w", padx=8, pady=(5, 6))
+        ctk.CTkButton(parent, text="Confirmar capping", height=28, fg_color="#2b5f8e", hover_color="#245883", command=self._on_apply_dynamic_cutoff).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
 
     def _show_stage_view(self, stage: str) -> None:
         DashboardGrid.clear(self.view_body)
@@ -414,7 +421,7 @@ class HomePanel(ctk.CTkFrame):
             return
 
         self.workspace_title_var.set("Vista Dominios")
-        self.workspace_subtitle_var.set("Compara dominios por estabilidad estadística para priorización variográfica.")
+        self.workspace_subtitle_var.set("Compara dominios por estabilidad estadística con lectura exploratoria.")
         self._render_domains_view()
 
     def _render_eda_view(self) -> None:
@@ -424,6 +431,12 @@ class HomePanel(ctk.CTkFrame):
         active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
         ctk.CTkLabel(wrapper, text=f"Variable activa: {active_variable} · Estado: {capping_status}", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkLabel(
+            wrapper,
+            text="Lectura distribucional: no implica independencia espacial entre muestras.",
+            text_color=TXT_MUTED,
+            font=ctk.CTkFont(size=10),
+        ).pack(anchor="w", padx=6, pady=(0, 4))
         try:
             data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
         except Exception as exc:
@@ -522,6 +535,7 @@ class HomePanel(ctk.CTkFrame):
 
         ax_info.axis("off")
         msg = "Metadatos de vista espacial\n\n• Vistas: Planta (XY), Sección XZ, Sección YZ"
+        msg += "\n• Inspección gráfica exploratoria (no inferencia de continuidad)."
         state = self.service.get_cutoff_state()
         if state["dynamic_enabled"]:
             msg += f"\n• Capping confirmado: {state['dynamic_cutoff_value']:.6g}"
@@ -577,7 +591,7 @@ class HomePanel(ctk.CTkFrame):
         colors = [color_map[group] for group in groups]
 
         points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors="#0f172a", linewidths=0.5, picker=True)
-        ax.set_title("Priorización de dominios para análisis variográfico", color=PLOT_TXT, fontsize=14, fontweight="bold")
+        ax.set_title("Comparación exploratoria de dominios", color=PLOT_TXT, fontsize=14, fontweight="bold")
         ax.set_xlabel("Media", fontsize=11)
         ax.set_ylabel("Coeficiente de variación (CV)", fontsize=11)
         ax.tick_params(labelsize=10)
