@@ -969,7 +969,7 @@ class GeostatService:
         df = self.current_dataset.dataframe
         if target not in df.columns or not _is_numeric_dtype(df[target]):
             return base + "Target no numérico: estadísticas limitadas."
-        stats = self._target_statistics()
+        stats = self._target_statistics(use_effective_target=use_effective_target)
         return base + f"Target {target}: válidos={stats['valid_count']} | nulos={stats['null_pct']:.2f}% | mean={stats['mean']:.4g}"
 
     def _target_statistics(self, use_effective_target: bool = False) -> dict[str, float]:
@@ -1051,6 +1051,14 @@ class GeostatService:
             )
             output = (pull_result.stdout or pull_result.stderr).strip()
             submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
+            if submodule_result.returncode != 0:
+                self.activity_log.log(
+                    "repo_update_failed",
+                    "error",
+                    "Falló actualización de submódulos.",
+                    {"command": "git submodule update --init --recursive", "details": submodule_output},
+                )
+                return RepoUpdateResult(False, "Falló actualización de submódulos.", submodule_output or "Error desconocido de submódulos.")
             combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
             up_to_date = "Already up to date" in output or "Ya está actualizado" in output
             message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
