@@ -90,6 +90,21 @@ def _build_active_step_hint(step_name: str, readiness: dict[str, object]) -> str
     return BLOCKING_REASON_HINTS.get(blocking[0], "Completa la configuración requerida para desbloquear esta etapa.")
 
 
+def _build_context_chip_texts(snapshot: dict[str, object], readiness: dict[str, object], dataset_name: str) -> dict[str, str]:
+    resolved_target = str(snapshot.get("resolved_target_column") or "No definido")
+    domain_col = str(snapshot.get("active_domain_column") or "No definido")
+    domain_filter = str(snapshot.get("active_domain_filter") or "Todos")
+    stages = readiness.get("stages", {}) if isinstance(readiness, dict) else {}
+    blocked = [name for name, state in stages.items() if not bool(state.get("ready"))] if isinstance(stages, dict) else []
+    status = "Listo" if not blocked else f"Bloqueos: {len(blocked)}"
+    return {
+        "dataset": f"Dataset: {dataset_name}",
+        "target": f"Target activo: {resolved_target}",
+        "domain": f"Dominio/filtro: {domain_col} · {domain_filter}",
+        "status": f"Workflow: {status}",
+    }
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -211,8 +226,8 @@ class HomePanel(ctk.CTkFrame):
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py · Workspace técnico", font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(5, 1))
-        ctk.CTkLabel(header, text="Contexto global activo", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(24, 0))
+        ctk.CTkLabel(header, text="GeoStat Py · Flujo de trabajo", font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(5, 1))
+        ctk.CTkLabel(header, text="Contexto global activo (dataset, target, dominio y estado)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(24, 0))
 
         chip_frame = ctk.CTkFrame(header, fg_color="transparent")
         chip_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
@@ -246,7 +261,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
-        ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(8, 6), pady=3)
+        ctk.CTkLabel(frame, text="Workflow y readiness", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(8, 6), pady=3)
         labels = {"Datos": "Datos", "EDA": "EDA", "Cutoffs": "Control de outliers", "Espacial": "Espacial", "Dominios": "Dominios"}
         for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]:
             btn = ctk.CTkButton(
@@ -402,6 +417,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Constructor explícito de dominios")
+        ctk.CTkLabel(section, text="Opciones locales de definición de dominios", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
         candidates = self.service.get_domain_candidate_columns() or [""]
         if not self.domain_base_var.get() and candidates and candidates[0]:
             self.domain_base_var.set(candidates[0])
@@ -454,6 +470,7 @@ class HomePanel(ctk.CTkFrame):
     def _build_kpi_strip(self, parent: ctk.CTkFrame) -> None:
         block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=7)
         block.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 5))
+        ctk.CTkLabel(block, text="Resumen rápido (resultados de la vista actual)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=7, pady=(4, 0))
         cards = ctk.CTkFrame(block, fg_color="transparent")
         cards.pack(fill="x", padx=5, pady=4)
         labels_by_key = {
@@ -523,7 +540,7 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "Datos":
             self.workspace_title_var.set("Vista Datos")
-            self.workspace_subtitle_var.set("Carga el CSV y valida X/Y/Z/target para continuar el workflow.")
+            self.workspace_subtitle_var.set("Primero carga el CSV y confirma X/Y/Z/target.")
             card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
             ctk.CTkLabel(card, text="Inicio de configuración", text_color=TXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 3))
@@ -537,24 +554,24 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "EDA":
             self.workspace_title_var.set("Vista EDA")
-            self.workspace_subtitle_var.set("Resumen univariado y distribución del target activo para diagnóstico rápido.")
+            self.workspace_subtitle_var.set("Diagnóstico univariado del target activo.")
             self._render_eda_view()
             return
 
         if stage == "Cutoffs":
             self.workspace_title_var.set("Vista Control de outliers")
-            self.workspace_subtitle_var.set("Evalúa impacto del capping antes de confirmar la variable operativa.")
+            self.workspace_subtitle_var.set("Configura y valida outliers/capping antes de confirmar.")
             self._render_cutoff_view()
             return
 
         if stage == "Espacial":
             self.workspace_title_var.set("Vista Espacial")
-            self.workspace_subtitle_var.set("Revisión espacial en planta y secciones con la variable activa.")
+            self.workspace_subtitle_var.set("Explora XY/XZ/YZ usando el contexto activo y color local.")
             self._render_spatial_view()
             return
 
         self.workspace_title_var.set("Vista Dominios")
-        self.workspace_subtitle_var.set("Compara dominios por estabilidad estadística con lectura exploratoria.")
+        self.workspace_subtitle_var.set("Compara dominios y revisa estabilidad estadística.")
         self._render_domains_view()
 
     def _render_eda_view(self) -> None:
@@ -952,13 +969,11 @@ class HomePanel(ctk.CTkFrame):
         readiness = self.service.get_workflow_readiness()
         state = self.service.get_cutoff_state()
         dataset_name = self.service.current_dataset.file_name if self.service.current_dataset is not None else "No cargado"
-        resolved_target = str(snapshot["resolved_target_column"] or "No definido")
-        domain_col = str(snapshot["active_domain_column"] or "No definido")
-        domain_filter = str(snapshot["active_domain_filter"] or "Todos")
-        self.context_chip_vars["dataset"].set(f"Dataset: {dataset_name}")
-        self.context_chip_vars["target"].set(f"Target resuelto: {resolved_target}")
-        self.context_chip_vars["domain"].set(f"Dominio: {domain_col} · filtro: {domain_filter}")
-        self.context_chip_vars["status"].set(f"Estado workflow: {'Listo' if readiness['stages']['eda']['ready'] else 'Con bloqueos'}")
+        texts = _build_context_chip_texts(snapshot, readiness, dataset_name)
+        self.context_chip_vars["dataset"].set(texts["dataset"])
+        self.context_chip_vars["target"].set(texts["target"])
+        self.context_chip_vars["domain"].set(texts["domain"])
+        self.context_chip_vars["status"].set(texts["status"])
         if state["dynamic_enabled"]:
             self.context_chip_vars["capping"].set(f"Capping activo P{state['dynamic_percent']:.0f}")
         elif state["enabled"]:

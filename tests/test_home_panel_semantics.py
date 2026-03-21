@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.ui.panels.home_panel import _build_active_step_hint, _build_workflow_stage_label
+from app.ui.panels.home_panel import _build_active_step_hint, _build_context_chip_texts, _build_workflow_stage_label
 
 
 class HomePanelSemanticsTests(unittest.TestCase):
@@ -48,7 +48,19 @@ class HomePanelSemanticsTests(unittest.TestCase):
         hint = _build_active_step_hint("Dominios", readiness)
         self.assertIn("Advertencia", hint)
 
+    def test_context_chip_texts_prioritize_global_context_microcopy(self) -> None:
+        snapshot = {
+            "resolved_target_column": "target_capped",
+            "active_domain_column": "domain_estimation",
+            "active_domain_filter": "A",
+        }
+        readiness = {"stages": {"data": {"ready": True}, "eda": {"ready": False}}}
+        texts = _build_context_chip_texts(snapshot, readiness, "demo.csv")
+        self.assertEqual(texts["dataset"], "Dataset: demo.csv")
+        self.assertIn("Target activo: target_capped", texts["target"])
+        self.assertIn("Dominio/filtro: domain_estimation · A", texts["domain"])
+        self.assertIn("Bloqueos: 1", texts["status"])
+
 
 if __name__ == "__main__":
     unittest.main()
-
