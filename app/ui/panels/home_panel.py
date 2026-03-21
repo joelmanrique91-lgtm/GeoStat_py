@@ -11,21 +11,40 @@ from matplotlib.ticker import ScalarFormatter
 
 from app.services.geostat_service import GeostatService
 from app.ui.panels.dashboard_grid import DashboardGrid
+from app.ui.theme import (
+    APP_BG,
+    BORDER_SOFT,
+    CARD_BG,
+    PANEL_BG,
+    SEM_BLUE,
+    SEM_BLUE_SOFT,
+    SEM_GRAY,
+    SEM_GREEN,
+    SEM_ORANGE,
+    SEM_RED,
+    SEM_WHITE,
+    TEXT_MAIN,
+    TEXT_MUTED,
+    add_reference_line,
+    apply_axis_style,
+    get_continuous_colormap,
+    get_domain_color,
+)
 
 
-BG_MAIN = "#1c1d21"
-BG_PANEL = "#25272c"
-BG_SOFT = "#2d3036"
-TXT_MAIN = "#f1f3f5"
-TXT_MUTED = "#aeb6c2"
-C_ORIGINAL = "#3b82f6"
-C_TRUNCATED = "#f59e0b"
-C_CUTOFF = "#ef4444"
-C_ACTIVE = "#2f6ea5"
-C_SUCCESS = "#5aa469"
-C_TAB_IDLE = "#30343b"
-C_TAB_DONE = "#3a485a"
-PLOT_TXT = "#1f2937"
+BG_MAIN = APP_BG
+BG_PANEL = PANEL_BG
+BG_SOFT = CARD_BG
+TXT_MAIN = TEXT_MAIN
+TXT_MUTED = TEXT_MUTED
+C_ORIGINAL = SEM_GRAY
+C_TRUNCATED = SEM_BLUE
+C_CUTOFF = SEM_ORANGE
+C_ACTIVE = SEM_BLUE
+C_SUCCESS = SEM_GREEN
+C_TAB_IDLE = "#1E293B"
+C_TAB_DONE = "#334155"
+PLOT_TXT = TEXT_MAIN
 
 
 class HomePanel(ctk.CTkFrame):
@@ -402,7 +421,7 @@ class HomePanel(ctk.CTkFrame):
         primary_keys = {"mean", "p90", "cutoff actual", "% truncado", "valid_count"}
         for idx, key in enumerate(keys):
             cards.grid_columnconfigure(idx, weight=1)
-            card_color = "#32455d" if key in primary_keys else "#2b2e35"
+            card_color = "#1D4ED8" if key in primary_keys else CARD_BG
             card = ctk.CTkFrame(cards, fg_color=card_color, corner_radius=6)
             card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
             ctk.CTkLabel(card, text=labels_by_key[key], font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
@@ -422,7 +441,7 @@ class HomePanel(ctk.CTkFrame):
         }
         focus = focus_by_step.get(step_name, set())
         for key, card in self.kpi_cards.items():
-            card.configure(fg_color="#344355" if key in focus else "#2b2e35")
+            card.configure(fg_color="#2563EB" if key in focus else CARD_BG)
 
     def _build_cutoff_decision_controls(self, parent: ctk.CTkFrame) -> None:
         parent.grid_columnconfigure((0, 1), weight=1)
@@ -513,42 +532,59 @@ class HomePanel(ctk.CTkFrame):
         ax_prob = grid.axis(1, 0)
         ax_domain = grid.axis(1, 1)
 
+        for axis in (ax_hist, ax_box, ax_prob, ax_domain):
+            apply_axis_style(axis)
+
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
         n_values = len(sorted_values)
-        bins = min(60, max(20, int(math.sqrt(n_values) * 2)))
+        bins = min(55, max(18, int(math.sqrt(n_values) * 2)))
         p50 = sorted_values[int(0.50 * (n_values - 1))]
         p90 = sorted_values[int(0.90 * (n_values - 1))]
-        p99 = sorted_values[int(0.99 * (n_values - 1))]
         mean_val = sum(sorted_values) / n_values
-        ax_hist.hist(values, bins=bins, color=C_ORIGINAL, edgecolor="white", alpha=0.68)
-        ax_hist.axvline(mean_val, color="#0f172a", linestyle="--", linewidth=1.2, label="Media")
-        ax_hist.axvline(p50, color="#16a34a", linestyle="-", linewidth=1.2, label="P50")
-        ax_hist.axvline(p90, color="#f97316", linestyle="-", linewidth=1.2, label="P90")
-        ax_hist.set_title(f"Histograma de ley Cu (%) · {active_variable}", color=PLOT_TXT)
+
+        original_values: list[float] = values
+        cutoff_val: float | None = None
+        if self.service.current_dataset is not None and self.service.variable_config is not None:
+            base_target = self.service.variable_config.target_column
+            if base_target in self.service.current_dataset.dataframe.columns:
+                raw_base = self.service.current_dataset.dataframe[base_target].dropna().tolist()
+                original_values = [float(v) for v in raw_base if str(v).strip() != ""]
+        if state["dynamic_enabled"]:
+            cutoff_val = float(state["dynamic_cutoff_value"])
+
+        if original_values != values:
+            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="none", alpha=0.35, label="Original")
+        ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="none", alpha=0.70, label="Operativa")
+        add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.97)
+        add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.90)
+        add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.83)
+        if cutoff_val is not None:
+            add_reference_line(ax_hist, cutoff_val, label=f"Cutoff {cutoff_val:.3g}", color=SEM_ORANGE, y_pos=0.76)
+        ax_hist.set_title("Distribución de ley", color=PLOT_TXT)
+        ax_hist.text(0.01, 1.02, "Comparación entre variable original y operativa", transform=ax_hist.transAxes, color=TXT_MUTED, fontsize=8)
         ax_hist.set_xlabel("Ley Cu (%)")
         ax_hist.set_ylabel("Frecuencia (n)")
-        ax_hist.legend(loc="upper right", fontsize=8)
-        if sorted_values[-1] > p99 * 1.3:
-            ax_hist.set_xlim(left=sorted_values[0], right=p99)
-            ax_hist.text(
-                0.01,
-                0.98,
-                "Vista truncada a P99 para mejorar resolución.",
-                transform=ax_hist.transAxes,
-                va="top",
-                ha="left",
-                fontsize=8,
-                color="#334155",
-            )
+        ax_hist.legend(loc="upper right", fontsize=8, frameon=False)
 
-        ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.45, showfliers=True)
+        box = ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.52, showfliers=True)
+        for patch in box["boxes"]:
+            patch.set_facecolor("#1E3A8A")
+            patch.set_alpha(0.68)
+            patch.set_edgecolor(SEM_BLUE_SOFT)
+        for median in box["medians"]:
+            median.set_color(SEM_GREEN)
+            median.set_linewidth(1.8)
+        for flier in box["fliers"]:
+            flier.set_alpha(0.30)
+            flier.set_markerfacecolor(SEM_GRAY)
+            flier.set_markeredgecolor(SEM_GRAY)
         jitter_y = [1 + ((idx % 9) - 4) * 0.012 for idx in range(n_values)]
-        ax_box.scatter(values, jitter_y, s=7, color=C_ACTIVE, alpha=0.35, edgecolors="none")
-        ax_box.axvline(p50, color="#16a34a", linestyle="-", linewidth=1.1)
-        ax_box.axvline(p90, color="#f97316", linestyle="-", linewidth=1.1)
+        ax_box.scatter(values, jitter_y, s=6, color=SEM_BLUE_SOFT, alpha=0.20, edgecolors="none")
+        ax_box.axvline(p50, color=SEM_GREEN, linestyle="-", linewidth=1.1, alpha=0.9)
+        ax_box.axvline(p90, color=SEM_ORANGE, linestyle="--", linewidth=1.1, alpha=0.9)
         ax_box.set_yticks([])
-        ax_box.set_title(f"Boxplot de ley Cu (%) · {active_variable}", color=PLOT_TXT)
+        ax_box.set_title("Rango univariado y outliers", color=PLOT_TXT)
         ax_box.set_xlabel("Ley Cu (%)")
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
@@ -559,12 +595,20 @@ class HomePanel(ctk.CTkFrame):
             slope = (ymax - ymin) / (qmax - qmin) if qmax != qmin else 1.0
             intercept = ymin - slope * qmin
             ref_line = [slope * q + intercept for q in prob_x]
-            ax_prob.scatter(prob_x, prob_y, s=13, color=C_ACTIVE, alpha=0.75, label="Datos")
-            ax_prob.plot(prob_x, ref_line, color="#dc2626", linestyle="--", linewidth=1.1, label="Referencia normal")
-            ax_prob.set_title(f"QQ Plot (Normal Score) · {active_variable}", color=PLOT_TXT)
+            high_cut = sorted(prob_y)[int(0.90 * (len(prob_y) - 1))]
+            core_x = [x for x, y in zip(prob_x, prob_y) if y <= high_cut]
+            core_y = [y for y in prob_y if y <= high_cut]
+            tail_x = [x for x, y in zip(prob_x, prob_y) if y > high_cut]
+            tail_y = [y for y in prob_y if y > high_cut]
+            ax_prob.scatter(core_x, core_y, s=12, color=SEM_BLUE, alpha=0.75, label="Datos")
+            if tail_x:
+                ax_prob.scatter(tail_x, tail_y, s=16, color=SEM_ORANGE, alpha=0.9, label="Cola alta")
+                ax_prob.annotate("Desvío de cola", xy=(tail_x[-1], tail_y[-1]), xytext=(8, 8), textcoords="offset points", color=SEM_ORANGE, fontsize=8)
+            ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
+            ax_prob.set_title("QQ Plot (Normal Score)", color=PLOT_TXT)
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
-            ax_prob.legend(loc="upper left", fontsize=8)
+            ax_prob.legend(loc="upper left", fontsize=8, frameon=False)
         else:
             ax_prob.axis("off")
             ax_prob.text(0.5, 0.5, "No disponible", ha="center", va="center", color=PLOT_TXT)
@@ -573,16 +617,16 @@ class HomePanel(ctk.CTkFrame):
         if domain_data.get("enabled"):
             paired = list(zip(domain_data["labels"], domain_data["values"]))
             paired.sort(key=lambda item: (sum(item[1]) / len(item[1])) if item[1] else float("-inf"), reverse=True)
-            ordered_labels = [label for label, _vals in paired]
+            ordered_labels = [f"{label} (n={len(vals)})" for label, vals in paired]
             ordered_values = [vals for _label, vals in paired]
-            palette = ["#4e79a7", "#59a14f", "#9c755f", "#76b7b2", "#bab0ab", "#e15759", "#f28e2b", "#b07aa1", "#ff9da7", "#8cd17d"]
             box = ax_domain.boxplot(ordered_values, labels=ordered_labels, patch_artist=True)
-            for idx, patch in enumerate(box["boxes"]):
-                patch.set_facecolor(palette[idx % len(palette)])
-                patch.set_alpha(0.8)
+            for patch, (label, _vals) in zip(box["boxes"], paired):
+                patch.set_facecolor(get_domain_color(label))
+                patch.set_alpha(0.72)
+                patch.set_edgecolor(BORDER_SOFT)
             ax_domain.tick_params(axis="x", rotation=22)
             ax_domain.set_ylabel("Ley Cu (%)")
-            ax_domain.set_title(f"Boxplot por dominio ({active_variable})", color=PLOT_TXT)
+            ax_domain.set_title("Comparativo por dominio (ordenado por media)", color=PLOT_TXT)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
@@ -634,14 +678,23 @@ class HomePanel(ctk.CTkFrame):
         ax_yz = grid.axis(1, 0)
         ax_info = grid.axis(1, 1)
 
-        cmap = "tab20" if spatial.target_tick_labels else "viridis"
-        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
-        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
-        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
+        for axis in (ax_xy, ax_xz, ax_yz, ax_info):
+            apply_axis_style(axis)
+        cmap = "tab20" if spatial.target_tick_labels else get_continuous_colormap()
+        point_kwargs = {"s": 10, "alpha": 0.58, "edgecolors": "none"}
+        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, **point_kwargs)
+        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
+        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
 
         ax_xy.set_title("Planta (XY)", color=PLOT_TXT)
         ax_xz.set_title("Sección XZ", color=PLOT_TXT)
         ax_yz.set_title("Sección YZ", color=PLOT_TXT)
+        ax_xy.set_xlabel("X")
+        ax_xy.set_ylabel("Y")
+        ax_xz.set_xlabel("X")
+        ax_xz.set_ylabel("Z")
+        ax_yz.set_xlabel("Y")
+        ax_yz.set_ylabel("Z")
         plain_formatter = ScalarFormatter(useOffset=False)
         plain_formatter.set_scientific(False)
         for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
@@ -652,18 +705,21 @@ class HomePanel(ctk.CTkFrame):
             if spatial.target_tick_positions and spatial.target_tick_labels:
                 colorbar.set_ticks(spatial.target_tick_positions)
                 colorbar.set_ticklabels(spatial.target_tick_labels)
-            colorbar.ax.tick_params(labelsize=8)
+            colorbar.ax.tick_params(labelsize=8, colors=TXT_MUTED)
+            colorbar.ax.yaxis.label.set_color(TXT_MUTED)
+            colorbar.outline.set_edgecolor(BORDER_SOFT)
 
         ax_info.axis("off")
-        msg = "Metadatos de vista espacial\n\n• Vistas: Planta (XY), Sección XZ, Sección YZ"
-        msg += "\n• Inspección gráfica exploratoria (no inferencia de continuidad)."
+        msg = "Ficha técnica espacial\n\n• Vistas: XY / XZ / YZ"
+        msg += f"\n• Variable activa: {spatial.target_label}"
+        msg += "\n• Uso: lectura exploratoria, no inferencia de continuidad."
         state = self.service.get_cutoff_state()
         if state["dynamic_enabled"]:
             msg += f"\n• Capping confirmado: {state['dynamic_cutoff_value']:.6g}"
         if spatial.downsampled:
             msg += f"\n• Muestreo mostrado: {spatial.plotted_points:,}/{spatial.source_points:,}"
-        msg += "\n• Preparado para resaltar dominios activos."
-        ax_info.text(0.05, 0.92, msg, va="top", color=PLOT_TXT, fontsize=10, bbox={"facecolor": "#e8eef6", "edgecolor": "#b6c2d2", "boxstyle": "round,pad=0.55"})
+        msg += "\n• Preparado para lectura por ley o por dominio."
+        ax_info.text(0.05, 0.92, msg, va="top", color=TXT_MAIN, fontsize=10, bbox={"facecolor": CARD_BG, "edgecolor": BORDER_SOFT, "boxstyle": "round,pad=0.55"})
         grid.render()
 
     def _render_domains_view(self) -> None:
@@ -692,6 +748,7 @@ class HomePanel(ctk.CTkFrame):
 
         chart = DashboardGrid(plot_card, 1, 1, figsize=(12.4, 6.8))
         ax = chart.axis(0, 0)
+        apply_axis_style(ax)
         x_values = [float(row["mean"]) for row in rows]
         y_values = [float(row["cv"]) for row in rows]
         names = [str(row["domain"]) for row in rows]
@@ -706,25 +763,28 @@ class HomePanel(ctk.CTkFrame):
             sizes = [size_min + ((size_max - size_min) * ((value**0.5 - min_n**0.5) / ((max_n**0.5 - min_n**0.5) or 1.0))) for value in counts]
 
         groups = [str(row.get("primary_group", "Otros")) for row in rows]
-        palette = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ab"]
         unique_groups = sorted(set(groups))
-        color_map = {group: palette[idx % len(palette)] for idx, group in enumerate(unique_groups)}
+        color_map = {group: get_domain_color(group) for group in unique_groups}
         colors = [color_map[group] for group in groups]
 
-        points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors="#0f172a", linewidths=0.5, picker=True)
+        points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors=BORDER_SOFT, linewidths=0.6, picker=True)
         ax.set_title("Comparación exploratoria de dominios", color=PLOT_TXT, fontsize=14, fontweight="bold")
-        ax.set_xlabel("Media", fontsize=11)
-        ax.set_ylabel("Coeficiente de variación (CV)", fontsize=11)
+        ax.text(0.01, 1.02, "Coherencia estadística de dominios", transform=ax.transAxes, color=TXT_MUTED, fontsize=8)
+        ax.set_xlabel("Media de ley Cu (%)", fontsize=11)
+        ax.set_ylabel("Coeficiente de variación", fontsize=11)
         ax.tick_params(labelsize=10)
         chart.figure.subplots_adjust(right=0.78, top=0.90, left=0.08, bottom=0.11)
         global_mean = sum(x_values) / len(x_values)
         global_cv = sum(y_values) / len(y_values)
-        ax.axvline(global_mean, color="#64748b", linestyle="--", linewidth=1.0, alpha=0.75)
-        ax.axhline(global_cv, color="#64748b", linestyle="--", linewidth=1.0, alpha=0.75)
+        ax.axvline(global_mean, color=SEM_GRAY, linestyle="--", linewidth=1.0, alpha=0.75)
+        ax.axhline(0.5, color=SEM_RED, linestyle=":", linewidth=1.0, alpha=0.8)
+        ax.axhline(global_cv, color=SEM_BLUE_SOFT, linestyle="--", linewidth=1.0, alpha=0.75)
+        ax.text(global_mean, 0.98, " media global", transform=ax.get_xaxis_transform(), color=SEM_GRAY, fontsize=8, va="top")
+        ax.text(0.01, 0.5, "umbral CV 0.50", transform=ax.transAxes, color=SEM_RED, fontsize=8)
 
         from matplotlib.lines import Line2D
-        legend_handles = [Line2D([0], [0], marker="o", color="w", label=group, markerfacecolor=color_map[group], markeredgecolor="#0f172a", markersize=8) for group in unique_groups]
-        ax.legend(handles=legend_handles, title="Capa principal", loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True, fontsize=8, title_fontsize=9)
+        legend_handles = [Line2D([0], [0], marker="o", color="w", label=group, markerfacecolor=color_map[group], markeredgecolor=BORDER_SOFT, markersize=8) for group in unique_groups]
+        ax.legend(handles=legend_handles, title="Grupo dominio", loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=8, title_fontsize=9)
         for idx, (xv, yv, label) in enumerate(zip(x_values, y_values, names)):
             dx = 0.012 * (max(x_values) - min(x_values) + 1e-6)
             dy = 0.012 * (max(y_values) - min(y_values) + 1e-6) * (1 if idx % 2 == 0 else -1)
@@ -733,12 +793,12 @@ class HomePanel(ctk.CTkFrame):
                 yv + dy,
                 label,
                 fontsize=9,
-                color="#0f172a",
+                color=SEM_WHITE,
                 alpha=0.95,
-                bbox={"facecolor": "#ffffff", "edgecolor": "#cbd5e1", "alpha": 0.72, "boxstyle": "round,pad=0.18"},
+                bbox={"facecolor": PANEL_BG, "edgecolor": BORDER_SOFT, "alpha": 0.85, "boxstyle": "round,pad=0.18"},
             )
 
-        tooltip = ax.annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points", bbox={"boxstyle": "round", "fc": "#eef2f7", "ec": "#94a3b8"}, fontsize=8)
+        tooltip = ax.annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points", bbox={"boxstyle": "round", "fc": CARD_BG, "ec": BORDER_SOFT}, color=TXT_MAIN, fontsize=8)
         tooltip.set_visible(False)
 
         def on_move(event) -> None:
@@ -1037,13 +1097,17 @@ class HomePanel(ctk.CTkFrame):
         ax_cdf = chart.axis(1, 0)
         ax_before_after = chart.axis(1, 1)
         ax_prob = chart.axis(0, 1)
+        for axis in (ax_hist, ax_cdf, ax_before_after, ax_prob):
+            apply_axis_style(axis)
 
-        ax_hist.hist(preview["retained_values"], bins="sturges", color=C_ORIGINAL, alpha=0.86, label="Original")
+        ax_hist.hist(preview["retained_values"], bins="sturges", color=SEM_GRAY, alpha=0.40, label="Original")
         if preview["truncated_values"]:
-            ax_hist.hist(preview["truncated_values"], bins="sturges", color=C_TRUNCATED, alpha=0.82, label="Capped")
-        ax_hist.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=2.0, label=f"Cutoff {cutoff:.3g}")
-        ax_hist.set_title("Distribución y umbral de capping", color=PLOT_TXT)
-        ax_hist.legend(fontsize=8)
+            ax_hist.hist(preview["truncated_values"], bins="sturges", color=SEM_BLUE, alpha=0.76, label="Operativa")
+        add_reference_line(ax_hist, cutoff, label=f"Cutoff {cutoff:.3g}", color=SEM_ORANGE, y_pos=0.92)
+        ax_hist.set_title("Distribución original vs operativa", color=PLOT_TXT)
+        ax_hist.set_xlabel("Ley Cu (%)")
+        ax_hist.set_ylabel("Frecuencia (n)")
+        ax_hist.legend(fontsize=8, frameon=False)
 
         retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
         for x_val, y_val in zip(preview["sorted_values"], preview["theoretical_quantiles"]):
@@ -1053,24 +1117,28 @@ class HomePanel(ctk.CTkFrame):
             else:
                 trunc_x.append(x_val)
                 trunc_y.append(y_val)
-        ax_prob.scatter(retained_x, retained_y, s=9, color=C_ORIGINAL, alpha=0.85)
+        ax_prob.scatter(retained_x, retained_y, s=9, color=SEM_BLUE, alpha=0.70)
         if trunc_x:
-            ax_prob.scatter(trunc_x, trunc_y, s=9, color=C_TRUNCATED, alpha=0.85)
-        ax_prob.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.4)
-        ax_prob.set_title("Probability plot con cutoff", color=PLOT_TXT)
+            ax_prob.scatter(trunc_x, trunc_y, s=10, color=SEM_ORANGE, alpha=0.9)
+        ax_prob.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
+        ax_prob.set_title("QQ diagnóstico (secundario)", color=TXT_MUTED)
+        ax_prob.set_xlabel("Ley Cu (%)")
+        ax_prob.set_ylabel("Cuantiles teóricos")
 
         original_sorted = sorted(preview["values"])
         capped_sorted = sorted(preview["capped_values"])
         original_cdf = [(idx + 1) / len(original_sorted) for idx in range(len(original_sorted))]
         capped_cdf = [(idx + 1) / len(capped_sorted) for idx in range(len(capped_sorted))]
-        ax_cdf.plot(original_sorted, original_cdf, color=C_ORIGINAL, label="Original")
-        ax_cdf.plot(capped_sorted, capped_cdf, color=C_ACTIVE, label="Capped")
-        ax_cdf.axvline(cutoff, color=C_CUTOFF, linestyle="--", linewidth=1.2)
-        ax_cdf.set_title("Curva acumulada: original vs capped", color=PLOT_TXT)
-        ax_cdf.legend(fontsize=8)
+        ax_cdf.plot(original_sorted, original_cdf, color=SEM_GRAY, label="Original", linewidth=1.4)
+        ax_cdf.plot(capped_sorted, capped_cdf, color=SEM_BLUE, label="Operativa", linewidth=1.6)
+        ax_cdf.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
+        ax_cdf.set_title("Impacto acumulado del capping", color=PLOT_TXT)
+        ax_cdf.set_xlabel("Ley Cu (%)")
+        ax_cdf.set_ylabel("F(x)")
+        ax_cdf.legend(fontsize=8, frameon=False)
 
-        ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Capped"], patch_artist=True, showfliers=False, widths=0.55)
-        ax_before_after.set_title("Comparación antes y después de capping", color=PLOT_TXT)
+        ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Original", "Operativa"], patch_artist=True, showfliers=False, widths=0.55)
+        ax_before_after.set_title("Comparación resumen", color=TXT_MUTED)
         chart.render()
 
     def _on_apply_dynamic_cutoff(self) -> None:
