@@ -58,10 +58,16 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_cutoff_label_var = ctk.StringVar(value="Cutoff actual: -")
         self.dynamic_impact_label_var = ctk.StringVar(value="Impacto: -")
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
-        self.domain_layer_vars = [ctk.StringVar(value=""), ctk.StringVar(value=""), ctk.StringVar(value="")]
-        self.domain_layer_active_vars = [ctk.BooleanVar(value=False), ctk.BooleanVar(value=False), ctk.BooleanVar(value=False)]
-        self.domain_min_samples_var = ctk.IntVar(value=1)
-        self.domain_include_missing_var = ctk.BooleanVar(value=False)
+        self.domain_base_var = ctk.StringVar(value="")
+        self.domain_name_var = ctk.StringVar(value="")
+        self.spatial_color_var = ctk.StringVar(value="")
+        self.domain_filter_var = ctk.StringVar(value="Todos")
+        self.domain_definition_local: dict[str, list[str]] = {}
+        self.domain_feedback_var = ctk.StringVar(value="Define dominios para comenzar.")
+        self.domain_selected_categories: set[str] = set()
+        self.domain_category_checkbox_vars: dict[str, ctk.BooleanVar] = {}
+        self.domain_assign_button: ctk.CTkButton | None = None
+        self.domain_apply_button: ctk.CTkButton | None = None
         self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para visualizar resumen analítico e índices de registros.")
 
         self.log_visible = False
@@ -80,6 +86,7 @@ class HomePanel(ctk.CTkFrame):
         self.plot_frame: ctk.CTkFrame | None = None
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
+        self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
         self._build_layout()
         self._render_step("Datos")
@@ -174,8 +181,20 @@ class HomePanel(ctk.CTkFrame):
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
         ctk.CTkLabel(frame, text="Workflow", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(8, 6), pady=3)
+        labels = {"Datos": "Datos", "EDA": "EDA", "Cutoffs": "Control de outliers", "Espacial": "Espacial", "Dominios": "Dominios"}
         for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]:
-            btn = ctk.CTkButton(frame, text=step, width=94, height=24, corner_radius=7, fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_width=1, border_color="#454b55", command=lambda s=step: self._on_change_step(s))
+            btn = ctk.CTkButton(
+                frame,
+                text=labels[step],
+                width=120,
+                height=24,
+                corner_radius=7,
+                fg_color=C_TAB_IDLE,
+                hover_color="#3a3f47",
+                border_width=1,
+                border_color="#454b55",
+                command=lambda s=step: self._on_change_step(s),
+            )
             btn.pack(side="left", padx=3, pady=3)
             self.workflow_buttons[step] = btn
         return frame
@@ -286,7 +305,7 @@ class HomePanel(ctk.CTkFrame):
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
-        section = self._section_shell(parent, "Control de capping")
+        section = self._section_shell(parent, "Control de outliers")
         numeric_columns = self.service.get_numeric_columns()
         ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", height=24, command=lambda _v: self._schedule_cutoff_preview()).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkSwitch(section, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
@@ -298,31 +317,64 @@ class HomePanel(ctk.CTkFrame):
     def _build_spatial_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Visualización espacial")
         ctk.CTkLabel(section, text="Vista fija XY / XZ / YZ + metadatos.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 5))
+        color_options = self._get_spatial_color_options()
+        if self.spatial_color_var.get() not in color_options:
+            self.spatial_color_var.set(color_options[0] if color_options else "")
+        ctk.CTkLabel(section, text="Color por", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkOptionMenu(section, variable=self.spatial_color_var, values=color_options or [""], state="normal" if color_options else "disabled", height=24).pack(fill="x", padx=6, pady=(0, 4))
+        domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
+        if self.domain_filter_var.get() not in domain_filters:
+            self.domain_filter_var.set("Todos")
+        ctk.CTkLabel(section, text="Filtro global de dominio", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkOptionMenu(section, variable=self.domain_filter_var, values=domain_filters, state="normal", height=24).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar filtro dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_apply_domain_filter).pack(fill="x", padx=6, pady=(0, 4))
         return section
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
-        section = self._section_shell(parent, "Constructor de dominios")
-        candidates = self.service.get_domain_layer_candidates() or [""]
-        state = self.service.get_domain_state()
-        ordered = list(state.get("ordered_layers", []))
-        active = set(state.get("active_layers", []))
-        self.domain_min_samples_var.set(int(state.get("min_samples", 1)))
-        self.domain_include_missing_var.set(bool(state.get("include_missing", False)))
-        ctk.CTkLabel(section, text="Hasta 3 capas categóricas con orden jerárquico.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 4))
-        for idx in range(3):
-            if idx < len(ordered) and ordered[idx] in candidates:
-                self.domain_layer_vars[idx].set(ordered[idx])
-            elif not self.domain_layer_vars[idx].get() and candidates and candidates[0]:
-                self.domain_layer_vars[idx].set(candidates[0])
-            self.domain_layer_active_vars[idx].set(bool(self.domain_layer_vars[idx].get() and self.domain_layer_vars[idx].get() in active))
-            row = ctk.CTkFrame(section, fg_color="transparent")
-            row.pack(fill="x", padx=6, pady=(0, 2))
-            ctk.CTkCheckBox(row, text=f"Capa {idx + 1}", variable=self.domain_layer_active_vars[idx]).pack(side="left", padx=(0, 4))
-            ctk.CTkOptionMenu(row, variable=self.domain_layer_vars[idx], values=candidates, state="normal" if candidates[0] else "disabled", height=24).pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(section, text="Excluir dominios con menos de N muestras", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(4, 2))
-        ctk.CTkEntry(section, textvariable=self.domain_min_samples_var, height=24).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkCheckBox(section, text="Incluir categorías faltantes", variable=self.domain_include_missing_var, text_color=TXT_MAIN).pack(anchor="w", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar constructor", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains).pack(fill="x", padx=6, pady=(2, 4))
+        section = self._section_shell(parent, "Constructor explícito de dominios")
+        candidates = self.service.get_domain_candidate_columns() or [""]
+        if not self.domain_base_var.get() and candidates and candidates[0]:
+            self.domain_base_var.set(candidates[0])
+        if self.domain_base_var.get() not in candidates:
+            self.domain_base_var.set(candidates[0] if candidates else "")
+            self.domain_selected_categories = set()
+        ctk.CTkLabel(section, text="Variable base", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkOptionMenu(
+            section,
+            variable=self.domain_base_var,
+            values=candidates,
+            state="normal" if candidates[0] else "disabled",
+            height=24,
+            command=lambda _value: self._on_domain_base_changed(),
+        ).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Selecciona categorías", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        categories_box = ctk.CTkScrollableFrame(section, height=140, fg_color=BG_SOFT)
+        categories_box.pack(fill="x", padx=6, pady=(0, 4))
+        self.domain_category_checkbox_vars = {}
+        category_counts = self._get_domain_category_counts()
+        if not category_counts:
+            ctk.CTkLabel(categories_box, text="No hay categorías disponibles.", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=4, pady=4)
+        for category, count in category_counts:
+            var = ctk.BooleanVar(value=category in self.domain_selected_categories)
+            self.domain_category_checkbox_vars[category] = var
+            ctk.CTkCheckBox(
+                categories_box,
+                text=f"{category} (n={count})",
+                variable=var,
+                command=lambda cat=category: self._on_toggle_domain_category(cat),
+                text_color=TXT_MAIN,
+            ).pack(anchor="w", padx=4, pady=1)
+        ctk.CTkLabel(section, text="Nombre dominio", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkEntry(section, textvariable=self.domain_name_var, height=24, placeholder_text="D1").pack(fill="x", padx=6, pady=(0, 4))
+        self.domain_assign_button = ctk.CTkButton(section, text="Asignar dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_assign_domain)
+        self.domain_assign_button.pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Dominios definidos:", text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=6, pady=(2, 2))
+        summary = self._build_domain_definition_summary()
+        ctk.CTkLabel(section, text=summary, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 4))
+        self.domain_apply_button = ctk.CTkButton(section, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains)
+        self.domain_apply_button.pack(fill="x", padx=6, pady=(2, 4))
+        ctk.CTkLabel(section, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 2))
+        self._update_domain_action_states()
         return section
 
     def _focus_sidebar_sections(self, step_name: str) -> None:
@@ -409,7 +461,7 @@ class HomePanel(ctk.CTkFrame):
             return
 
         if stage == "Cutoffs":
-            self.workspace_title_var.set("Vista Cutoffs")
+            self.workspace_title_var.set("Vista Control de outliers")
             self.workspace_subtitle_var.set("Evalúa impacto del capping antes de confirmar la variable operativa.")
             self._render_cutoff_view()
             return
@@ -503,7 +555,8 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         try:
-            result = self.service.prepare_visual_data()
+            color_by = self.spatial_color_var.get() or None
+            result = self.service.prepare_visual_data(color_by=color_by)
             if not result.success or result.spatial_data is None:
                 raise ValueError(result.message)
             spatial = result.spatial_data
@@ -517,9 +570,10 @@ class HomePanel(ctk.CTkFrame):
         ax_yz = grid.axis(1, 0)
         ax_info = grid.axis(1, 1)
 
-        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
-        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
-        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap="viridis", s=12, alpha=0.82, edgecolors="none")
+        cmap = "tab20" if spatial.target_tick_labels else "viridis"
+        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
+        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
+        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, s=12, alpha=0.82, edgecolors="none")
 
         ax_xy.set_title("Planta (XY)", color=PLOT_TXT)
         ax_xz.set_title("Sección XZ", color=PLOT_TXT)
@@ -531,6 +585,9 @@ class HomePanel(ctk.CTkFrame):
 
         for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
             colorbar = grid.figure.colorbar(sc, ax=ax, shrink=0.76, label=spatial.target_label)
+            if spatial.target_tick_positions and spatial.target_tick_labels:
+                colorbar.set_ticks(spatial.target_tick_positions)
+                colorbar.set_ticklabels(spatial.target_tick_labels)
             colorbar.ax.tick_params(labelsize=8)
 
         ax_info.axis("off")
@@ -559,7 +616,7 @@ class HomePanel(ctk.CTkFrame):
 
         rows = payload.get("items", [])
         if not rows:
-            ctk.CTkLabel(wrapper, text="No hay dominios activos. Configura capas y aplica el constructor.", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(wrapper, text="Define al menos un dominio para comenzar", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
         plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
@@ -671,14 +728,15 @@ class HomePanel(ctk.CTkFrame):
 
     def _paint_workflow_state(self, active_step: str) -> None:
         ordered = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]
+        labels = {"Datos": "Datos", "EDA": "EDA", "Cutoffs": "Control de outliers", "Espacial": "Espacial", "Dominios": "Dominios"}
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
             if idx < active_idx:
-                self.workflow_buttons[step].configure(text=f"✓ {step}", fg_color=C_TAB_DONE, hover_color="#455468", border_color="#5a687a")
+                self.workflow_buttons[step].configure(text=f"✓ {labels[step]}", fg_color=C_TAB_DONE, hover_color="#455468", border_color="#5a687a")
             elif idx == active_idx:
-                self.workflow_buttons[step].configure(text=f"● {step}", fg_color=C_ACTIVE, hover_color="#255b87", border_color="#4d7fae")
+                self.workflow_buttons[step].configure(text=f"● {labels[step]}", fg_color=C_ACTIVE, hover_color="#255b87", border_color="#4d7fae")
             else:
-                self.workflow_buttons[step].configure(text=f"○ {step}", fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_color="#454b55")
+                self.workflow_buttons[step].configure(text=f"○ {labels[step]}", fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_color="#454b55")
 
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
         self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
@@ -728,6 +786,38 @@ class HomePanel(ctk.CTkFrame):
         if key:
             self.column_menus[key] = menu
 
+    def _get_spatial_color_options(self) -> list[str]:
+        target = self.service.get_cutoff_state().get("effective_target_column", "") or self.target_var.get()
+        categorical = self.service.get_categorical_columns()
+        options = [value for value in [target, "domain_estimation", *categorical] if value]
+        unique: list[str] = []
+        for option in options:
+            if option not in unique:
+                unique.append(option)
+        return unique
+
+    def _get_domain_category_counts(self) -> list[tuple[str, int]]:
+        dataset = self.service.current_dataset
+        base = self.domain_base_var.get().strip()
+        if dataset is None or not base or base not in dataset.dataframe.columns:
+            return []
+        counts = dataset.dataframe[base].dropna().astype(str).str.strip().value_counts()
+        return [(str(cat), int(count)) for cat, count in counts.items() if str(cat)]
+
+    def _domain_inputs_valid(self) -> bool:
+        return bool(self.domain_base_var.get().strip() and self.domain_name_var.get().strip() and self.domain_selected_categories)
+
+    def _update_domain_action_states(self) -> None:
+        assign_state = "normal" if self._domain_inputs_valid() else "disabled"
+        apply_state = "normal" if self.domain_definition_local else "disabled"
+        if self.domain_assign_button is not None:
+            self.domain_assign_button.configure(state=assign_state)
+        if self.domain_apply_button is not None:
+            self.domain_apply_button.configure(state=apply_state)
+
+    def _on_domain_name_changed(self, *_args) -> None:
+        self._update_domain_action_states()
+
     def _on_domain_mode_change(self) -> None:
         if self.domain_menu_widget is not None:
             self.domain_menu_widget.configure(state="normal" if bool(self.use_domain_var.get()) else "disabled")
@@ -745,6 +835,9 @@ class HomePanel(ctk.CTkFrame):
         self._append_activity(result.message)
         if result.success and result.dataset:
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
+            self.domain_definition_local = {}
+            self.domain_selected_categories = set()
+            self.domain_feedback_var.set("Selecciona categorías y asigna un nombre de dominio.")
             self._apply_autodetected_columns()
             self._sync_cutoff_defaults()
             self._render_control_sections()
@@ -791,6 +884,7 @@ class HomePanel(ctk.CTkFrame):
         if result.success:
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio: {selected_domain or 'No definido'}")
+            self.spatial_color_var.set(self.target_var.get())
             self._sync_cutoff_defaults()
             self._refresh_dashboard(reason="config_applied")
 
@@ -807,6 +901,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_percentile_label_var.set("Percentil: P95.0")
         self.dynamic_cutoff_label_var.set("Cutoff actual: -")
         self.dynamic_impact_label_var.set("Impacto: Sin preview.")
+        self.spatial_color_var.set(self.target_var.get())
 
     def _on_apply_cutoffs(self) -> None:
         self._trace_ui_action("aplicar_cutoffs_manuales", refresh_type="none")
@@ -931,20 +1026,71 @@ class HomePanel(ctk.CTkFrame):
             self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
             self._refresh_dashboard(reason="dynamic_cutoff_confirmed")
 
-    def _on_apply_domains(self) -> None:
-        self._trace_ui_action("aplicar_dominios", refresh_type="none")
-        ordered = [var.get() for var in self.domain_layer_vars]
-        active = [self.domain_layer_vars[idx].get() for idx, flag in enumerate(self.domain_layer_active_vars) if bool(flag.get())]
-        result = self.service.configure_domains(
-            ordered_layers=ordered,
-            active_layers=active,
-            min_samples=int(self.domain_min_samples_var.get() or 1),
-            include_missing=bool(self.domain_include_missing_var.get()),
-        )
+    def _build_domain_definition_summary(self) -> str:
+        if not self.domain_definition_local:
+            return "Define al menos un dominio para comenzar"
+        counts_map = dict(self._get_domain_category_counts())
+        lines: list[str] = []
+        for domain_name, categories in self.domain_definition_local.items():
+            total = sum(int(counts_map.get(cat, 0)) for cat in categories)
+            lines.append(f"{domain_name} → [{', '.join(categories)}] (n={total})")
+        return "\n".join(lines)
+
+    def _on_domain_base_changed(self) -> None:
+        self.domain_selected_categories = set()
+        self.domain_feedback_var.set("Selecciona categorías y asigna un nombre de dominio.")
+        self._render_control_sections()
+
+    def _on_toggle_domain_category(self, category: str) -> None:
+        var = self.domain_category_checkbox_vars.get(category)
+        if var is None:
+            return
+        if bool(var.get()):
+            self.domain_selected_categories.add(category)
+        else:
+            self.domain_selected_categories.discard(category)
+        self._update_domain_action_states()
+
+    def _on_assign_domain(self) -> None:
+        domain_name = self.domain_name_var.get().strip()
+        categories = sorted(self.domain_selected_categories)
+        if not self.domain_base_var.get().strip() or not domain_name or not categories:
+            self.status_text.set("Debes seleccionar categorías y asignar un nombre al dominio")
+            self.domain_feedback_var.set("Debes seleccionar categorías y asignar un nombre al dominio")
+            return
+        merged = list(dict.fromkeys([*self.domain_definition_local.get(domain_name, []), *categories]))
+        self.domain_definition_local[domain_name] = merged
+        self.domain_name_var.set("")
+        self.domain_selected_categories = set()
+        self.status_text.set(f"Dominio {domain_name} creado correctamente")
+        self.domain_feedback_var.set(f"Dominio {domain_name} creado correctamente")
+        self._render_control_sections()
+
+    def _on_apply_domain_filter(self) -> None:
+        result = self.service.set_active_domain(self.domain_filter_var.get())
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
-            self.domain_label.set(f"Dominio: {self.service.workflow_state.active_domain}")
+            self._refresh_dashboard(reason="domain_filter_changed")
+
+    def _on_apply_domains(self) -> None:
+        self._trace_ui_action("aplicar_dominios", refresh_type="none")
+        if not self.domain_definition_local:
+            self.status_text.set("Define al menos un dominio para comenzar")
+            self.domain_feedback_var.set("Define al menos un dominio para comenzar")
+            return
+        definition = {"variable_base": self.domain_base_var.get().strip(), "domains": dict(self.domain_definition_local)}
+        result = self.service.apply_domain_definition(definition)
+        if result.success:
+            self.status_text.set("Dominios aplicados al dataset")
+            self.domain_feedback_var.set("Dominios aplicados al dataset")
+            self._append_activity("Dominios aplicados al dataset")
+        else:
+            self.status_text.set(result.message)
+            self.domain_feedback_var.set(result.message)
+            self._append_activity(result.message)
+        if result.success:
+            self.domain_label.set("Dominio: domain_estimation")
             self.domain_records_var.set("Selecciona una burbuja para ver índices y resumen del dominio.")
             self._refresh_dashboard(reason="domains_applied")
 

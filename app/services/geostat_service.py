@@ -26,6 +26,7 @@ STEP_EVENT_MAP = {
     "Espacial": "workflow_step_spatial_opened",
     "Dominios": "workflow_step_domains_opened",
 }
+DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
 
 
 @dataclass
@@ -283,6 +284,8 @@ class GeostatService:
             return []
         domain_columns: list[str] = []
         for column in self.current_dataset.columns:
+            if column == DOMAIN_ESTIMATION_COLUMN:
+                continue
             if not _is_numeric_dtype(self.current_dataset.dataframe[column]):
                 domain_columns.append(column)
         return domain_columns
@@ -302,65 +305,110 @@ class GeostatService:
         return candidates
 
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
+        # Compatibilidad hacia atrás: conserva contrato histórico pero delega
+        # al nuevo flujo de dominios persistentes usando la primera capa activa.
         if self.current_dataset is None:
             return CutoffResult(False, "No hay dataset cargado.")
         if self.variable_config is None:
             return CutoffResult(False, "Configura X/Y/Z/target antes de definir dominios.")
         allowed = set(self.get_domain_layer_candidates())
-        unique_ordered: list[str] = []
-        for layer in ordered_layers[:3]:
-            if layer and layer in allowed and layer not in unique_ordered:
-                unique_ordered.append(layer)
+        unique_ordered = [layer for layer in ordered_layers[:3] if layer and layer in allowed]
         active_unique = [layer for layer in active_layers if layer in unique_ordered][:3]
         if not active_unique:
+            self._clear_domain_state()
             self.workflow_state.domain_layers_order = unique_ordered
-            self.workflow_state.domain_active_layers = []
-            self.workflow_state.domain_output_column = ""
             self.workflow_state.domain_min_samples = max(1, int(min_samples))
             self.workflow_state.domain_include_missing = bool(include_missing)
-            self.workflow_state.active_domain = "No definido"
             return CutoffResult(True, "Constructor de dominios actualizado (sin capas activas).")
-
-        output_column = "domain_composite"
-        frame = self.current_dataset.dataframe
-        text_layers = frame[active_unique].copy()
-        missing_mask = None
-        for layer in active_unique:
-            layer_values = text_layers[layer]
-            mask = layer_values.map(_is_missing_category)
-            missing_mask = mask if missing_mask is None else (missing_mask | mask)
-            text_layers[layer] = layer_values.map(
-                lambda value: f"{layer}_Missing" if _is_missing_category(value) else f"{layer}_{str(value).strip()}"
-            )
-
-        composed = text_layers.agg(" | ".join, axis=1)
-        if include_missing:
-            frame[output_column] = composed
-        else:
-            frame[output_column] = composed.where(~missing_mask, other=None)
-        if output_column not in self.current_dataset.columns:
-            self.current_dataset.columns.append(output_column)
+        base = active_unique[0]
+        categories = self.current_dataset.dataframe[base].dropna().astype(str).str.strip().unique().tolist()
+        definition = {
+            "variable_base": base,
+            "domains": {str(cat): [str(cat)] for cat in categories if str(cat)},
+        }
+        self.apply_domain_definition(definition)
+        self.current_dataset.dataframe["domain_composite"] = self.current_dataset.dataframe[DOMAIN_ESTIMATION_COLUMN]
+        if "domain_composite" not in self.current_dataset.columns:
+            self.current_dataset.columns.append("domain_composite")
             self.current_dataset.column_count = len(self.current_dataset.columns)
-
         self.workflow_state.domain_layers_order = unique_ordered
         self.workflow_state.domain_active_layers = active_unique
-        self.workflow_state.domain_output_column = output_column
+        self.workflow_state.domain_output_column = "domain_composite"
         self.workflow_state.domain_min_samples = max(1, int(min_samples))
         self.workflow_state.domain_include_missing = bool(include_missing)
-        self.workflow_state.active_domain = " | ".join(active_unique)
-        self.activity_log.log(
-            "domain_configuration_applied",
-            "success",
-            "Configuración de dominios aplicada.",
-            {
-                "ordered_layers": unique_ordered,
-                "active_layers": active_unique,
-                "output_column": output_column,
-                "min_samples": self.workflow_state.domain_min_samples,
-                "include_missing": bool(include_missing),
-            },
-        )
         return CutoffResult(True, "Dominios actualizados correctamente.")
+
+    def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
+        if self.current_dataset is None:
+            return CutoffResult(False, "No hay dataset cargado.")
+        if self.variable_config is None:
+            return CutoffResult(False, "Configura X/Y/Z/target antes de definir dominios.")
+
+        variable_base = str(domain_definition.get("variable_base", "")).strip()
+        domains = domain_definition.get("domains", {})
+        if not variable_base:
+            return CutoffResult(False, "Debes seleccionar una variable base para dominios.")
+        if variable_base not in self.current_dataset.columns:
+            return CutoffResult(False, f"La variable base '{variable_base}' no existe en el dataset.")
+        if not isinstance(domains, dict) or not domains:
+            return CutoffResult(False, "Debes definir al menos un dominio con categorías.")
+
+        category_map: dict[str, str] = {}
+        for domain_name, categories in domains.items():
+            dom = str(domain_name).strip()
+            if not dom:
+                continue
+            if not isinstance(categories, list):
+                continue
+            for value in categories:
+                cat = str(value).strip()
+                if not cat:
+                    continue
+                category_map[cat] = dom
+        if not category_map:
+            return CutoffResult(False, "No se detectaron categorías válidas para mapear a dominios.")
+
+        base_series = self.current_dataset.dataframe[variable_base].map(lambda value: str(value).strip() if not _is_missing_category(value) else "")
+        mapped = base_series.map(lambda value: category_map.get(value, "UNDEFINED")).astype("string")
+        self.current_dataset.dataframe[DOMAIN_ESTIMATION_COLUMN] = mapped
+        if DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.columns:
+            self.current_dataset.columns.append(DOMAIN_ESTIMATION_COLUMN)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        self.workflow_state.domain_definition = {
+            "variable_base": variable_base,
+            "domains": {str(key): [str(item) for item in value] for key, value in domains.items()},
+        }
+        self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.active_domain = f"Columna: {DOMAIN_ESTIMATION_COLUMN}"
+        if self.variable_config is not None:
+            self.variable_config.domain_column = DOMAIN_ESTIMATION_COLUMN
+        self.activity_log.log(
+            "domain_definition_applied",
+            "success",
+            "Definición manual de dominios aplicada.",
+            {"variable_base": variable_base, "domains_count": len(domains), "output_column": DOMAIN_ESTIMATION_COLUMN},
+        )
+        return CutoffResult(True, f"Dominios aplicados. Columna persistente: {DOMAIN_ESTIMATION_COLUMN}")
+
+    def set_active_domain(self, domain_name: str | None) -> CutoffResult:
+        normalized = (domain_name or "").strip()
+        if normalized.upper() in {"", "ALL", "TODOS", "TODAS"}:
+            self.workflow_state.active_domain_filter = ""
+            return CutoffResult(True, "Filtro de dominio desactivado.")
+        if self.current_dataset is None or DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.dataframe.columns:
+            return CutoffResult(False, "No existe domain_estimation para filtrar.")
+        exists = (self.current_dataset.dataframe[DOMAIN_ESTIMATION_COLUMN].astype(str) == normalized).any()
+        if not exists:
+            return CutoffResult(False, f"Dominio '{normalized}' no encontrado en domain_estimation.")
+        self.workflow_state.active_domain_filter = normalized
+        return CutoffResult(True, f"Filtro de dominio activo: {normalized}")
+
+    def get_domain_estimation_values(self) -> list[str]:
+        if self.current_dataset is None or DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.dataframe.columns:
+            return []
+        values = self.current_dataset.dataframe[DOMAIN_ESTIMATION_COLUMN].dropna().astype(str).unique().tolist()
+        return sorted([value for value in values if value])
 
     def get_domain_state(self) -> dict[str, object]:
         return {
@@ -371,14 +419,19 @@ class GeostatService:
             "include_missing": bool(self.workflow_state.domain_include_missing),
             "effective_target_column": self._get_effective_target_column(),
             "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
+            "domain_definition": dict(self.workflow_state.domain_definition),
+            "active_domain_filter": self.workflow_state.active_domain_filter,
+            "domain_estimation_values": self.get_domain_estimation_values(),
         }
 
     def prepare_domain_statistics(self) -> dict[str, object]:
         if self.current_dataset is None or self.variable_config is None:
             raise ValueError("No hay dataset/configuración suficiente para Dominios.")
-        output_column = self.workflow_state.domain_output_column
+        output_column = self.workflow_state.domain_output_column or (
+            DOMAIN_ESTIMATION_COLUMN if DOMAIN_ESTIMATION_COLUMN in self.current_dataset.dataframe.columns else ""
+        )
         active_layers = list(self.workflow_state.domain_active_layers)
-        if not output_column or output_column not in self.current_dataset.dataframe.columns or not active_layers:
+        if not output_column or output_column not in self.current_dataset.dataframe.columns:
             return {"items": [], "selection_column": output_column, "active_layers": active_layers}
 
         target_column = self._get_effective_target_column()
@@ -468,6 +521,11 @@ class GeostatService:
             if _is_numeric_dtype(self.current_dataset.dataframe[column]):
                 numeric_columns.append(column)
         return numeric_columns
+
+    def get_categorical_columns(self) -> list[str]:
+        if self.current_dataset is None:
+            return []
+        return [column for column in self.current_dataset.columns if not _is_numeric_dtype(self.current_dataset.dataframe[column])]
 
     def get_cutoff_state(self) -> dict[str, object]:
         default_target = self.variable_config.target_column if self.variable_config else ""
@@ -711,6 +769,10 @@ class GeostatService:
         self.workflow_state.domain_output_column = ""
         self.workflow_state.domain_min_samples = 1
         self.workflow_state.domain_include_missing = False
+        self.workflow_state.domain_definition = {}
+        self.workflow_state.active_domain_filter = ""
+        if self.variable_config is not None and self.variable_config.domain_column == DOMAIN_ESTIMATION_COLUMN:
+            self.variable_config.domain_column = None
 
     def _get_effective_target_column(self) -> str:
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
@@ -721,20 +783,32 @@ class GeostatService:
             return ""
         return self.variable_config.target_column
 
-    def prepare_visual_data(self) -> VisualPreparationResult:
+    def _get_filtered_dataframe(self):
+        if self.current_dataset is None:
+            return None
+        dataframe = self.current_dataset.dataframe
+        active_filter = (self.workflow_state.active_domain_filter or "").strip()
+        if not active_filter or DOMAIN_ESTIMATION_COLUMN not in dataframe.columns:
+            return dataframe
+        return dataframe[dataframe[DOMAIN_ESTIMATION_COLUMN].astype(str) == active_filter]
+
+    def prepare_visual_data(self, color_by: str | None = None) -> VisualPreparationResult:
         self.activity_log.log("dashboard_render_started", "info", "Render espacial iniciado.", {"view": "Espacial"})
         if self.current_dataset is None or self.variable_config is None:
             message = "No hay dataset/configuración suficiente para renderizar visuales."
             self.activity_log.log("dashboard_render_failed", "error", message, {"view": "Espacial"})
             return VisualPreparationResult(False, message, None)
         try:
+            dataframe = self._get_filtered_dataframe()
+            color_column = (color_by or "").strip() or self._get_effective_target_column()
+            allow_categorical = bool(color_column != self._get_effective_target_column() or self.workflow_state.cutoffs_enabled)
             spatial = prepare_spatial_sections(
-                self.current_dataset.dataframe,
+                dataframe,
                 self.variable_config.x_column,
                 self.variable_config.y_column,
                 self.variable_config.z_column,
-                self._get_effective_target_column(),
-                allow_categorical_target=self.workflow_state.cutoffs_enabled,
+                color_column,
+                allow_categorical_target=allow_categorical,
             )
         except ValueError as exc:
             self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial"})
@@ -749,7 +823,12 @@ class GeostatService:
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
 
-    def prepare_univariate_data(self, max_domain_categories: int = 10, use_effective_target: bool = False) -> dict:
+    def prepare_univariate_data(
+        self,
+        max_domain_categories: int = 10,
+        use_effective_target: bool = False,
+        domain_filter: str | None = None,
+    ) -> dict:
         if self.current_dataset is None or self.variable_config is None:
             message = "No hay dataset/configuración suficiente para EDA."
             self.activity_log.log("eda_univariate_payload_empty", "warning", message, {})
@@ -757,6 +836,14 @@ class GeostatService:
             raise ValueError(message)
 
         df = self.current_dataset.dataframe
+        requested_filter = (domain_filter or "").strip()
+        if requested_filter:
+            if DOMAIN_ESTIMATION_COLUMN in df.columns:
+                df = df[df[DOMAIN_ESTIMATION_COLUMN].astype(str) == requested_filter]
+            else:
+                df = df.iloc[0:0]
+        elif self.workflow_state.active_domain_filter:
+            df = self._get_filtered_dataframe()
         target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
         if not target or target not in df.columns:
             message = f"Target no válido para EDA univariado: '{target}'."
@@ -837,7 +924,7 @@ class GeostatService:
                 )
 
         domain_payload = _empty_domain_payload()
-        domain_col = self.variable_config.domain_column
+        domain_col = DOMAIN_ESTIMATION_COLUMN if DOMAIN_ESTIMATION_COLUMN in df.columns else self.variable_config.domain_column
         if not domain_col:
             domain_payload["message"] = "Boxplot por dominio no disponible: no hay dominio seleccionado."
             self.activity_log.log("univariate_component_unavailable", "warning", domain_payload["message"], {"component": "domain_boxplot", "target": target})
@@ -984,7 +1071,7 @@ class GeostatService:
 
     def _target_statistics(self, use_effective_target: bool = False) -> dict[str, float]:
         target = self._get_effective_target_column() if use_effective_target else self.variable_config.target_column
-        df = self.current_dataset.dataframe
+        df = self._get_filtered_dataframe()
         total = len(df)
         clean = df[target].dropna().astype(float)
         return _compute_target_statistics(clean, total)

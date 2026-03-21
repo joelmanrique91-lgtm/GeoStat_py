@@ -28,3 +28,5 @@ class WorkflowStateModel:
     domain_output_column: str = ""
     domain_min_samples: int = 1
     domain_include_missing: bool = False
+    domain_definition: dict = field(default_factory=dict)
+    active_domain_filter: str = ""
