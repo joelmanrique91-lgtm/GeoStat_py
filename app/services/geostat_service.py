@@ -777,6 +777,11 @@ class GeostatService:
             self.variable_config.domain_column = None
 
     def _get_effective_target_column(self) -> str:
+        """Resolve effective target with legacy precedence.
+
+        Precedence is intentionally conservative and mirrors current behavior:
+        dynamic cutoff output > manual cutoff output > base target from variable config.
+        """
         if self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column:
             return self.workflow_state.dynamic_cutoff_output_column
         if self.workflow_state.cutoffs_enabled and self.workflow_state.cutoff_output_column:
@@ -784,6 +789,49 @@ class GeostatService:
         if self.variable_config is None:
             return ""
         return self.variable_config.target_column
+
+    def get_analysis_context_snapshot(self) -> dict[str, object]:
+        """Return a read-only snapshot of the currently active analysis context."""
+        base_target_column = self.variable_config.target_column if self.variable_config else ""
+        effective_target_column = self._get_effective_target_column()
+        resolved_target_column = effective_target_column or base_target_column
+        active_domain_column = (
+            self.workflow_state.domain_output_column
+            or (self.variable_config.domain_column if self.variable_config else "")
+            or ""
+        )
+
+        readiness = "ready"
+        blocking_reason = ""
+        if self.current_dataset is None:
+            readiness = "blocked"
+            blocking_reason = "missing_dataset"
+        elif self.variable_config is None:
+            readiness = "blocked"
+            blocking_reason = "missing_variable_config"
+        elif not resolved_target_column or resolved_target_column not in self.current_dataset.dataframe.columns:
+            readiness = "blocked"
+            blocking_reason = "missing_resolved_target_column"
+
+        resolved_target_type = "unknown"
+        if (
+            readiness == "ready"
+            and self.current_dataset is not None
+            and resolved_target_column in self.current_dataset.dataframe.columns
+        ):
+            resolved_target_type = "numeric" if _is_numeric_dtype(self.current_dataset.dataframe[resolved_target_column]) else "categorical"
+
+        return {
+            "base_target_column": base_target_column,
+            "effective_target_column": effective_target_column,
+            "resolved_target_column": resolved_target_column,
+            "resolved_target_type": resolved_target_type,
+            "active_domain_column": active_domain_column,
+            "active_domain_filter": self.workflow_state.active_domain_filter,
+            "current_step": self.workflow_state.current_step,
+            "readiness": readiness,
+            "blocking_reason": blocking_reason,
+        }
 
     def _get_filtered_dataframe(self):
         if self.current_dataset is None:
@@ -1112,7 +1160,8 @@ class GeostatService:
         if self.current_dataset is None:
             return {"Dataset": "No cargado", "Muestras": "0", "Columnas": "0", "Target": "No definido", "Estado": "Pendiente", "Dominio": "No definido"}
 
-        target = self._get_effective_target_column() if self.variable_config else "No definido"
+        context = self.get_analysis_context_snapshot()
+        target = str(context["resolved_target_column"] or "No definido")
         return {
             "Dataset": self.current_dataset.file_name,
             "Muestras": str(self.current_dataset.row_count),
