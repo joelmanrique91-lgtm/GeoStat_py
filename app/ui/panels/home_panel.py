@@ -168,6 +168,14 @@ def _build_visual_context_line(snapshot: dict[str, object], *, local_override: s
     return " | ".join(parts)
 
 
+def _should_expand_stage_actions(step_name: str, readiness: dict[str, object]) -> bool:
+    if step_name != "Datos" or not isinstance(readiness, dict):
+        return False
+    stage_state = readiness.get("stages", {}).get("data", {})
+    blocking = [str(item) for item in stage_state.get("blocking_reasons", []) if str(item)]
+    return "missing_dataset" in blocking
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -230,7 +238,8 @@ class HomePanel(ctk.CTkFrame):
         self.action_bar_body: ctk.CTkFrame | None = None
         self.action_bar_block: ctk.CTkFrame | None = None
         self.action_bar_toggle_button: ctk.CTkButton | None = None
-        self.stage_actions_collapsed = True
+        initial_readiness = self.service.get_workflow_readiness()
+        self.stage_actions_collapsed = not _should_expand_stage_actions("Datos", initial_readiness)
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -635,10 +644,13 @@ class HomePanel(ctk.CTkFrame):
         head.grid(row=0, column=0, sticky="ew", padx=6, pady=(1, 0))
         head.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(head, text="Controles etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).grid(row=0, column=0, sticky="w")
-        self.action_bar_toggle_button = ctk.CTkButton(head, text="Expandir", width=74, command=self._toggle_stage_actions, **self._button_style("aux"))
+        toggle_text = "Expandir" if self.stage_actions_collapsed else "Ocultar"
+        self.action_bar_toggle_button = ctk.CTkButton(head, text=toggle_text, width=74, command=self._toggle_stage_actions, **self._button_style("aux"))
         self.action_bar_toggle_button.grid(row=0, column=1, sticky="e")
         self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
         self.action_bar_body.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 2))
+        if self.stage_actions_collapsed:
+            self.action_bar_body.grid_remove()
 
     def _toggle_stage_actions(self) -> None:
         self.stage_actions_collapsed = not self.stage_actions_collapsed
@@ -1356,6 +1368,13 @@ class HomePanel(ctk.CTkFrame):
         self._render_step(step_name)
 
     def _render_step(self, step_name: str) -> None:
+        readiness = self.service.get_workflow_readiness()
+        if _should_expand_stage_actions(step_name, readiness):
+            self.stage_actions_collapsed = False
+            if self.action_bar_toggle_button is not None:
+                self.action_bar_toggle_button.configure(text="Ocultar")
+            if self.action_bar_body is not None:
+                self.action_bar_body.grid()
         self._paint_workflow_state(step_name)
         self._focus_sidebar_sections(step_name)
         self._render_stage_action_bar(step_name)
