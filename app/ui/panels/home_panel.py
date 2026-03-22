@@ -244,6 +244,10 @@ class HomePanel(ctk.CTkFrame):
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
 
+        self.aux_controls_host = self._build_control_panel(self.content_panel)
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
+        self.aux_controls_host.grid_remove()
+
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
         self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
         self.log_panel.grid_columnconfigure(1, weight=1)
@@ -557,6 +561,154 @@ class HomePanel(ctk.CTkFrame):
     def _build_stage_action_bar(self, parent: ctk.CTkFrame) -> None:
         block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=9)
         block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 2))
+        block.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(block, text="Acciones de la etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
+            row=0, column=0, sticky="w", padx=7, pady=(4, 1)
+        )
+        self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
+        self.action_bar_body.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 4))
+
+    def _render_stage_action_bar(self, stage: str) -> None:
+        if self.action_bar_body is None:
+            return
+        for child in self.action_bar_body.winfo_children():
+            child.destroy()
+        self.action_bar_body.grid_columnconfigure(0, weight=1)
+        readiness = self.service.get_workflow_readiness()
+        stage_key = STEP_TO_READINESS_KEY.get(stage, "")
+        stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
+        if not bool(stage_state.get("ready")):
+            self._build_blocked_message_card(self.action_bar_body, stage)
+
+        if stage == "Datos":
+            self._build_data_actions_inline(self.action_bar_body)
+        elif stage == "EDA":
+            self._build_eda_actions_inline(self.action_bar_body)
+        elif stage == "Cutoffs":
+            self._build_cutoff_actions_inline(self.action_bar_body)
+        elif stage == "Espacial":
+            self._build_spatial_actions_inline(self.action_bar_body)
+        else:
+            self._build_domains_actions_inline(self.action_bar_body)
+
+    def _build_blocked_message_card(self, parent: ctk.CTkFrame, stage: str) -> None:
+        readiness = self.service.get_workflow_readiness()
+        message = _build_active_step_hint(stage, readiness)
+        card = ctk.CTkFrame(parent, fg_color=WF_BLOCKED, corner_radius=8)
+        card.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        ctk.CTkLabel(
+            card,
+            text=f"Etapa con bloqueo: {message}",
+            text_color=SEM_WHITE,
+            font=ui_font(FONT_SMALL),
+        ).pack(anchor="w", padx=8, pady=5)
+
+    def _build_data_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew")
+        for col in range(8):
+            row.grid_columnconfigure(col, weight=1)
+        ctk.CTkButton(row, text="Cargar CSV", height=28, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_load_csv).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        self._selector_inline(row, "X", self.x_var, self.service.get_available_columns() or [""], 0, 1)
+        self._selector_inline(row, "Y", self.y_var, self.service.get_available_columns() or [""], 0, 2)
+        self._selector_inline(row, "Z", self.z_var, self.service.get_available_columns() or [""], 0, 3)
+        self._selector_inline(row, "Target", self.target_var, self.service.get_numeric_columns() or [""], 0, 4)
+        ctk.CTkCheckBox(row, text="Usar dominio", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=0, column=5, padx=3, pady=2, sticky="w")
+        domain_options = self.service.get_domain_candidate_columns() or [""]
+        self._selector_inline(row, "Dominio", self.domain_var, domain_options, 0, 6, state="normal" if self.use_domain_var.get() else "disabled")
+        ctk.CTkButton(row, text="Confirmar", height=28, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_config).grid(row=0, column=7, padx=3, pady=2, sticky="ew")
+
+    def _selector_inline(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, *, state: str | None = None) -> None:
+        group = ctk.CTkFrame(parent, fg_color="transparent")
+        group.grid(row=row, column=col, padx=2, pady=1, sticky="ew")
+        ctk.CTkLabel(group, text=label, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w")
+        if values and variable.get() not in values:
+            variable.set(values[0])
+        computed_state = state or ("normal" if values and values[0] else "disabled")
+        ctk.CTkOptionMenu(group, variable=variable, values=values or [""], state=computed_state, height=24).pack(fill="x")
+
+    def _build_eda_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew")
+        row.grid_columnconfigure((0, 1), weight=0)
+        row.grid_columnconfigure(2, weight=1)
+        has_capping = self.service.has_confirmed_dynamic_capping()
+        if not has_capping:
+            self.eda_use_capping_var.set(False)
+        cluster = ctk.CTkFrame(row, fg_color=BG_CARD, corner_radius=7)
+        cluster.grid(row=0, column=0, columnspan=2, sticky="w", padx=(2, 6), pady=2)
+        ctk.CTkSwitch(cluster, text="EDA con capping confirmado", variable=self.eda_use_capping_var, state="normal" if has_capping else "disabled", command=self._on_toggle_eda_capping).pack(side="left", padx=6, pady=4)
+        ctk.CTkButton(cluster, text="Actualizar EDA", width=120, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_refresh_eda).pack(side="left", padx=(0, 6), pady=4)
+        ctk.CTkLabel(row, text="Histograma · QQ · boxplots con foco en dispersión y sesgo.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=2, sticky="e", padx=2, pady=2)
+
+    def _build_cutoff_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        band = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=7)
+        band.grid(row=1, column=0, sticky="ew")
+        for col in range(6):
+            band.grid_columnconfigure(col, weight=1)
+        ctk.CTkOptionMenu(
+            band,
+            variable=self.cutoff_target_var,
+            values=self.service.get_numeric_columns() or [""],
+            state="normal" if self.service.get_numeric_columns() else "disabled",
+            height=24,
+            command=lambda _v: self._schedule_cutoff_preview(),
+        ).grid(row=0, column=0, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkSwitch(band, text="Manual", variable=self.cutoff_enabled_var).grid(row=0, column=1, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkSwitch(band, text="Dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._schedule_cutoff_preview).grid(row=0, column=2, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkOptionMenu(band, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=24, command=lambda _v: self._schedule_cutoff_preview()).grid(row=0, column=3, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkLabel(band, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=4, padx=4, pady=(4, 2), sticky="e")
+        ctk.CTkButton(band, text="Aplicar", height=26, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_cutoff_primary).grid(row=0, column=5, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkSlider(
+            band,
+            from_=0,
+            to=100,
+            variable=self.dynamic_slider_var,
+            command=self._on_slider_change,
+            button_color=SEM_BLUE_SOFT,
+            progress_color=SEM_BLUE_SOFT,
+        ).grid(row=1, column=0, columnspan=5, padx=4, pady=(0, 4), sticky="ew")
+        ctk.CTkLabel(band, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=5, padx=4, pady=(0, 4), sticky="e")
+
+    def _on_apply_cutoff_primary(self) -> None:
+        if self.service.workflow_state.current_step != "Cutoffs":
+            return
+        if bool(self.dynamic_cutoff_enabled_var.get()):
+            self._on_apply_dynamic_cutoff()
+            return
+        self._on_apply_cutoffs()
+
+    def _build_spatial_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew")
+        row.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        color_options = self._get_spatial_color_options()
+        if self.spatial_color_var.get() not in color_options:
+            self.spatial_color_var.set(color_options[0] if color_options else "")
+        ctk.CTkOptionMenu(row, variable=self.spatial_color_var, values=color_options or [""], state="normal" if color_options else "disabled", height=24).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
+        if self.domain_filter_var.get() not in domain_filters:
+            self.domain_filter_var.set("Todos")
+        ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=domain_filters, state="normal", height=24).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Aplicar filtro dominio", height=26, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_apply_domain_filter).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        ctk.CTkLabel(row, text="El color es un override local de esta vista.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=3, sticky="e", padx=4, pady=2)
+
+    def _build_domains_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew")
+        row.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
+        candidates = self.service.get_domain_candidate_columns() or [""]
+        if self.domain_base_var.get() not in candidates:
+            self.domain_base_var.set(candidates[0] if candidates else "")
+        ctk.CTkOptionMenu(row, variable=self.domain_base_var, values=candidates, state="normal" if candidates and candidates[0] else "disabled", height=24, command=lambda _v: self._on_domain_base_changed()).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ctk.CTkEntry(row, textvariable=self.domain_name_var, height=24, placeholder_text="Nombre dominio").grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Asignar dominio", height=26, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_assign_domain).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_domains).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
+        ctk.CTkLabel(row, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=4, sticky="e", padx=4, pady=2)
+
+    def _build_stage_action_bar(self, parent: ctk.CTkFrame) -> None:
+        block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=9)
+        block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 3))
         block.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(block, text="Acciones de la etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
             row=0, column=0, sticky="w", padx=7, pady=(4, 1)
