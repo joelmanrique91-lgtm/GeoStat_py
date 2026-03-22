@@ -74,6 +74,10 @@ PAD_SECTION_Y = 8
 def ui_font(token: dict[str, object]) -> ctk.CTkFont:
     return ctk.CTkFont(size=int(token["size"]), weight=str(token["weight"]))
 
+
+def ui_font(token: dict[str, object]) -> ctk.CTkFont:
+    return ctk.CTkFont(size=int(token["size"]), weight=str(token["weight"]))
+
 STEP_TO_READINESS_KEY = {
     "Datos": "data",
     "EDA": "eda",
