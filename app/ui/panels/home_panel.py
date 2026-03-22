@@ -965,12 +965,12 @@ class HomePanel(ctk.CTkFrame):
             diagnostic = "Diagnóstico no disponible."
 
         evidence = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
-        evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 2))
+        evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 3))
         evidence.grid_columnconfigure(0, weight=1)
         evidence.grid_rowconfigure(1, weight=1)
 
         summary = ctk.CTkFrame(evidence, fg_color=BG_PANEL)
-        summary.grid(row=0, column=0, sticky="ew", padx=3, pady=(0, 2))
+        summary.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 3))
         summary.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(summary, text=f"EDA · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=2, pady=(0, 0))
         ctk.CTkLabel(
@@ -983,7 +983,7 @@ class HomePanel(ctk.CTkFrame):
         ).grid(row=1, column=0, sticky="w", padx=2, pady=(0, 0))
 
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-        plot_card.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 3))
+        plot_card.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 4))
         plot_card.grid_rowconfigure(0, weight=1)
         plot_card.grid_columnconfigure(0, weight=1)
 
@@ -1075,10 +1075,10 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         snapshot = self.service.get_analysis_context_snapshot()
-        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
-        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(0, 5))
+        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(0, 3))
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(0, 3))
         try:
             color_by = self.spatial_color_var.get() or None
             result = self.service.prepare_visual_data(color_by=color_by)

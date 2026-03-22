@@ -23,7 +23,7 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         for axis in (ax_xy, ax_xz, ax_yz, ax_info):
             apply_axis_style(axis)
         cmap = "tab20" if spatial.target_tick_labels else get_continuous_colormap()
-        point_kwargs = {"s": 11, "alpha": 0.64, "edgecolors": "none"}
+        point_kwargs = {"s": 12, "alpha": 0.66, "edgecolors": "white", "linewidths": 0.15}
         sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, **point_kwargs)
         ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
         ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
@@ -37,12 +37,15 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         ax_xz.set_ylabel("Z")
         ax_yz.set_xlabel("Y")
         ax_yz.set_ylabel("Z")
+        ax_xy.margins(x=0.02, y=0.02)
+        ax_xz.margins(x=0.02, y=0.03)
+        ax_yz.margins(x=0.02, y=0.03)
         plain_formatter = ScalarFormatter(useOffset=False)
         plain_formatter.set_scientific(False)
         for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
             axis.set_major_formatter(plain_formatter)
 
-        colorbar = grid.figure.colorbar(sc_xy, ax=ax_xy, shrink=0.68, pad=0.02, label=spatial.target_label)
+        colorbar = grid.figure.colorbar(sc_xy, ax=ax_xy, shrink=0.72, pad=0.015, fraction=0.045, label=spatial.target_label)
         if spatial.target_tick_positions and spatial.target_tick_labels:
             colorbar.set_ticks(spatial.target_tick_positions)
             colorbar.set_ticklabels(spatial.target_tick_labels)
@@ -68,6 +71,7 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
             va="top",
             color=context.info_text_color,
             fontsize=context.label_size,
-            bbox={"facecolor": context.info_bg_color, "edgecolor": context.info_border_color, "boxstyle": "round,pad=0.45"},
+            linespacing=1.35,
+            bbox={"facecolor": context.info_bg_color, "edgecolor": context.info_border_color, "boxstyle": "round,pad=0.55"},
         )
         grid.render()

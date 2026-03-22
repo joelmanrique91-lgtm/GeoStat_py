@@ -18,10 +18,10 @@ TEXT_MAIN = "#E6EDF8"
 TEXT_MUTED = "#A7B6CB"
 TEXT_SOFT = "#8B9AB0"
 GRID_COLOR = "#334866"
-CHART_BG = "#F8FAFC"
-CHART_BORDER = "#D5DEEA"
-CHART_GRID = "#C9D5E5"
-CHART_TEXT = "#1A2A3A"
+CHART_BG = "#F7FAFE"
+CHART_BORDER = "#CAD7E7"
+CHART_GRID = "#D4DEEB"
+CHART_TEXT = "#162638"
 
 SEM_BLUE = "#4A8DFF"
 SEM_BLUE_SOFT = "#8EB8FF"
@@ -94,7 +94,7 @@ def get_continuous_colormap() -> str:
 
 def apply_axis_style(ax) -> None:
     ax.set_facecolor(CHART_BG)
-    ax.grid(color=CHART_GRID, alpha=0.42, linestyle="-", linewidth=0.6)
+    ax.grid(color=CHART_GRID, alpha=0.38, linestyle="-", linewidth=0.7)
     ax.tick_params(colors=CHART_TEXT, labelsize=CHART_FONT_SIZE_TICK)
     ax.xaxis.label.set_color(CHART_TEXT)
     ax.yaxis.label.set_color(CHART_TEXT)
@@ -103,8 +103,10 @@ def apply_axis_style(ax) -> None:
     ax.title.set_color(CHART_TEXT)
     ax.title.set_fontsize(CHART_FONT_SIZE_TITLE)
     ax.title.set_fontweight("bold")
-    for spine in ax.spines.values():
-        spine.set_color(CHART_BORDER)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(CHART_BORDER)
+    ax.spines["bottom"].set_color(CHART_BORDER)
 
 
 def apply_figure_theme(fig) -> None:

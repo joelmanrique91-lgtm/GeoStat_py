@@ -41,8 +41,8 @@ class MatplotlibEDARenderer(EDARenderer):
         mean_val = sum(sorted_values) / n_values
 
         if original_values != values:
-            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="none", alpha=0.20, label="Base")
-        ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="none", alpha=0.76, label="Activa")
+            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="white", linewidth=0.25, alpha=0.18, label="Base")
+        ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="white", linewidth=0.30, alpha=0.80, label="Activa")
         add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.95)
         add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.88)
         add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
@@ -52,6 +52,7 @@ class MatplotlibEDARenderer(EDARenderer):
         ax_hist.set_xlabel("Ley Cu (%)")
         ax_hist.set_ylabel("Frecuencia (n)")
         ax_hist.legend(loc="upper right", bbox_to_anchor=(0.995, 0.995), fontsize=context.chart_legend_size, frameon=False)
+        ax_hist.margins(x=0.02)
         tail_hint = "cola dominante alta" if mean_val >= p50 else "cola dominante baja"
         ax_hist.text(
             0.015,
@@ -86,6 +87,7 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
             ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=context.chart_legend_size, frameon=False)
+            ax_prob.margins(x=0.03, y=0.05)
         else:
             ax_prob.axis("off")
             ax_prob.text(0.5, 0.5, "QQ no disponible", ha="center", va="center", color=context.chart_text_color)
@@ -104,6 +106,7 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.tick_params(axis="x", rotation=10, labelsize=context.chart_legend_size)
             ax_secondary.set_ylabel("Ley Cu (%)")
             ax_secondary.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
+            ax_secondary.margins(x=0.02)
         else:
             box = ax_secondary.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
             for patch in box["boxes"]:
@@ -120,7 +123,8 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.set_yticks([])
             ax_secondary.set_title("Boxplot · Rango y outliers", color=context.chart_text_color, pad=8)
             ax_secondary.set_xlabel("Ley Cu (%)")
+            ax_secondary.margins(x=0.03)
 
-        grid.figure.tight_layout(pad=0.75, w_pad=0.85, h_pad=0.85)
+        grid.figure.tight_layout(pad=0.92, w_pad=1.0, h_pad=0.95)
         grid.canvas.draw()
         grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
