@@ -35,3 +35,7 @@ class WorkflowStateModel:
     domain_include_missing: bool = False
     domain_definition: dict = field(default_factory=dict)
     active_domain_filter: str = ""
+    domain_ui_filters: dict[str, str] = field(default_factory=lambda: {"lithology": "", "alteration": "", "mine": ""})
+    domain_filter_columns: dict[str, str] = field(default_factory=lambda: {"lithology": "", "alteration": "", "mine": ""})
+    domain_assignment_history: list[dict[str, object]] = field(default_factory=list)
+    domain_assignment_sequence: int = 0

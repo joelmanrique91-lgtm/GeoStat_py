@@ -769,6 +769,20 @@ class ServiceFeatureTests(unittest.TestCase):
                 self.assertIsInstance(item["indexes"], list)
                 self.assertIsInstance(item["primary_group"], str)
 
+    def test_set_active_domain_uses_active_domain_column_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "domain_filter_context.csv"
+            csv_path.write_text(
+                "x,y,z,target,dom,zone\n0,0,0,1,a,z1\n1,1,1,2,a,z1\n2,2,2,4,b,z2\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(self.service.configure_domains(["dom", "zone"], ["dom", "zone"]).success)
+            result = self.service.set_active_domain("a")
+            self.assertTrue(result.success)
+            self.assertEqual(self.service.workflow_state.active_domain_filter, "a")
+
 
 if __name__ == "__main__":
     unittest.main()
