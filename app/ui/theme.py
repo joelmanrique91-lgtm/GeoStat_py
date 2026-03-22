@@ -18,6 +18,10 @@ TEXT_MAIN = "#E6EDF8"
 TEXT_MUTED = "#A7B6CB"
 TEXT_SOFT = "#8B9AB0"
 GRID_COLOR = "#334866"
+CHART_BG = "#F8FAFC"
+CHART_BORDER = "#D5DEEA"
+CHART_GRID = "#C9D5E5"
+CHART_TEXT = "#1A2A3A"
 
 SEM_BLUE = "#4A8DFF"
 SEM_BLUE_SOFT = "#8EB8FF"
@@ -63,7 +67,7 @@ DOMAIN_PALETTE = [
     "#A7D0FF",
 ]
 
-FONT_TITLE = {"size": 22, "weight": "bold"}
+FONT_TITLE = {"size": 24, "weight": "bold"}
 FONT_SUBTITLE = {"size": 15, "weight": "bold"}
 FONT_BODY = {"size": 13, "weight": "normal"}
 FONT_SMALL = {"size": 12, "weight": "normal"}
@@ -88,22 +92,22 @@ def get_continuous_colormap() -> str:
 
 
 def apply_axis_style(ax) -> None:
-    ax.set_facecolor(BG_CARD)
-    ax.grid(color=GRID_COLOR, alpha=0.22, linestyle="-", linewidth=0.55)
-    ax.tick_params(colors=TEXT_MUTED, labelsize=CHART_FONT_SIZE_TICK)
-    ax.xaxis.label.set_color(TEXT_MUTED)
-    ax.yaxis.label.set_color(TEXT_MUTED)
+    ax.set_facecolor(CHART_BG)
+    ax.grid(color=CHART_GRID, alpha=0.42, linestyle="-", linewidth=0.6)
+    ax.tick_params(colors=CHART_TEXT, labelsize=CHART_FONT_SIZE_TICK)
+    ax.xaxis.label.set_color(CHART_TEXT)
+    ax.yaxis.label.set_color(CHART_TEXT)
     ax.xaxis.label.set_size(CHART_FONT_SIZE_LABEL)
     ax.yaxis.label.set_size(CHART_FONT_SIZE_LABEL)
-    ax.title.set_color(TEXT_MAIN)
+    ax.title.set_color(CHART_TEXT)
     ax.title.set_fontsize(CHART_FONT_SIZE_TITLE)
     ax.title.set_fontweight("bold")
     for spine in ax.spines.values():
-        spine.set_color(BORDER_SOFT)
+        spine.set_color(CHART_BORDER)
 
 
 def apply_figure_theme(fig) -> None:
-    fig.patch.set_facecolor(PANEL_BG)
+    fig.patch.set_facecolor(CHART_BG)
 
 
 def add_reference_line(ax, value: float, *, label: str, color: str, y_pos: float = 0.95) -> None:

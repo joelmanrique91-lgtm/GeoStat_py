@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from app.ui.theme import apply_axis_style, apply_figure_theme
+from app.ui.theme import CHART_BG, apply_axis_style, apply_figure_theme
 
 
 class DashboardGrid:
@@ -33,6 +33,7 @@ class DashboardGrid:
         else:
             self.axes = self.figure.subplots(rows, cols, squeeze=False).tolist()
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.parent)
+        self.canvas.get_tk_widget().configure(bg=CHART_BG, highlightthickness=0, bd=0)
         for row_axes in self.axes:
             for axis in row_axes:
                 apply_axis_style(axis)
@@ -45,9 +46,9 @@ class DashboardGrid:
         self.axes[row][col].axis("off")
 
     def render(self) -> None:
-        self.figure.tight_layout(pad=1.1, w_pad=0.9, h_pad=0.9)
+        self.figure.tight_layout(pad=0.9, w_pad=0.8, h_pad=0.8)
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=2, pady=2)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
     def destroy(self) -> None:
         widget = self.canvas.get_tk_widget()
