@@ -21,6 +21,21 @@ class SpatialDataBundle:
 
 
 @dataclass
+class Spatial3DDataBundle:
+    x: list[float]
+    y: list[float]
+    z: list[float]
+    color_values: list[float]
+    point_count_original: int
+    point_count_rendered: int
+    downsampling_applied: bool
+    color_mode: str
+    color_label: str
+    color_tick_positions: list[float] | None = None
+    color_tick_labels: list[str] | None = None
+
+
+@dataclass
 class SwathSeries:
     axis: str
     centers: list[float]
@@ -91,6 +106,59 @@ def prepare_spatial_sections(
         target_label=target_label,
         target_tick_positions=target_tick_positions,
         target_tick_labels=target_tick_labels,
+    )
+
+
+def prepare_spatial_3d_cloud(
+    dataframe,
+    x_col: str,
+    y_col: str,
+    z_col: str,
+    color_col: str,
+    max_points: int = 40000,
+    allow_categorical_color: bool = False,
+) -> Spatial3DDataBundle:
+    import pandas as pd
+
+    required = [x_col, y_col, z_col, color_col]
+    missing = [column for column in required if column not in dataframe.columns]
+    if missing:
+        raise ValueError(f"Columnas faltantes para nube 3D: {', '.join(missing)}")
+    if not allow_categorical_color and not pd.api.types.is_numeric_dtype(dataframe[color_col]):
+        raise ValueError("Color no numérico para nube 3D.")
+
+    clean = dataframe[required].dropna()
+    if clean.empty:
+        raise ValueError("No hay datos válidos para nube 3D.")
+
+    point_count_original = len(clean)
+    sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
+
+    color_tick_positions: list[float] | None = None
+    color_tick_labels: list[str] | None = None
+    color_mode = "numeric"
+    if pd.api.types.is_numeric_dtype(sampled[color_col]):
+        color_values = sampled[color_col].astype(float).tolist()
+    else:
+        categorical = sampled[color_col].astype("category")
+        color_values = categorical.cat.codes.astype(float).tolist()
+        categories = [str(cat) for cat in categorical.cat.categories]
+        color_tick_positions = [float(idx) for idx in range(len(categories))]
+        color_tick_labels = categories
+        color_mode = "categorical"
+
+    return Spatial3DDataBundle(
+        x=sampled[x_col].astype(float).tolist(),
+        y=sampled[y_col].astype(float).tolist(),
+        z=sampled[z_col].astype(float).tolist(),
+        color_values=color_values,
+        point_count_original=point_count_original,
+        point_count_rendered=len(sampled),
+        downsampling_applied=downsampled,
+        color_mode=color_mode,
+        color_label=color_col,
+        color_tick_positions=color_tick_positions,
+        color_tick_labels=color_tick_labels,
     )
 
 

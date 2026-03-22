@@ -11,6 +11,7 @@ from matplotlib.ticker import ScalarFormatter
 
 from app.services.geostat_service import GeostatService
 from app.ui.panels.dashboard_grid import DashboardGrid
+from app.ui.panels.spatial_3d_view import Spatial3DView, is_3d_backend_available
 from app.ui.theme import (
     BG_CARD,
     BG_MAIN,
@@ -196,6 +197,7 @@ class HomePanel(ctk.CTkFrame):
         self.domain_name_var = ctk.StringVar(value="")
         self.domain_confirm_var = ctk.StringVar(value="")
         self.spatial_color_var = ctk.StringVar(value="")
+        self.spatial_view_mode_var = ctk.StringVar(value="2D")
         self.domain_filter_var = ctk.StringVar(value="Todos")
         self.domain_filter_lithology_var = ctk.StringVar(value="Todos")
         self.domain_filter_alteration_var = ctk.StringVar(value="Todos")
@@ -226,6 +228,7 @@ class HomePanel(ctk.CTkFrame):
         self.workspace_subtitle_var = ctk.StringVar(value="Carga y configura columnas para habilitar el flujo analítico.")
         self.workflow_hint_var = ctk.StringVar(value="Etapa lista.")
         self.plot_frame: ctk.CTkFrame | None = None
+        self.spatial_3d_widget: Spatial3DView | None = None
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
@@ -524,11 +527,25 @@ class HomePanel(ctk.CTkFrame):
         section = self._section_shell(parent, "Visualización espacial")
         ctk.CTkLabel(section, text="Opciones locales de la vista espacial", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(section, text="Vista fija XY / XZ / YZ + metadatos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 5))
+        ctk.CTkLabel(section, text="Modo vista", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkSegmentedButton(
+            section,
+            variable=self.spatial_view_mode_var,
+            values=["2D", "3D"],
+            command=self._on_spatial_mode_changed,
+        ).pack(fill="x", padx=6, pady=(0, 4))
         color_options = self._get_spatial_color_options()
         if self.spatial_color_var.get() not in color_options:
             self.spatial_color_var.set(color_options[0] if color_options else "")
         ctk.CTkLabel(section, text="Color por", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkOptionMenu(section, variable=self.spatial_color_var, values=color_options or [""], state="normal" if color_options else "disabled", **self._option_menu_style()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkOptionMenu(
+            section,
+            variable=self.spatial_color_var,
+            values=color_options or [""],
+            state="normal" if color_options else "disabled",
+            command=lambda _v: self._on_spatial_color_changed(),
+            **self._option_menu_style(),
+        ).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(section, text="(Local) No cambia el target global del workflow.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 3))
         domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
         if self.domain_filter_var.get() not in domain_filters:
@@ -750,13 +767,25 @@ class HomePanel(ctk.CTkFrame):
         color_options = self._get_spatial_color_options()
         if self.spatial_color_var.get() not in color_options:
             self.spatial_color_var.set(color_options[0] if color_options else "")
-        ctk.CTkOptionMenu(row, variable=self.spatial_color_var, values=color_options or [""], state="normal" if color_options else "disabled", **self._option_menu_style()).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ctk.CTkSegmentedButton(
+            row,
+            variable=self.spatial_view_mode_var,
+            values=["2D", "3D"],
+            command=self._on_spatial_mode_changed,
+        ).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ctk.CTkOptionMenu(
+            row,
+            variable=self.spatial_color_var,
+            values=color_options or [""],
+            state="normal" if color_options else "disabled",
+            command=lambda _v: self._on_spatial_color_changed(),
+            **self._option_menu_style(),
+        ).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
         domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
         if self.domain_filter_var.get() not in domain_filters:
             self.domain_filter_var.set("Todos")
-        ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=domain_filters, state="normal", **self._option_menu_style()).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Aplicar filtro dominio", command=self._on_apply_domain_filter, **self._button_style("secondary")).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
-        ctk.CTkLabel(row, text="El color es un override local de esta vista.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=3, sticky="e", padx=4, pady=2)
+        ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=domain_filters, state="normal", **self._option_menu_style()).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Aplicar filtro dominio", command=self._on_apply_domain_filter, **self._button_style("secondary")).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
 
     def _build_domains_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1111,6 +1140,15 @@ class HomePanel(ctk.CTkFrame):
         self._refresh_cutoff_preview()
 
     def _render_spatial_view(self) -> None:
+        if self.spatial_3d_widget is not None:
+            self.spatial_3d_widget.destroy()
+            self.spatial_3d_widget = None
+        if self.spatial_view_mode_var.get() == "3D":
+            self._render_spatial_3d_view()
+            return
+        self._render_spatial_2d_view()
+
+    def _render_spatial_2d_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         snapshot = self.service.get_analysis_context_snapshot()
@@ -1185,6 +1223,41 @@ class HomePanel(ctk.CTkFrame):
         msg += "\n• Preparado para lectura por ley o por dominio."
         ax_info.text(0.05, 0.95, msg, va="top", color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LABEL, bbox={"facecolor": BG_CARD, "edgecolor": BORDER_SOFT, "boxstyle": "round,pad=0.45"})
         grid.render()
+
+    def _render_spatial_3d_view(self) -> None:
+        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+        wrapper.grid(row=0, column=0, sticky="nsew")
+        wrapper.grid_columnconfigure(0, weight=1)
+        wrapper.grid_rowconfigure(1, weight=1)
+
+        snapshot = self.service.get_analysis_context_snapshot()
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(
+            wrapper,
+            text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)} · Modo 3D PoC",
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 2))
+
+        self.spatial_3d_widget = Spatial3DView(wrapper)
+        self.spatial_3d_widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
+
+        available, reason = is_3d_backend_available()
+        if not available:
+            self.spatial_3d_widget.show_unavailable(f"{reason}. Volviendo automáticamente a 2D.")
+            self.spatial_view_mode_var.set("2D")
+            self.after(10, self._render_spatial_view)
+            return
+
+        color_by = self.spatial_color_var.get() or None
+        result = self.service.prepare_visual_3d_data(color_by=color_by)
+        if not result.success or result.spatial_3d_data is None:
+            self.spatial_3d_widget.show_unavailable(f"No se pudo renderizar 3D: {result.message}. Volviendo a 2D.")
+            self.spatial_view_mode_var.set("2D")
+            self.after(10, self._render_spatial_view)
+            return
+
+        self.spatial_3d_widget.update_cloud(result.spatial_3d_data, color_by or snapshot["resolved_target_column"] or "No definido")
 
     def _render_domains_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
@@ -1776,6 +1849,16 @@ class HomePanel(ctk.CTkFrame):
             return
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
         self._refresh_dashboard(reason="eda_manual_button", force=True)
+
+    def _on_spatial_mode_changed(self, _value: str) -> None:
+        if self.service.workflow_state.current_step != "Espacial":
+            return
+        self._refresh_dashboard(reason="spatial_mode_changed", force=True)
+
+    def _on_spatial_color_changed(self) -> None:
+        if self.service.workflow_state.current_step != "Espacial":
+            return
+        self._refresh_dashboard(reason="spatial_color_changed", force=True)
 
     def _refresh_summary_cards(self) -> None:
         stats_table = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))

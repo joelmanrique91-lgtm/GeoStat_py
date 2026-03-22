@@ -14,7 +14,14 @@ from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
-from app.services.visualization_service import SwathSeries, SpatialDataBundle, compute_swath_series, prepare_spatial_sections
+from app.services.visualization_service import (
+    Spatial3DDataBundle,
+    SpatialDataBundle,
+    SwathSeries,
+    compute_swath_series,
+    prepare_spatial_3d_cloud,
+    prepare_spatial_sections,
+)
 from app.utils.paths import PROJECT_ROOT
 
 WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]
@@ -57,6 +64,13 @@ class VisualPreparationResult:
     success: bool
     message: str
     spatial_data: SpatialDataBundle | None
+
+
+@dataclass
+class Visual3DPreparationResult:
+    success: bool
+    message: str
+    spatial_3d_data: Spatial3DDataBundle | None
 
 
 @dataclass
@@ -1285,6 +1299,40 @@ class GeostatService:
         )
         self.activity_log.log("dashboard_render_finished", "success", "Render espacial finalizado.", {"view": "Espacial"})
         return VisualPreparationResult(True, "Visuales preparados.", spatial)
+
+    def prepare_visual_3d_data(self, color_by: str | None = None, max_points: int = 40000) -> Visual3DPreparationResult:
+        self.activity_log.log("dashboard_render_started", "info", "Render espacial 3D iniciado.", {"view": "Espacial 3D"})
+        dataframe, color_column, allow_categorical, context_error = self._resolve_spatial_visual_context(color_by)
+        if context_error:
+            self.activity_log.log("dashboard_render_failed", "error", context_error, {"view": "Espacial 3D"})
+            return Visual3DPreparationResult(False, context_error, None)
+        try:
+            spatial = prepare_spatial_3d_cloud(
+                dataframe,
+                self.variable_config.x_column,
+                self.variable_config.y_column,
+                self.variable_config.z_column,
+                color_column,
+                max_points=max_points,
+                allow_categorical_color=allow_categorical,
+            )
+        except ValueError as exc:
+            self.activity_log.log("dashboard_render_failed", "error", str(exc), {"view": "Espacial 3D"})
+            return Visual3DPreparationResult(False, str(exc), None)
+
+        self.activity_log.log(
+            "spatial_3d_rendered",
+            "success",
+            "Vista espacial 3D preparada.",
+            {
+                "rows": spatial.point_count_rendered,
+                "source_rows": spatial.point_count_original,
+                "color_column": color_column,
+                "color_mode": spatial.color_mode,
+            },
+        )
+        self.activity_log.log("dashboard_render_finished", "success", "Render espacial 3D finalizado.", {"view": "Espacial 3D"})
+        return Visual3DPreparationResult(True, "Visual 3D preparado.", spatial)
 
     def prepare_univariate_data(
         self,
