@@ -889,7 +889,6 @@ class HomePanel(ctk.CTkFrame):
 
         stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
         cv_text = str(stats_table.get("cv", "-"))
-        skew_text = str(stats_table.get("skewness", "-"))
         trunc_text = str(stats_table.get("% truncated", "-"))
         cutoff_text = f"{state['dynamic_cutoff_value']:.5g}" if state["dynamic_enabled"] else ("Manual" if state["enabled"] else "No aplicado")
 
@@ -905,54 +904,48 @@ class HomePanel(ctk.CTkFrame):
             diagnostic = "Diagnóstico: no disponible."
 
         header = ctk.CTkFrame(wrapper, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 4))
+        header.grid(row=0, column=0, sticky="ew", padx=3, pady=(0, 2))
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="EDA · Diagnóstico de distribución para decisión", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=6, pady=(1, 0))
+        ctk.CTkLabel(header, text="EDA · Diagnóstico de distribución", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=4, pady=(0, 0))
         ctk.CTkLabel(
             header,
             text=f"{_build_visual_context_line(snapshot, local_override=active_variable)} · {capping_status} · {diagnostic}",
             text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
-            wraplength=1160,
+            wraplength=1140,
             justify="left",
-        ).grid(row=1, column=0, sticky="w", padx=6, pady=(0, 2))
-        ctk.CTkLabel(
-            header,
-            text="Guardrail: no implica independencia espacial.",
-            text_color=TXT_MUTED,
-            font=ui_font(FONT_MICRO),
-        ).grid(row=2, column=0, sticky="w", padx=6, pady=(0, 1))
+        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 0))
+        ctk.CTkLabel(header, text="no implica independencia espacial.", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).grid(row=2, column=0, sticky="w", padx=4, pady=(0, 0))
 
         decision_strip = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        decision_strip.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
-        decision_strip.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        decision_strip.grid(row=1, column=0, sticky="ew", padx=3, pady=(0, 3))
+        decision_strip.grid_columnconfigure((0, 1, 2), weight=1)
         metrics = [
             ("CV", cv_text, True),
             ("% truncado", trunc_text, False),
             ("Cutoff", str(cutoff_text), False),
-            ("Skew", skew_text, False),
         ]
         for idx, (label, value, primary) in enumerate(metrics):
             card = ctk.CTkFrame(decision_strip, fg_color=KPI_PRIMARY if primary else BG_CARD, corner_radius=6)
-            card.grid(row=0, column=idx, sticky="nsew", padx=4, pady=4)
-            ctk.CTkLabel(card, text=label, text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=7, pady=(3, 0))
-            ctk.CTkLabel(card, text=value, text_color=TXT_MAIN, font=ui_font(FONT_BODY if primary else FONT_SMALL)).pack(anchor="w", padx=7, pady=(0, 3))
+            card.grid(row=0, column=idx, sticky="nsew", padx=3, pady=3)
+            ctk.CTkLabel(card, text=label, text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=6, pady=(2, 0))
+            ctk.CTkLabel(card, text=value, text_color=TXT_MAIN, font=ui_font(FONT_BODY if primary else FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
 
         plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        plot_card.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0, 0))
+        plot_card.grid(row=2, column=0, sticky="nsew", padx=3, pady=(0, 0))
         plot_card.grid_rowconfigure(0, weight=1)
         plot_card.grid_columnconfigure(0, weight=1)
 
         grid_host = ctk.CTkFrame(plot_card, fg_color="transparent")
-        grid_host.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        grid_host.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
 
         grid = DashboardGrid(
             grid_host,
             2,
             2,
-            figsize=self._responsive_figsize(15.2, 9.6),
-            width_ratios=[1.0, 1.0],
-            height_ratios=[1.0, 1.0],
+            figsize=self._responsive_figsize(15.6, 10.0),
+            width_ratios=[1.0, 1.12],
+            height_ratios=[1.02, 1.0],
         )
         ax_hist = grid.axis(0, 0)
         ax_box = grid.axis(0, 1)
@@ -1018,8 +1011,9 @@ class HomePanel(ctk.CTkFrame):
         if cutoff_val is not None:
             ax_box.axvline(cutoff_val, color=SEM_RED, linestyle=":", linewidth=1.2, alpha=0.9)
         ax_box.set_yticks([])
-        ax_box.set_title(f"2) Rango/outliers · {active_variable}", color=PLOT_TXT, pad=8)
+        ax_box.set_title(f"2) Rango/outliers · {active_variable}", color=PLOT_TXT, pad=9)
         ax_box.set_xlabel("Ley Cu (%)")
+        ax_box.margins(y=0.20)
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             prob_x = [float(v) for v in data["probplot_x"]]
@@ -1038,7 +1032,7 @@ class HomePanel(ctk.CTkFrame):
             if tail_x:
                 ax_prob.scatter(tail_x, tail_y, s=18, color=SEM_ORANGE, alpha=0.86, label="Cola")
             ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
-            ax_prob.set_title(f"3) Normalidad/cola · QQ", color=PLOT_TXT, pad=8)
+            ax_prob.set_title("3) Normalidad/cola · QQ", color=PLOT_TXT, pad=9)
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
             ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
@@ -1057,14 +1051,14 @@ class HomePanel(ctk.CTkFrame):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(BORDER_SOFT)
-            ax_domain.tick_params(axis="x", rotation=14)
+            ax_domain.tick_params(axis="x", rotation=10, labelsize=CHART_FONT_SIZE_LEGEND)
             ax_domain.set_ylabel("Ley Cu (%)")
             ax_domain.set_title(f"4) Comparación por dominio", color=PLOT_TXT, pad=8)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
 
-        grid.figure.tight_layout(pad=1.1, w_pad=1.0, h_pad=1.05)
+        grid.figure.tight_layout(pad=1.0, w_pad=1.15, h_pad=1.2)
         grid.canvas.draw()
         grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=1, pady=1)
 
