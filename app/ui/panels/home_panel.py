@@ -197,9 +197,7 @@ class HomePanel(ctk.CTkFrame):
         self.eda_capping_switch: ctk.CTkSwitch | None = None
         self.domain_menu_widget: ctk.CTkOptionMenu | None = None
         self.column_menus: dict[str, ctk.CTkOptionMenu] = {}
-        self.show_aux_controls_var = ctk.BooleanVar(value=False)
         self.action_bar_body: ctk.CTkFrame | None = None
-        self.aux_window: ctk.CTkToplevel | None = None
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -564,38 +562,11 @@ class HomePanel(ctk.CTkFrame):
         block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=9)
         block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 3))
         block.grid_columnconfigure(0, weight=1)
-        block.grid_columnconfigure(1, weight=0)
         ctk.CTkLabel(block, text="Acciones de la etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
             row=0, column=0, sticky="w", padx=7, pady=(4, 1)
         )
-        ctk.CTkButton(
-            block,
-            text="Panel auxiliar",
-            width=96,
-            height=24,
-            fg_color=BTN_NEUTRAL,
-            hover_color=BTN_NEUTRAL_HOVER,
-            command=self._toggle_aux_controls,
-        ).grid(row=0, column=1, sticky="e", padx=7, pady=(2, 1))
         self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
-        self.action_bar_body.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 4))
-
-    def _toggle_aux_controls(self) -> None:
-        if self.aux_window is not None and self.aux_window.winfo_exists():
-            self.aux_window.destroy()
-            self.aux_window = None
-            self.show_aux_controls_var.set(False)
-            return
-        self.show_aux_controls_var.set(True)
-        self.aux_window = ctk.CTkToplevel(self)
-        self.aux_window.title("GeoStat Py · Panel auxiliar")
-        self.aux_window.geometry("390x760")
-        self.aux_window.minsize(360, 620)
-        self.aux_window.transient(self.winfo_toplevel())
-        self.aux_window.protocol("WM_DELETE_WINDOW", self._toggle_aux_controls)
-        self.aux_window.grid_columnconfigure(0, weight=1)
-        self.aux_window.grid_rowconfigure(0, weight=1)
-        self._build_control_panel(self.aux_window).grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self.action_bar_body.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 4))
 
     def _render_stage_action_bar(self, stage: str) -> None:
         if self.action_bar_body is None:
@@ -700,6 +671,8 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkLabel(band, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=5, padx=4, pady=(0, 4), sticky="e")
 
     def _on_apply_cutoff_primary(self) -> None:
+        if self.service.workflow_state.current_step != "Cutoffs":
+            return
         if bool(self.dynamic_cutoff_enabled_var.get()):
             self._on_apply_dynamic_cutoff()
             return
@@ -1628,10 +1601,14 @@ class HomePanel(ctk.CTkFrame):
             self._refresh_dashboard(reason="domains_applied")
 
     def _on_toggle_eda_capping(self) -> None:
+        if self.service.workflow_state.current_step != "EDA":
+            return
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_capping_switch"})
         self._refresh_dashboard(reason="eda_capping_switch")
 
     def _on_refresh_eda(self) -> None:
+        if self.service.workflow_state.current_step != "EDA":
+            return
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
         self._refresh_dashboard(reason="eda_manual_button", force=True)
 
