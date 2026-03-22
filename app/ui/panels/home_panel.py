@@ -68,6 +68,11 @@ PLOT_TXT = TEXT_MAIN
 PAD_MAIN_X = 8
 PAD_CARD_X = 10
 PAD_STACK_Y = 4
+PAD_SECTION_Y = 8
+
+
+def ui_font(token: dict[str, object]) -> ctk.CTkFont:
+    return ctk.CTkFont(size=int(token["size"]), weight=str(token["weight"]))
 
 
 def ui_font(token: dict[str, object]) -> ctk.CTkFont:
@@ -262,13 +267,18 @@ class HomePanel(ctk.CTkFrame):
         self.log_box.grid_remove()
 
     def _build_header(self) -> ctk.CTkFrame:
-        header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
+        header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=12)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py · Panel ejecutivo geoestadístico", font=ui_font(FONT_TITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(7, 1))
-        ctk.CTkLabel(header, text="Contexto activo para decisión: dataset, target, dominio y readiness", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(27, 0))
+        header.grid_columnconfigure(1, weight=0)
+        identity = ctk.CTkFrame(header, fg_color="transparent")
+        identity.grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(7, 1))
+        ctk.CTkLabel(identity, text="GeoStat Py", font=ui_font(FONT_TITLE), text_color=TXT_MAIN).pack(anchor="w")
+        ctk.CTkLabel(identity, text="Geoestadística aplicada · panel ejecutivo", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", pady=(0, 1))
+
+        ctk.CTkLabel(header, text="Contexto activo para decisión", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=PAD_CARD_X, pady=(2, 0))
 
         chip_frame = ctk.CTkFrame(header, fg_color="transparent")
-        chip_frame.grid(row=1, column=0, sticky="ew", padx=PAD_CARD_X, pady=(0, 6))
+        chip_frame.grid(row=2, column=0, sticky="ew", padx=PAD_CARD_X, pady=(0, 7))
         labels = {
             "dataset": "Dataset no cargado",
             "target": "Target no definido",
@@ -290,11 +300,14 @@ class HomePanel(ctk.CTkFrame):
                 font=ui_font(FONT_SMALL),
             ).grid(row=0, column=idx, padx=3, sticky="w")
 
-        actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8)
-        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=108, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_update_repo)
+        actions = ctk.CTkFrame(header, fg_color=BG_SOFT, corner_radius=9)
+        actions.grid(row=0, column=1, rowspan=3, sticky="e", padx=8, pady=6)
+        ctk.CTkLabel(actions, text="Acciones globales", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(6, 2))
+        actions_row = ctk.CTkFrame(actions, fg_color="transparent")
+        actions_row.pack(fill="x", padx=6, pady=(0, 6))
+        self.update_repo_button = ctk.CTkButton(actions_row, text="Actualizar repo", width=108, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_update_repo)
         self.update_repo_button.pack(side="left", padx=3)
-        ctk.CTkButton(actions, text="Exportar log", width=88, height=24, fg_color=BG_SOFT, hover_color=BTN_NEUTRAL_HOVER, command=self._on_export_log).pack(side="left", padx=3)
+        ctk.CTkButton(actions_row, text="Exportar log", width=88, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_export_log).pack(side="left", padx=3)
         return header
 
     def _build_step_progress(self) -> ctk.CTkFrame:
@@ -359,9 +372,9 @@ class HomePanel(ctk.CTkFrame):
         self._focus_sidebar_sections(self.service.workflow_state.current_step)
 
     def _section_shell(self, parent: ctk.CTkScrollableFrame, title: str) -> ctk.CTkFrame:
-        section = ctk.CTkFrame(parent, fg_color="transparent")
-        section.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(section, text=title, text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(4, 3))
+        section = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
+        section.pack(fill="x", pady=(0, PAD_SECTION_Y))
+        ctk.CTkLabel(section, text=title, text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(6, 3))
         ctk.CTkFrame(section, height=1, fg_color=DIVIDER_SOFT).pack(fill="x", padx=6, pady=(0, 4))
         return section
 
@@ -378,18 +391,18 @@ class HomePanel(ctk.CTkFrame):
         numeric_cols = self.service.get_numeric_columns() or [""]
         domain_candidates = self.service.get_domain_candidate_columns() or [""]
         row = 0
-        ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+        ctk.CTkLabel(grid, text="2) Coordenadas (obligatorio)", text_color=SEM_ORANGE, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
         row += 1
         self._selector(grid, "X", self.x_var, cols, row, 0, key="x")
         self._selector(grid, "Y", self.y_var, cols, row, 1, key="y")
         row += 2
         self._selector(grid, "Z", self.z_var, cols, row, 0, key="z")
         row += 2
-        ctk.CTkLabel(grid, text="3) Variable objetivo", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkLabel(grid, text="3) Variable objetivo (obligatorio)", text_color=SEM_ORANGE, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         row += 1
         self._selector(grid, "Target (ley)", self.target_var, numeric_cols, row, 0, key="target")
         row += 2
-        ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkLabel(grid, text="4) Dominio (opcional)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2))
         row += 1
         ctk.CTkCheckBox(grid, text="Analizar por dominios", variable=self.use_domain_var, command=self._on_domain_mode_change).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 2))
         row += 1
@@ -397,11 +410,11 @@ class HomePanel(ctk.CTkFrame):
         self.domain_menu_widget = ctk.CTkOptionMenu(grid, variable=self.domain_var, values=domain_candidates, state=domain_state, height=24)
         self.domain_menu_widget.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(0, 4))
         row += 1
-        ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkLabel(grid, text="5) Hole ID (opcional)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2))
         row += 1
         self._selector(grid, "Hole ID", self.hole_var, cols, row, 0, key="hole")
         row += 2
-        ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+        ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(6, 2))
         row += 1
         ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_config).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         return section
@@ -506,7 +519,7 @@ class HomePanel(ctk.CTkFrame):
             frame.configure(fg_color=BG_SOFT if name == step_name else "transparent")
 
     def _build_kpi_strip(self, parent: ctk.CTkFrame) -> None:
-        block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=7)
+        block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=9)
         block.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 5))
         ctk.CTkLabel(block, text="Resumen rápido (resultados de la vista actual)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=7, pady=(4, 0))
         cards = ctk.CTkFrame(block, fg_color="transparent")
@@ -525,10 +538,12 @@ class HomePanel(ctk.CTkFrame):
         keys = list(labels_by_key.keys())
         primary_keys = {"cv"}
         for idx, key in enumerate(keys):
-            cards.grid_columnconfigure(idx, weight=1)
+            cards.grid_columnconfigure(idx, weight=1 if key != "cv" else 2)
             card_color = KPI_PRIMARY if key in primary_keys else BG_CARD
             card = ctk.CTkFrame(cards, fg_color=card_color, corner_radius=6)
-            card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
+            card.grid(row=0, column=idx, padx=3, pady=1, sticky="nsew")
+            border_width = 1 if key in primary_keys else 0
+            card.configure(border_width=border_width, border_color=SEM_BLUE_SOFT if key in primary_keys else BORDER_SOFT)
             ctk.CTkLabel(card, text=labels_by_key[key], font=ui_font(FONT_SMALL), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
             val = ctk.StringVar(value="-")
             self.kpi_value_vars[key] = val
@@ -578,11 +593,11 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "Datos":
             self.workspace_title_var.set("Preparación de datos – habilitación del flujo")
-            self.workspace_subtitle_var.set("Carga el CSV y confirma X/Y/Z/target para desbloquear análisis confiable.")
+            self.workspace_subtitle_var.set("Paso 1 de workflow: carga y validación estructural para habilitar todas las vistas.")
             card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
             ctk.CTkLabel(card, text="Inicio de configuración", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=10, pady=(10, 3))
-            ctk.CTkLabel(card, text="1) Cargar CSV · 2) Asignar columnas · 3) Confirmar configuración.", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=10, pady=(0, 8))
+            ctk.CTkLabel(card, text="Progreso: 1) Cargar CSV  ·  2) Asignar columnas  ·  3) Confirmar configuración", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=10, pady=(0, 8))
             summary = ctk.CTkFrame(card, fg_color=BG_PANEL, corner_radius=7)
             summary.pack(fill="x", padx=10, pady=(0, 8))
             ctk.CTkLabel(summary, textvariable=self.dataset_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=(6, 2))
@@ -792,7 +807,7 @@ class HomePanel(ctk.CTkFrame):
         snapshot = self.service.get_analysis_context_snapshot()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
-        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
         try:
             color_by = self.spatial_color_var.get() or None
@@ -804,7 +819,7 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(wrapper, text=f"No se pudo renderizar Espacial: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
-        grid = DashboardGrid(wrapper, 2, 2, figsize=(12.2, 6.2))
+        grid = DashboardGrid(wrapper, 2, 2, figsize=(12.8, 6.6))
         ax_xy = grid.axis(0, 0)
         ax_xz = grid.axis(0, 1)
         ax_yz = grid.axis(1, 0)
@@ -813,14 +828,14 @@ class HomePanel(ctk.CTkFrame):
         for axis in (ax_xy, ax_xz, ax_yz, ax_info):
             apply_axis_style(axis)
         cmap = "tab20" if spatial.target_tick_labels else get_continuous_colormap()
-        point_kwargs = {"s": 10, "alpha": 0.62, "edgecolors": "none"}
+        point_kwargs = {"s": 11, "alpha": 0.64, "edgecolors": "none"}
         sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, **point_kwargs)
         sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
         sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
 
-        ax_xy.set_title("Planta XY (vista operativa)", color=PLOT_TXT)
-        ax_xz.set_title("Sección XZ (detalle vertical)", color=PLOT_TXT)
-        ax_yz.set_title("Sección YZ (detalle vertical)", color=PLOT_TXT)
+        ax_xy.set_title("Planta XY (principal)", color=PLOT_TXT)
+        ax_xz.set_title("Sección XZ", color=PLOT_TXT)
+        ax_yz.set_title("Sección YZ", color=PLOT_TXT)
         ax_xy.set_xlabel("X")
         ax_xy.set_ylabel("Y")
         ax_xz.set_xlabel("X")
@@ -832,8 +847,8 @@ class HomePanel(ctk.CTkFrame):
         for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
             axis.set_major_formatter(plain_formatter)
 
-        for sc, ax in [(sc_xy, ax_xy), (sc_xz, ax_xz), (sc_yz, ax_yz)]:
-            colorbar = grid.figure.colorbar(sc, ax=ax, shrink=0.72, label=spatial.target_label)
+        for sc, ax in [(sc_xy, ax_xy)]:
+            colorbar = grid.figure.colorbar(sc, ax=ax, shrink=0.68, pad=0.02, label=spatial.target_label)
             if spatial.target_tick_positions and spatial.target_tick_labels:
                 colorbar.set_ticks(spatial.target_tick_positions)
                 colorbar.set_ticklabels(spatial.target_tick_labels)
@@ -842,7 +857,7 @@ class HomePanel(ctk.CTkFrame):
             colorbar.outline.set_edgecolor(BORDER_SOFT)
 
         ax_info.axis("off")
-        msg = "Ficha técnica espacial\n\n• Vistas: XY / XZ / YZ"
+        msg = "Ficha espacial\n• Vistas: XY / XZ / YZ"
         msg += f"\n• Target resuelto global: {snapshot['resolved_target_column'] or 'No definido'}"
         msg += f"\n• Color mostrado (local): {color_by or snapshot['resolved_target_column'] or 'No definido'}"
         msg += "\n• Uso: lectura exploratoria, no inferencia de continuidad."
@@ -852,7 +867,7 @@ class HomePanel(ctk.CTkFrame):
         if spatial.downsampled:
             msg += f"\n• Muestreo mostrado: {spatial.plotted_points:,}/{spatial.source_points:,}"
         msg += "\n• Preparado para lectura por ley o por dominio."
-        ax_info.text(0.05, 0.92, msg, va="top", color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LABEL, bbox={"facecolor": BG_CARD, "edgecolor": BORDER_SOFT, "boxstyle": "round,pad=0.55"})
+        ax_info.text(0.05, 0.95, msg, va="top", color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LABEL, bbox={"facecolor": BG_CARD, "edgecolor": BORDER_SOFT, "boxstyle": "round,pad=0.45"})
         grid.render()
 
     def _render_domains_view(self) -> None:
@@ -934,7 +949,7 @@ class HomePanel(ctk.CTkFrame):
                 fontsize=CHART_FONT_SIZE_LEGEND,
                 color=SEM_WHITE,
                 alpha=0.82,
-                bbox={"facecolor": PANEL_BG, "edgecolor": BORDER_SOFT, "alpha": 0.85, "boxstyle": "round,pad=0.18"},
+                bbox={"facecolor": BG_PANEL, "edgecolor": BORDER_SOFT, "alpha": 0.85, "boxstyle": "round,pad=0.18"},
             )
 
         tooltip = ax.annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points", bbox={"boxstyle": "round", "fc": BG_CARD, "ec": BORDER_SOFT}, color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LEGEND)
