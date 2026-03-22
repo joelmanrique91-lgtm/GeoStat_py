@@ -14,8 +14,13 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.theme import (
     APP_BG,
     BORDER_SOFT,
+    BTN_PRIMARY_HOVER,
+    BTN_SECONDARY_BG,
+    BTN_SECONDARY_HOVER,
     CARD_BG,
     CHIP_BG,
+    DIVIDER_SOFT,
+    KPI_PRIMARY_BG,
     PANEL_BG,
     SEM_BLUE,
     SEM_BLUE_SOFT,
@@ -50,13 +55,15 @@ C_ACTIVE = SEM_BLUE
 C_SUCCESS = SEM_GREEN
 C_TAB_IDLE = WF_IDLE
 C_TAB_DONE = WF_READY
-BTN_NEUTRAL = "#2C3F56"
-BTN_NEUTRAL_HOVER = "#395675"
-BTN_PRIMARY_HOVER = "#4A89D6"
-DIVIDER_SOFT = BORDER_SOFT
-KPI_PRIMARY = "#244A73"
+BTN_NEUTRAL = BTN_SECONDARY_BG
+BTN_NEUTRAL_HOVER = BTN_SECONDARY_HOVER
+KPI_PRIMARY = KPI_PRIMARY_BG
 KPI_PRIMARY_FOCUS = WF_ACTIVE
 PLOT_TXT = TEXT_MAIN
+
+PAD_MAIN_X = 8
+PAD_CARD_X = 10
+PAD_STACK_Y = 4
 
 STEP_TO_READINESS_KEY = {
     "Datos": "data",
@@ -197,11 +204,11 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=8, pady=(7, 3))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 3))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(7, 4))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
-        workspace.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 4))
+        workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
         workspace.grid_columnconfigure(1, weight=1)
         workspace.grid_rowconfigure(0, weight=1)
 
@@ -214,7 +221,7 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel.grid_rowconfigure(2, weight=1)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 3))
+        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(6, 4))
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ctk.CTkFont(size=10), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
@@ -224,12 +231,12 @@ class HomePanel(ctk.CTkFrame):
         self._build_kpi_strip(self.content_panel)
 
         self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.view_body.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_MAIN_X))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 6))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
@@ -249,11 +256,11 @@ class HomePanel(ctk.CTkFrame):
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py · Flujo de trabajo", font=ctk.CTkFont(size=16, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(6, 1))
-        ctk.CTkLabel(header, text="Contexto global activo (dataset, target, dominio y estado)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(26, 0))
+        ctk.CTkLabel(header, text="GeoStat Py · Flujo de trabajo", font=ctk.CTkFont(size=16, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(7, 1))
+        ctk.CTkLabel(header, text="Contexto global activo (dataset, target, dominio y estado)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(27, 0))
 
         chip_frame = ctk.CTkFrame(header, fg_color="transparent")
-        chip_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        chip_frame.grid(row=1, column=0, sticky="ew", padx=PAD_CARD_X, pady=(0, 6))
         labels = {
             "dataset": "Dataset no cargado",
             "target": "Target no definido",
@@ -270,7 +277,7 @@ class HomePanel(ctk.CTkFrame):
                 corner_radius=10,
                 fg_color=CHIP_BG,
                 text_color=TXT_MAIN,
-                padx=10,
+                padx=PAD_CARD_X,
                 pady=4,
                 font=ctk.CTkFont(size=10),
             ).grid(row=0, column=idx, padx=3, sticky="w")
@@ -284,7 +291,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
-        ctk.CTkLabel(frame, text="Workflow y readiness", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(8, 6), pady=3)
+        ctk.CTkLabel(frame, text="Workflow y readiness", font=ctk.CTkFont(size=11, weight="bold"), text_color=TXT_MUTED).pack(side="left", padx=(PAD_MAIN_X, 6), pady=4)
         labels = {"Datos": "Datos", "EDA": "EDA", "Cutoffs": "Control de outliers", "Espacial": "Espacial", "Dominios": "Dominios"}
         for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]:
             btn = ctk.CTkButton(
@@ -299,7 +306,7 @@ class HomePanel(ctk.CTkFrame):
                 border_color=BORDER_SOFT,
                 command=lambda s=step: self._on_change_step(s),
             )
-            btn.pack(side="left", padx=3, pady=3)
+            btn.pack(side="left", padx=3, pady=4)
             self.workflow_buttons[step] = btn
         return frame
 
@@ -668,8 +675,14 @@ class HomePanel(ctk.CTkFrame):
         box = ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.52, showfliers=True)
         for patch in box["boxes"]:
             patch.set_facecolor(KPI_PRIMARY)
-            patch.set_alpha(0.68)
+            patch.set_alpha(0.64)
             patch.set_edgecolor(SEM_BLUE_SOFT)
+        for whisker in box["whiskers"]:
+            whisker.set_color(BORDER_SOFT)
+            whisker.set_alpha(0.9)
+        for cap in box["caps"]:
+            cap.set_color(BORDER_SOFT)
+            cap.set_alpha(0.9)
         for median in box["medians"]:
             median.set_color(SEM_GREEN)
             median.set_linewidth(1.8)
