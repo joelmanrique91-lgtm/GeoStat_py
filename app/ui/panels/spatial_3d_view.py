@@ -40,8 +40,8 @@ class Spatial3DView(ctk.CTkFrame):
         self._canvas: FigureCanvasTkAgg | None = None
         self._toolbar: NavigationToolbar2Tk | None = None
         self._axis = None
-        self._last_elev = 24.0
-        self._last_azim = -58.0
+        self._last_elev = 26.0
+        self._last_azim = -54.0
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -88,11 +88,14 @@ class Spatial3DView(ctk.CTkFrame):
     def update_cloud(self, data: Spatial3DDataBundle, color_display_label: str) -> None:
         self.destroy_plot()
 
-        self._figure = Figure(figsize=(10.8, 6.8), dpi=100)
+        self._figure = Figure(figsize=(11.2, 7.0), dpi=100)
         apply_figure_theme(self._figure)
         self._axis = self._figure.add_subplot(111, projection="3d")
-        self._axis.set_facecolor("#F8FAFC")
-        self._axis.grid(True, alpha=0.35)
+        self._axis.set_facecolor("#F7FAFE")
+        self._axis.grid(True, alpha=0.28, linewidth=0.7, color="#C8D7E9")
+
+        marker_size = 9 if data.point_count_rendered < 7000 else 7
+        marker_alpha = 0.78 if data.point_count_rendered < 22000 else 0.64
 
         cmap = "tab20" if data.color_mode == "categorical" else get_continuous_colormap()
         scatter = self._axis.scatter(
@@ -101,8 +104,8 @@ class Spatial3DView(ctk.CTkFrame):
             data.z,
             c=data.color_values,
             cmap=cmap,
-            s=8,
-            alpha=0.78,
+            s=marker_size,
+            alpha=marker_alpha,
             edgecolors="none",
             depthshade=True,
         )
@@ -111,9 +114,18 @@ class Spatial3DView(ctk.CTkFrame):
         self._axis.set_ylabel("Y", color=CHART_TEXT)
         self._axis.set_zlabel("Z", color=CHART_TEXT)
         self._axis.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=CHART_TEXT)
+        for pane in (self._axis.xaxis.pane, self._axis.yaxis.pane, self._axis.zaxis.pane):
+            pane.set_facecolor((0.97, 0.98, 1.0, 0.85))
+            pane.set_edgecolor((0.83, 0.88, 0.94, 1.0))
+
+        x_span = max(max(data.x) - min(data.x), 1e-6)
+        y_span = max(max(data.y) - min(data.y), 1e-6)
+        z_span = max(max(data.z) - min(data.z), 1e-6)
+        max_span = max(x_span, y_span, z_span)
+        self._axis.set_box_aspect((x_span / max_span, y_span / max_span, z_span / max_span))
         self._axis.view_init(elev=self._last_elev, azim=self._last_azim)
 
-        colorbar = self._figure.colorbar(scatter, ax=self._axis, shrink=0.72, pad=0.08, label=color_display_label)
+        colorbar = self._figure.colorbar(scatter, ax=self._axis, shrink=0.74, pad=0.05, fraction=0.04, label=color_display_label)
         if data.color_tick_positions and data.color_tick_labels:
             colorbar.set_ticks(data.color_tick_positions)
             colorbar.set_ticklabels(data.color_tick_labels)
@@ -127,6 +139,7 @@ class Spatial3DView(ctk.CTkFrame):
         self._toolbar = NavigationToolbar2Tk(self._canvas, self.toolbar_host, pack_toolbar=False)
         self._toolbar.update()
         self._toolbar.pack(fill="x")
+        self._figure.tight_layout(pad=0.8)
         self._canvas.draw()
 
         rendered_info = f"{data.point_count_rendered:,}/{data.point_count_original:,} puntos"
@@ -138,5 +151,5 @@ class Spatial3DView(ctk.CTkFrame):
     def reset_view(self) -> None:
         if self._axis is None or self._canvas is None:
             return
-        self._axis.view_init(elev=24.0, azim=-58.0)
+        self._axis.view_init(elev=26.0, azim=-54.0)
         self._canvas.draw_idle()
