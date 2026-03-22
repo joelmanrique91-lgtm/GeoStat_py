@@ -246,6 +246,10 @@ class HomePanel(ctk.CTkFrame):
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
 
+        self.aux_controls_host = self._build_control_panel(self.content_panel)
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
+        self.aux_controls_host.grid_remove()
+
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
         self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
         self.log_panel.grid_columnconfigure(1, weight=1)
