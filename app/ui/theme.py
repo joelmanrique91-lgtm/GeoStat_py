@@ -8,6 +8,9 @@ from matplotlib import cm
 APP_BG = "#0E1624"
 PANEL_BG = "#142033"
 CARD_BG = "#1B2A3D"
+BG_MAIN = APP_BG
+BG_PANEL = PANEL_BG
+BG_CARD = CARD_BG
 BORDER_SOFT = "#334A66"
 TEXT_MAIN = "#E7EEF7"
 TEXT_MUTED = "#9CB0C8"
@@ -26,7 +29,7 @@ WF_ACTIVE = "#2F5E98"
 WF_READY = "#2F6C53"
 WF_BLOCKED = "#7A3A45"
 WF_WARNING = "#7A5E2A"
-CHIP_BG = "#243549"
+CHIP_BG = BG_CARD
 BTN_SECONDARY_BG = "#2C3F56"
 BTN_SECONDARY_HOVER = "#395675"
 BTN_PRIMARY_HOVER = "#4A89D6"
@@ -36,15 +39,26 @@ KPI_PRIMARY_BG = "#244A73"
 DOMAIN_PALETTE = [
     "#60A5FA",
     "#34D399",
-    "#F59E0B",
+    SEM_ORANGE,
     "#F472B6",
     "#A78BFA",
     "#22D3EE",
     "#F87171",
-    "#FBBF24",
+    SEM_ORANGE,
     "#4ADE80",
     "#93C5FD",
 ]
+
+FONT_TITLE = {"size": 17, "weight": "bold"}
+FONT_SUBTITLE = {"size": 12, "weight": "bold"}
+FONT_BODY = {"size": 11, "weight": "normal"}
+FONT_SMALL = {"size": 10, "weight": "normal"}
+FONT_KPI = {"size": 14, "weight": "bold"}
+
+CHART_FONT_SIZE_TITLE = 11
+CHART_FONT_SIZE_LABEL = 9
+CHART_FONT_SIZE_TICK = 9
+CHART_FONT_SIZE_LEGEND = 8
 
 
 def get_domain_color(domain_label: str) -> str:
@@ -59,13 +73,15 @@ def get_continuous_colormap() -> str:
 
 
 def apply_axis_style(ax) -> None:
-    ax.set_facecolor(CARD_BG)
-    ax.grid(color=GRID_COLOR, alpha=0.28, linestyle="-", linewidth=0.6)
-    ax.tick_params(colors=TEXT_MUTED, labelsize=8.5)
+    ax.set_facecolor(BG_CARD)
+    ax.grid(color=GRID_COLOR, alpha=0.22, linestyle="-", linewidth=0.55)
+    ax.tick_params(colors=TEXT_MUTED, labelsize=CHART_FONT_SIZE_TICK)
     ax.xaxis.label.set_color(TEXT_MUTED)
     ax.yaxis.label.set_color(TEXT_MUTED)
+    ax.xaxis.label.set_size(CHART_FONT_SIZE_LABEL)
+    ax.yaxis.label.set_size(CHART_FONT_SIZE_LABEL)
     ax.title.set_color(TEXT_MAIN)
-    ax.title.set_fontsize(11)
+    ax.title.set_fontsize(CHART_FONT_SIZE_TITLE)
     ax.title.set_fontweight("bold")
     for spine in ax.spines.values():
         spine.set_color(BORDER_SOFT)
