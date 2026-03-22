@@ -88,6 +88,23 @@ class DomainEstimationTests(unittest.TestCase):
         spatial = self.service.prepare_visual_data()
         self.assertTrue(spatial.success)
 
+    def test_confirm_domain_assignment_persists_subset_and_traces_history(self) -> None:
+        self._load_dataset()
+        dataset = self.service.current_dataset.dataframe
+        dataset["Alteracion"] = ["Arg", "Arg", "Sil", "Sil"]
+        dataset["Mina"] = ["M1", "M1", "M2", "M2"]
+        self.assertTrue(self.service.set_domain_ui_filters({"lithology": "L1", "alteration": "Arg", "mine": "M1"}))
+        result = self.service.confirm_domain_assignment("D_ITER")
+        self.assertTrue(result.success)
+        self.assertIn("domain_estimation", self.service.current_dataset.columns)
+        assigned = self.service.current_dataset.dataframe["domain_estimation"].tolist()
+        self.assertEqual(assigned[:2], ["D_ITER", "D_ITER"])
+        state = self.service.get_domain_state()
+        self.assertTrue(state["assignment_history"])
+        last = state["assignment_history"][-1]
+        self.assertEqual(last["domain"], "D_ITER")
+        self.assertEqual(last["affected_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

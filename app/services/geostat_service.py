@@ -116,6 +116,10 @@ def _normalize_identifier(value: str) -> str:
     return value.lower().replace("_", "").replace(" ", "")
 
 
+def _default_domain_ui_filters() -> dict[str, str]:
+    return {"lithology": "", "alteration": "", "mine": ""}
+
+
 def _build_univariate_availability(target: str, valid_count: int, probability_min_samples: int = 3) -> dict[str, dict[str, object]]:
     histogram_available = valid_count > 0
     boxplot_available = valid_count > 0
@@ -306,6 +310,70 @@ class GeostatService:
                 candidates.append(column)
         return candidates
 
+    def get_domain_filter_candidates(self) -> dict[str, str]:
+        """Resolve best-effort columns for iterative domain filters."""
+        if self.current_dataset is None:
+            return _default_domain_ui_filters()
+        available = set(self.current_dataset.columns)
+        normalized = {_normalize_identifier(column): column for column in self.current_dataset.columns}
+
+        def pick(candidates: list[str]) -> str:
+            for candidate in candidates:
+                normalized_candidate = _normalize_identifier(candidate)
+                for key, original in normalized.items():
+                    if key == normalized_candidate or key.startswith(normalized_candidate):
+                        return original
+            return ""
+
+        guessed = {
+            "lithology": pick(["lithology", "lito", "litologia", "litología", "rocktype"]),
+            "alteration": pick(["alteration", "alteracion", "alteración", "alt"]),
+            "mine": pick(["mine", "mina", "pit"]),
+        }
+        stored = dict(self.workflow_state.domain_filter_columns or {})
+        resolved: dict[str, str] = {}
+        for key in ["lithology", "alteration", "mine"]:
+            current = str(stored.get(key, "")).strip()
+            if current and current in available:
+                resolved[key] = current
+            else:
+                resolved[key] = str(guessed.get(key, "")).strip()
+        self.workflow_state.domain_filter_columns = resolved
+        return dict(resolved)
+
+    def get_domain_filter_options(self) -> dict[str, list[str]]:
+        if self.current_dataset is None:
+            return {"lithology": ["Todos"], "alteration": ["Todos"], "mine": ["Todos"]}
+        df = self.current_dataset.dataframe
+        options: dict[str, list[str]] = {}
+        for key, column in self.get_domain_filter_candidates().items():
+            if not column or column not in df.columns:
+                options[key] = ["Todos"]
+                continue
+            values = sorted({str(value).strip() for value in df[column].dropna().tolist() if str(value).strip()})
+            options[key] = ["Todos", *values]
+        return options
+
+    def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
+        normalized = _default_domain_ui_filters()
+        raw = filters or {}
+        for key in normalized:
+            value = str(raw.get(key, "")).strip()
+            if value.upper() in {"", "TODOS", "ALL"}:
+                normalized[key] = ""
+            else:
+                normalized[key] = value
+        self.workflow_state.domain_ui_filters = normalized
+        return dict(normalized)
+
+    def get_domain_ui_filters(self) -> dict[str, str]:
+        filters = dict(self.workflow_state.domain_ui_filters or {})
+        normalized = _default_domain_ui_filters()
+        for key in normalized:
+            value = str(filters.get(key, "")).strip()
+            normalized[key] = value
+        return normalized
+
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         # Compatibilidad hacia atrás: conserva contrato histórico pero delega
         # al nuevo flujo de dominios persistentes usando la primera capa activa.
@@ -398,11 +466,18 @@ class GeostatService:
         if normalized.upper() in {"", "ALL", "TODOS", "TODAS"}:
             self.workflow_state.active_domain_filter = ""
             return CutoffResult(True, "Filtro de dominio desactivado.")
-        if self.current_dataset is None or DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.dataframe.columns:
-            return CutoffResult(False, "No existe domain_estimation para filtrar.")
-        exists = (self.current_dataset.dataframe[DOMAIN_ESTIMATION_COLUMN].astype(str) == normalized).any()
+        if self.current_dataset is None:
+            return CutoffResult(False, "No existe dataset para filtrar.")
+        dataframe = self.current_dataset.dataframe
+        snapshot = self.get_analysis_context_snapshot()
+        active_domain_column = str(snapshot.get("active_domain_column", "")).strip() or DOMAIN_ESTIMATION_COLUMN
+        if active_domain_column not in dataframe.columns and DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+            active_domain_column = DOMAIN_ESTIMATION_COLUMN
+        if active_domain_column not in dataframe.columns:
+            return CutoffResult(False, f"No existe columna de dominio para filtrar: '{active_domain_column}'.")
+        exists = (dataframe[active_domain_column].astype(str) == normalized).any()
         if not exists:
-            return CutoffResult(False, f"Dominio '{normalized}' no encontrado en domain_estimation.")
+            return CutoffResult(False, f"Dominio '{normalized}' no encontrado en {active_domain_column}.")
         self.workflow_state.active_domain_filter = normalized
         return CutoffResult(True, f"Filtro de dominio activo: {normalized}")
 
@@ -427,7 +502,138 @@ class GeostatService:
             "active_domain_filter": str(snapshot["active_domain_filter"]),
             "domain_estimation_values": self.get_domain_estimation_values(),
             "domains_ready": bool(workflow["stages"]["domains"]["ready"]),
+            "ui_filters": self.get_domain_ui_filters(),
+            "filter_columns": self.get_domain_filter_candidates(),
+            "assignment_history": [dict(item) for item in self.workflow_state.domain_assignment_history],
         }
+
+    def _get_domain_ui_filtered_dataframe(self):
+        if self.current_dataset is None:
+            return None, _default_domain_ui_filters(), self.get_domain_filter_candidates()
+        df = self.current_dataset.dataframe
+        filters = self.get_domain_ui_filters()
+        columns = self.get_domain_filter_candidates()
+        filtered = df
+        for key in ["lithology", "alteration", "mine"]:
+            value = str(filters.get(key, "")).strip()
+            column = str(columns.get(key, "")).strip()
+            if not value or not column or column not in filtered.columns:
+                continue
+            filtered = filtered[filtered[column].astype(str).str.strip() == value]
+        return filtered, filters, columns
+
+    def prepare_iterative_domain_data(self) -> dict[str, object]:
+        snapshot = self.get_analysis_context_snapshot()
+        if self.current_dataset is None or self.variable_config is None:
+            return {"ready": False, "message": "No hay dataset/configuración suficiente para Dominios."}
+        target_column = str(snapshot["resolved_target_column"] or "")
+        if not target_column or target_column not in self.current_dataset.dataframe.columns:
+            return {"ready": False, "message": "Target activo no válido para Dominios."}
+        df, filters, filter_columns = self._get_domain_ui_filtered_dataframe()
+        if df is None:
+            return {"ready": False, "message": "No hay dataset/configuración suficiente para Dominios."}
+
+        preview_count = int(len(df))
+        preview_stats = {"n": preview_count, "mean": math.nan, "std": math.nan, "cv": math.nan, "min": math.nan, "max": math.nan}
+        if preview_count > 0:
+            numeric = _to_numeric(df[target_column]).dropna().astype(float)
+            if not numeric.empty:
+                mean_val = float(numeric.mean())
+                std_val = float(numeric.std(ddof=0))
+                preview_stats = {
+                    "n": int(len(numeric)),
+                    "mean": mean_val,
+                    "std": std_val,
+                    "cv": float(std_val / mean_val) if mean_val != 0 else 0.0,
+                    "min": float(numeric.min()),
+                    "max": float(numeric.max()),
+                }
+
+        available_group_columns = [
+            column
+            for column in [filter_columns.get("lithology", ""), filter_columns.get("alteration", ""), filter_columns.get("mine", "")]
+            if column and column in df.columns
+        ]
+        if not available_group_columns:
+            available_group_columns = [DOMAIN_ESTIMATION_COLUMN] if DOMAIN_ESTIMATION_COLUMN in df.columns else []
+        if not available_group_columns:
+            grouping = []
+        else:
+            grouping = available_group_columns
+        scatter_rows: list[dict[str, object]] = []
+        if grouping and preview_count:
+            grouped = df.groupby(grouping, dropna=False)
+            for key, chunk in grouped:
+                target_values = _to_numeric(chunk[target_column]).dropna().astype(float)
+                if target_values.empty:
+                    continue
+                mean_val = float(target_values.mean())
+                std_val = float(target_values.std(ddof=0))
+                cv_val = float(std_val / mean_val) if mean_val != 0 else 0.0
+                if isinstance(key, tuple):
+                    labels = [str(value).strip() if str(value).strip() else "N/A" for value in key]
+                    category = " | ".join(labels)
+                else:
+                    category = str(key).strip() or "N/A"
+                scatter_rows.append(
+                    {
+                        "category": category,
+                        "count": int(len(target_values)),
+                        "mean": mean_val,
+                        "std": std_val,
+                        "cv": cv_val,
+                    }
+                )
+        scatter_rows.sort(key=lambda item: str(item["category"]))
+        return {
+            "ready": True,
+            "target_column": target_column,
+            "filters": filters,
+            "filter_columns": filter_columns,
+            "preview_count": preview_count,
+            "preview_stats": preview_stats,
+            "scatter_rows": scatter_rows,
+            "assignment_history": [dict(item) for item in self.workflow_state.domain_assignment_history],
+        }
+
+    def confirm_domain_assignment(self, domain_name: str) -> CutoffResult:
+        if self.current_dataset is None or self.variable_config is None:
+            return CutoffResult(False, "No hay dataset/configuración suficiente para Dominios.")
+        normalized_name = str(domain_name).strip()
+        if not normalized_name:
+            return CutoffResult(False, "Debes indicar un nombre de dominio.")
+        filtered, filters, filter_columns = self._get_domain_ui_filtered_dataframe()
+        if filtered is None or filtered.empty:
+            return CutoffResult(False, "No hay muestras para confirmar con los filtros actuales.")
+        dataframe = self.current_dataset.dataframe
+        if DOMAIN_ESTIMATION_COLUMN not in dataframe.columns:
+            dataframe[DOMAIN_ESTIMATION_COLUMN] = "UNASSIGNED"
+            if DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.columns:
+                self.current_dataset.columns.append(DOMAIN_ESTIMATION_COLUMN)
+                self.current_dataset.column_count = len(self.current_dataset.columns)
+
+        indexes = filtered.index
+        previous = dataframe.loc[indexes, DOMAIN_ESTIMATION_COLUMN].astype(str)
+        overwritten = int((previous.str.strip() != normalized_name).sum())
+        dataframe.loc[indexes, DOMAIN_ESTIMATION_COLUMN] = normalized_name
+
+        self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.active_domain = f"Columna: {DOMAIN_ESTIMATION_COLUMN}"
+        if self.variable_config is not None:
+            self.variable_config.domain_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.domain_assignment_sequence += 1
+        event = {
+            "sequence": int(self.workflow_state.domain_assignment_sequence),
+            "domain": normalized_name,
+            "filters": {key: str(filters.get(key, "")) for key in ["lithology", "alteration", "mine"]},
+            "filter_columns": {key: str(filter_columns.get(key, "")) for key in ["lithology", "alteration", "mine"]},
+            "affected_count": int(len(indexes)),
+            "overwritten_count": overwritten,
+            "output_column": DOMAIN_ESTIMATION_COLUMN,
+        }
+        self.workflow_state.domain_assignment_history.append(event)
+        self.activity_log.log("domain_assignment_confirmed", "success", "Dominio confirmado sobre subconjunto filtrado.", event)
+        return CutoffResult(True, f"Dominio '{normalized_name}' confirmado sobre {len(indexes)} muestras.")
 
     def prepare_domain_statistics(self) -> dict[str, object]:
         context, message = self._resolve_domain_statistics_context()
@@ -829,6 +1035,10 @@ class GeostatService:
         self.workflow_state.domain_include_missing = False
         self.workflow_state.domain_definition = {}
         self.workflow_state.active_domain_filter = ""
+        self.workflow_state.domain_ui_filters = _default_domain_ui_filters()
+        self.workflow_state.domain_filter_columns = _default_domain_ui_filters()
+        self.workflow_state.domain_assignment_history = []
+        self.workflow_state.domain_assignment_sequence = 0
         if self.variable_config is not None and self.variable_config.domain_column == DOMAIN_ESTIMATION_COLUMN:
             self.variable_config.domain_column = None
 

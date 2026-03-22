@@ -178,8 +178,12 @@ class HomePanel(ctk.CTkFrame):
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
         self.domain_base_var = ctk.StringVar(value="")
         self.domain_name_var = ctk.StringVar(value="")
+        self.domain_confirm_var = ctk.StringVar(value="")
         self.spatial_color_var = ctk.StringVar(value="")
         self.domain_filter_var = ctk.StringVar(value="Todos")
+        self.domain_filter_lithology_var = ctk.StringVar(value="Todos")
+        self.domain_filter_alteration_var = ctk.StringVar(value="Todos")
+        self.domain_filter_mine_var = ctk.StringVar(value="Todos")
         self.domain_definition_local: dict[str, list[str]] = {}
         self.domain_feedback_var = ctk.StringVar(value="Define dominios para comenzar.")
         self.domain_selected_categories: set[str] = set()
@@ -187,6 +191,8 @@ class HomePanel(ctk.CTkFrame):
         self.domain_assign_button: ctk.CTkButton | None = None
         self.domain_apply_button: ctk.CTkButton | None = None
         self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para visualizar resumen analítico e índices de registros.")
+        self.domain_preview_var = ctk.StringVar(value="Previsualización: sin filtros activos.")
+        self.domain_history_var = ctk.StringVar(value="Sin dominios confirmados.")
 
         self.log_visible = False
         self.controls_collapsed = False
@@ -1210,120 +1216,99 @@ class HomePanel(ctk.CTkFrame):
     def _render_domains_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
-        wrapper.grid_rowconfigure(0, weight=0)
-        wrapper.grid_rowconfigure(1, weight=1)
-        wrapper.grid_rowconfigure(2, weight=0)
         wrapper.grid_columnconfigure(0, weight=1)
-        snapshot = self.service.get_analysis_context_snapshot()
-        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 2))
-        ctk.CTkLabel(wrapper, text=_build_visual_context_line(snapshot), text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=6, pady=(18, 2))
-        ctk.CTkLabel(wrapper, text="Microlectura: dominios con CV menor y media consistente son más estables para estimación.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=6, pady=(34, 2))
-        try:
-            payload = self.service.prepare_domain_statistics()
-        except Exception as exc:
-            ctk.CTkLabel(wrapper, text=f"No se pudo renderizar Dominios: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
+        wrapper.grid_rowconfigure(1, weight=3)
+        wrapper.grid_rowconfigure(2, weight=2)
+
+        payload = self.service.prepare_iterative_domain_data()
+        if not payload.get("ready"):
+            ctk.CTkLabel(
+                wrapper,
+                text=str(payload.get("message", "No hay dataset/configuración suficiente para Dominios.")),
+                text_color=TXT_MAIN,
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             return
 
-        rows = payload.get("items", [])
-        if not rows:
-            ctk.CTkLabel(wrapper, text="Define al menos un dominio para comenzar", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
-            return
+        options = self.service.get_domain_filter_options()
+        filters = payload.get("filters", {})
+        for var, key in [
+            (self.domain_filter_lithology_var, "lithology"),
+            (self.domain_filter_alteration_var, "alteration"),
+            (self.domain_filter_mine_var, "mine"),
+        ]:
+            value = str(filters.get(key, "")).strip() or "Todos"
+            choices = options.get(key, ["Todos"])
+            if value not in choices:
+                value = "Todos"
+            var.set(value)
 
-        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 2))
+        top_panel = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
+        top_panel.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 4))
+        top_panel.grid_columnconfigure((1, 3, 5), weight=1)
+        ctk.CTkLabel(top_panel, text="Filtros dinámicos", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2), columnspan=6)
+        ctk.CTkLabel(top_panel, text="Litología", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=(8, 2), pady=(2, 6))
+        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_lithology_var, values=options.get("lithology", ["Todos"]), command=lambda _v: self._on_domain_filters_changed()).grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(2, 6))
+        ctk.CTkLabel(top_panel, text="Alteración", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=2, sticky="w", padx=(0, 2), pady=(2, 6))
+        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_alteration_var, values=options.get("alteration", ["Todos"]), command=lambda _v: self._on_domain_filters_changed()).grid(row=1, column=3, sticky="ew", padx=(0, 8), pady=(2, 6))
+        ctk.CTkLabel(top_panel, text="Mina", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=4, sticky="w", padx=(0, 2), pady=(2, 6))
+        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_mine_var, values=options.get("mine", ["Todos"]), command=lambda _v: self._on_domain_filters_changed()).grid(row=1, column=5, sticky="ew", padx=(0, 8), pady=(2, 6))
+
+        ctk.CTkLabel(top_panel, textvariable=self.domain_preview_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6), columnspan=6)
+
         plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
-        records_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        records_card.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 0))
-        ctk.CTkLabel(records_card, text="Detalle del dominio seleccionado", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(6, 2))
-        ctk.CTkLabel(records_card, textvariable=self.domain_records_var, text_color=TXT_MUTED, justify="left", wraplength=980, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(0, 6))
-
-        chart = DashboardGrid(plot_card, 1, 1, figsize=self._responsive_figsize(14.0, 8.2))
+        chart = DashboardGrid(plot_card, 1, 1, figsize=self._responsive_figsize(11.0, 5.2))
         ax = chart.axis(0, 0)
         apply_axis_style(ax)
-        x_values = [float(row["mean"]) for row in rows]
-        y_values = [float(row["cv"]) for row in rows]
-        names = [str(row["domain"]) for row in rows]
-        counts = [int(row["count"]) for row in rows]
-        min_n = min(counts)
-        max_n = max(counts)
-        size_min = 70.0
-        size_max = 550.0
-        if max_n == min_n:
-            sizes = [220.0 for _ in counts]
+        scatter_rows = payload.get("scatter_rows", [])
+        if not scatter_rows:
+            ax.text(0.5, 0.5, "Sin datos para scatter con filtros actuales.", ha="center", va="center", color=TXT_MAIN)
+            ax.set_title("Media vs CV por categoría", color=PLOT_TXT)
         else:
-            sizes = [size_min + ((size_max - size_min) * ((value**0.5 - min_n**0.5) / ((max_n**0.5 - min_n**0.5) or 1.0))) for value in counts]
-
-        groups = [str(row.get("primary_group", "Otros")) for row in rows]
-        unique_groups = sorted(set(groups))
-        color_map = {group: get_domain_color(group) for group in unique_groups}
-        colors = [color_map[group] for group in groups]
-
-        points = ax.scatter(x_values, y_values, s=sizes, c=colors, alpha=0.78, edgecolors=BORDER_SOFT, linewidths=0.6, picker=True)
-        ax.set_title("Comparación exploratoria de dominios", color=PLOT_TXT)
-        ax.text(0.01, 1.02, "Coherencia estadística de dominios", transform=ax.transAxes, color=TXT_MUTED, fontsize=CHART_FONT_SIZE_LEGEND)
-        ax.set_xlabel("Media de ley Cu (%)")
-        ax.set_ylabel("Coeficiente de variación")
-        ax.tick_params(labelsize=CHART_FONT_SIZE_TICK)
-        chart.figure.subplots_adjust(right=0.78, top=0.90, left=0.08, bottom=0.11)
-        global_mean = sum(x_values) / len(x_values)
-        global_cv = sum(y_values) / len(y_values)
-        ax.axvline(global_mean, color=SEM_GRAY, linestyle="--", linewidth=1.0, alpha=0.75)
-        ax.axhline(0.5, color=SEM_RED, linestyle=":", linewidth=1.0, alpha=0.8)
-        ax.axhline(global_cv, color=SEM_BLUE_SOFT, linestyle="--", linewidth=1.0, alpha=0.75)
-        ax.text(global_mean, 0.98, " media global", transform=ax.get_xaxis_transform(), color=SEM_GRAY, fontsize=CHART_FONT_SIZE_LEGEND, va="top")
-        ax.text(0.01, 0.5, "umbral CV 0.50", transform=ax.transAxes, color=SEM_RED, fontsize=CHART_FONT_SIZE_LEGEND)
-
-        from matplotlib.lines import Line2D
-        legend_handles = [Line2D([0], [0], marker="o", color="w", label=group, markerfacecolor=color_map[group], markeredgecolor=BORDER_SOFT, markersize=8) for group in unique_groups]
-        ax.legend(handles=legend_handles, title="Grupo dominio", loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=CHART_FONT_SIZE_LEGEND, title_fontsize=CHART_FONT_SIZE_LEGEND)
-        for idx, (xv, yv, label) in enumerate(zip(x_values, y_values, names)):
-            dx = 0.012 * (max(x_values) - min(x_values) + 1e-6)
-            dy = 0.012 * (max(y_values) - min(y_values) + 1e-6) * (1 if idx % 2 == 0 else -1)
-            ax.text(
-                xv + dx,
-                yv + dy,
-                label,
-                fontsize=CHART_FONT_SIZE_LEGEND,
-                color=SEM_WHITE,
-                alpha=0.82,
-                bbox={"facecolor": BG_PANEL, "edgecolor": BORDER_SOFT, "alpha": 0.85, "boxstyle": "round,pad=0.18"},
-            )
-
-        tooltip = ax.annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points", bbox={"boxstyle": "round", "fc": BG_CARD, "ec": BORDER_SOFT}, color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LEGEND)
-        tooltip.set_visible(False)
-
-        def on_move(event) -> None:
-            if event.inaxes != ax:
-                tooltip.set_visible(False)
-                chart.canvas.draw_idle()
-                return
-            contains, details = points.contains(event)
-            if not contains:
-                tooltip.set_visible(False)
-                chart.canvas.draw_idle()
-                return
-            point_index = int(details["ind"][0])
-            row = rows[point_index]
-            tooltip.xy = (x_values[point_index], y_values[point_index])
-            tooltip.set_text(
-                f"{row['domain']}\nN={row['count']} · mean={row['mean']:.4g}\nstd={row['std']:.4g} · CV={row['cv']:.4g}\n% total={row['pct_total']:.2f}"
-            )
-            tooltip.set_visible(True)
-            chart.canvas.draw_idle()
-
-        def on_pick(event) -> None:
-            if not hasattr(event, "ind") or not event.ind:
-                return
-            idx = int(event.ind[0])
-            row = rows[idx]
-            preview_indexes = ", ".join(str(value) for value in row["indexes"][:24])
-            self.domain_records_var.set(
-                f"Dominio: {row['domain']} | N={row['count']} | Media={row['mean']:.4g} | CV={row['cv']:.4g} | Índices: {preview_indexes}"
-            )
-
-        chart.canvas.mpl_connect("motion_notify_event", on_move)
-        chart.canvas.mpl_connect("pick_event", on_pick)
+            x_values = [float(item["mean"]) for item in scatter_rows]
+            y_values = [float(item["cv"]) for item in scatter_rows]
+            categories = [str(item["category"]) for item in scatter_rows]
+            counts = [int(item["count"]) for item in scatter_rows]
+            colors = [get_domain_color(category) for category in categories]
+            size_base = [max(70.0, min(420.0, 40.0 + (count * 8.0))) for count in counts]
+            ax.scatter(x_values, y_values, s=size_base, c=colors, alpha=0.80, edgecolors=BORDER_SOFT, linewidths=0.6)
+            for xv, yv, label in zip(x_values, y_values, categories):
+                ax.text(xv, yv, f" {label}", color=TXT_MUTED, fontsize=CHART_FONT_SIZE_LEGEND, va="center")
+            ax.set_title("Comparación exploratoria de dominios", color=PLOT_TXT)
+            ax.axhline(0.5, color=SEM_RED, linestyle=":", linewidth=1.0, alpha=0.75)
+            ax.set_xlabel(f"Media ({payload.get('target_column', '')})")
+            ax.set_ylabel("Coeficiente de variación (CV)")
         chart.render()
+
+        bottom = ctk.CTkFrame(wrapper, fg_color="transparent")
+        bottom.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0, 0))
+        bottom.grid_columnconfigure(0, weight=1)
+        bottom.grid_columnconfigure(1, weight=1)
+
+        stats_card = ctk.CTkFrame(bottom, fg_color=BG_SOFT, corner_radius=8)
+        stats_card.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
+        ctk.CTkLabel(stats_card, text="Resumen estadístico (subconjunto filtrado)", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
+        stats = payload.get("preview_stats", {})
+        preview_count = int(payload.get("preview_count", 0))
+        preview_text = (
+            f"N filtrado: {preview_count}\n"
+            f"N válido target: {int(stats.get('n', 0))}\n"
+            f"Media: {float(stats.get('mean', math.nan)):.5g}\n"
+            f"Std: {float(stats.get('std', math.nan)):.5g}\n"
+            f"CV: {float(stats.get('cv', math.nan)):.5g}\n"
+            f"Mín: {float(stats.get('min', math.nan)):.5g}\n"
+            f"Máx: {float(stats.get('max', math.nan)):.5g}"
+        )
+        ctk.CTkLabel(stats_card, text=preview_text, text_color=TXT_MUTED, justify="left", font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+
+        confirm_card = ctk.CTkFrame(bottom, fg_color=BG_SOFT, corner_radius=8)
+        confirm_card.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
+        ctk.CTkLabel(confirm_card, text="Confirmar dominio persistente", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2))
+        ctk.CTkEntry(confirm_card, textvariable=self.domain_confirm_var, placeholder_text="Ej: D1", height=24).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
+        ctk.CTkButton(confirm_card, text="Confirmar dominio sobre filtros", height=24, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_confirm_domain_assignment).grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
+        ctk.CTkLabel(confirm_card, textvariable=self.domain_history_var, text_color=TXT_MUTED, justify="left", wraplength=480, font=ui_font(FONT_SMALL)).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
+
+        self._update_domain_preview_and_history(payload)
 
     def _on_change_step(self, step_name: str) -> None:
         current_step = self.service.workflow_state.current_step
@@ -1726,6 +1711,53 @@ class HomePanel(ctk.CTkFrame):
         self._append_activity(result.message)
         if result.success:
             self._refresh_dashboard(reason="domain_filter_changed")
+
+    def _on_domain_filters_changed(self) -> None:
+        filters = {
+            "lithology": self.domain_filter_lithology_var.get(),
+            "alteration": self.domain_filter_alteration_var.get(),
+            "mine": self.domain_filter_mine_var.get(),
+        }
+        self.service.set_domain_ui_filters(filters)
+        self._refresh_dashboard(reason="domain_ui_filters_changed")
+
+    def _update_domain_preview_and_history(self, payload: dict[str, object]) -> None:
+        filters = payload.get("filters", {})
+        filtered_desc = ", ".join(
+            [
+                f"{label}={value or 'Todos'}"
+                for label, value in [
+                    ("Litología", str(filters.get("lithology", ""))),
+                    ("Alteración", str(filters.get("alteration", ""))),
+                    ("Mina", str(filters.get("mine", ""))),
+                ]
+            ]
+        )
+        preview_count = int(payload.get("preview_count", 0))
+        self.domain_preview_var.set(f"Previsualización: {filtered_desc} · muestras={preview_count}")
+
+        history = payload.get("assignment_history", [])
+        if not history:
+            self.domain_history_var.set("Sin dominios confirmados.")
+            return
+        recent = history[-5:]
+        lines: list[str] = []
+        for event in recent:
+            filters_map = event.get("filters", {})
+            lines.append(
+                f"#{event.get('sequence')} {event.get('domain')} · n={event.get('affected_count')} · "
+                f"L={filters_map.get('lithology') or 'Todos'} / A={filters_map.get('alteration') or 'Todos'} / M={filters_map.get('mine') or 'Todos'}"
+            )
+        self.domain_history_var.set("Confirmados:\n" + "\n".join(lines))
+
+    def _on_confirm_domain_assignment(self) -> None:
+        result = self.service.confirm_domain_assignment(self.domain_confirm_var.get())
+        self.status_text.set(result.message)
+        self._append_activity(result.message)
+        if result.success:
+            self.domain_label.set("Dominio: domain_estimation")
+            self.domain_confirm_var.set("")
+            self._refresh_dashboard(reason="domain_assignment_confirmed")
 
     def _on_apply_domains(self) -> None:
         self._trace_ui_action("aplicar_dominios", refresh_type="none")
