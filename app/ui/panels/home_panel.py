@@ -7,11 +7,17 @@ from tkinter import filedialog, messagebox
 import threading
 
 import customtkinter as ctk
-from matplotlib.ticker import ScalarFormatter
 
 from app.services.geostat_service import GeostatService
 from app.ui.panels.dashboard_grid import DashboardGrid
-from app.ui.panels.spatial_3d_view import Spatial3DView, is_3d_backend_available
+from app.ui.renderers import (
+    EDARenderContext,
+    MatplotlibEDARenderer,
+    MatplotlibSpatial2DRenderer,
+    MatplotlibSpatial3DRenderer,
+    PyVistaSpatial3DRenderer,
+    Spatial2DRenderContext,
+)
 from app.ui.theme import (
     BG_CARD,
     BG_MAIN,
@@ -62,10 +68,7 @@ from app.ui.theme import (
     BTN_PRIMARY_BG,
     BTN_TERTIARY_BG,
     BTN_TERTIARY_HOVER,
-    add_reference_line,
     apply_axis_style,
-    get_continuous_colormap,
-    get_domain_color,
 )
 BG_SOFT = BG_CARD
 TXT_MAIN = TEXT_MAIN
@@ -88,6 +91,7 @@ PAD_CARD_X = 14
 PAD_STACK_Y = 4
 PAD_SECTION_Y = 8
 SIDEBAR_WIDTH = 308
+SPATIAL_GUARDRAIL_NOTE = "Uso: lectura exploratoria, no inferencia de continuidad."
 
 
 def ui_font(token: dict[str, object]) -> ctk.CTkFont:
@@ -247,7 +251,12 @@ class HomePanel(ctk.CTkFrame):
         self.workflow_hint_var = ctk.StringVar(value="Etapa lista.")
         self.unified_context_var = ctk.StringVar(value="Dataset: No cargado · Target activo: No definido · Dominio/filtro: No definido · Workflow: Listo · Capping inactivo")
         self.plot_frame: ctk.CTkFrame | None = None
-        self.spatial_3d_widget: Spatial3DView | None = None
+        self.spatial_3d_widget: ctk.CTkFrame | None = None
+        self.eda_renderer = MatplotlibEDARenderer()
+        self.spatial_2d_renderer = MatplotlibSpatial2DRenderer(service=self.service)
+        self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
+        self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
+        self._spatial_3d_renderer_warning_cache: str = ""
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
@@ -989,23 +998,8 @@ class HomePanel(ctk.CTkFrame):
             width_ratios=[2.55, 1.0],
             height_ratios=[1.0, 1.0],
         )
-        ax_hist = grid.axis(0, 0)
-        ax_hist_bottom = grid.axis(1, 0)
-        ax_prob = grid.axis(0, 1)
-        ax_secondary = grid.axis(1, 1)
-
-        for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
-            apply_axis_style(axis)
-        ax_hist_bottom.axis("off")
 
         values = [float(v) for v in data["target_values"]]
-        sorted_values = sorted(values)
-        n_values = len(sorted_values)
-        bins = min(55, max(18, int(math.sqrt(n_values) * 2)))
-        p50 = sorted_values[int(0.50 * (n_values - 1))]
-        p90 = sorted_values[int(0.90 * (n_values - 1))]
-        mean_val = sum(sorted_values) / n_values
-
         original_values: list[float] = values
         cutoff_val: float | None = None
         if self.service.current_dataset is not None and self.service.variable_config is not None:
@@ -1016,86 +1010,19 @@ class HomePanel(ctk.CTkFrame):
         if state["dynamic_enabled"]:
             cutoff_val = float(state["dynamic_cutoff_value"])
 
-        if original_values != values:
-            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="none", alpha=0.20, label="Base")
-        ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="none", alpha=0.76, label="Activa")
-        add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.95)
-        add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.88)
-        add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
-        if cutoff_val is not None:
-            add_reference_line(ax_hist, cutoff_val, label=f"Cutoff {cutoff_val:.3g}", color=SEM_RED, y_pos=0.74)
-        ax_hist.set_title(f"Evidencia principal · Histograma ({active_variable})", color=CHART_TEXT, pad=8)
-        ax_hist.set_xlabel("Ley Cu (%)")
-        ax_hist.set_ylabel("Frecuencia (n)")
-        ax_hist.legend(loc="upper right", bbox_to_anchor=(0.995, 0.995), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
-        tail_hint = "cola dominante alta" if mean_val >= p50 else "cola dominante baja"
-        ax_hist.text(
-            0.015,
-            0.96,
-            f"Skew={skewness_text} · {tail_hint}",
-            transform=ax_hist.transAxes,
-            ha="left",
-            va="top",
-            fontsize=CHART_FONT_SIZE_LABEL,
-            color=CHART_TEXT,
-            bbox={"facecolor": CHART_BG, "edgecolor": CHART_BORDER, "boxstyle": "round,pad=0.22"},
+        self.eda_renderer.render(
+            grid,
+            data,
+            EDARenderContext(
+                active_variable=active_variable,
+                skewness_text=skewness_text,
+                chart_text_color=CHART_TEXT,
+                chart_legend_size=CHART_FONT_SIZE_LEGEND,
+                chart_label_size=CHART_FONT_SIZE_LABEL,
+            ),
+            original_values=original_values,
+            cutoff_value=cutoff_val,
         )
-
-        if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
-            prob_x = [float(v) for v in data["probplot_x"]]
-            prob_y = [float(v) for v in data["probplot_y"]]
-            qmin, qmax = min(prob_x), max(prob_x)
-            ymin, ymax = min(prob_y), max(prob_y)
-            slope = (ymax - ymin) / (qmax - qmin) if qmax != qmin else 1.0
-            intercept = ymin - slope * qmin
-            ref_line = [slope * q + intercept for q in prob_x]
-            high_cut = sorted(prob_y)[int(0.90 * (len(prob_y) - 1))]
-            core_x = [x for x, y in zip(prob_x, prob_y) if y <= high_cut]
-            core_y = [y for y in prob_y if y <= high_cut]
-            tail_x = [x for x, y in zip(prob_x, prob_y) if y > high_cut]
-            tail_y = [y for y in prob_y if y > high_cut]
-            ax_prob.scatter(core_x, core_y, s=13, color=SEM_BLUE, alpha=0.74, label="Cuerpo")
-            if tail_x:
-                ax_prob.scatter(tail_x, tail_y, s=18, color=SEM_ORANGE, alpha=0.86, label="Cola")
-            ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
-            ax_prob.set_title("QQ plot · Normalidad", color=CHART_TEXT, pad=8)
-            ax_prob.set_xlabel("Cuantiles normales")
-            ax_prob.set_ylabel("Ley Cu (%)")
-            ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
-        else:
-            ax_prob.axis("off")
-            ax_prob.text(0.5, 0.5, "QQ no disponible", ha="center", va="center", color=CHART_TEXT)
-
-        domain_data = data.get("domain_boxplot", {})
-        if domain_data.get("enabled"):
-            paired = list(zip(domain_data["labels"], domain_data["values"]))
-            paired.sort(key=lambda item: (sum(item[1]) / len(item[1])) if item[1] else float("-inf"), reverse=True)
-            ordered_labels = [f"{label} (n={len(vals)})" for label, vals in paired]
-            ordered_values = [vals for _label, vals in paired]
-            box = ax_secondary.boxplot(ordered_values, labels=ordered_labels, patch_artist=True)
-            for patch, (label, _vals) in zip(box["boxes"], paired):
-                patch.set_facecolor(get_domain_color(label))
-                patch.set_alpha(0.72)
-                patch.set_edgecolor(CHART_BORDER)
-            ax_secondary.tick_params(axis="x", rotation=10, labelsize=CHART_FONT_SIZE_LEGEND)
-            ax_secondary.set_ylabel("Ley Cu (%)")
-            ax_secondary.set_title("Comparación por dominio", color=CHART_TEXT, pad=8)
-        else:
-            box = ax_secondary.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
-            for patch in box["boxes"]:
-                patch.set_facecolor(KPI_PRIMARY)
-                patch.set_alpha(0.58)
-                patch.set_edgecolor(SEM_BLUE_SOFT)
-            for whisker in box["whiskers"]:
-                whisker.set_color(CHART_BORDER)
-            for cap in box["caps"]:
-                cap.set_color(CHART_BORDER)
-            for median in box["medians"]:
-                median.set_color(SEM_GREEN)
-                median.set_linewidth(1.8)
-            ax_secondary.set_yticks([])
-            ax_secondary.set_title("Boxplot · Rango y outliers", color=CHART_TEXT, pad=8)
-            ax_secondary.set_xlabel("Ley Cu (%)")
 
         stage_alert = bool(
             not availability.get("probability", {}).get("available", True)
@@ -1109,10 +1036,6 @@ class HomePanel(ctk.CTkFrame):
             text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
             font=ui_font(FONT_MICRO),
         ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 0))
-
-        grid.figure.tight_layout(pad=0.75, w_pad=0.85, h_pad=0.85)
-        grid.canvas.draw()
-        grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
 
     def _render_cutoff_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
@@ -1174,55 +1097,19 @@ class HomePanel(ctk.CTkFrame):
             width_ratios=[1.45, 1.0],
             height_ratios=[1.2, 1.0],
         )
-        ax_xy = grid.axis(0, 0)
-        ax_xz = grid.axis(0, 1)
-        ax_yz = grid.axis(1, 0)
-        ax_info = grid.axis(1, 1)
-
-        for axis in (ax_xy, ax_xz, ax_yz, ax_info):
-            apply_axis_style(axis)
-        cmap = "tab20" if spatial.target_tick_labels else get_continuous_colormap()
-        point_kwargs = {"s": 11, "alpha": 0.64, "edgecolors": "none"}
-        sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, **point_kwargs)
-        sc_xz = ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
-        sc_yz = ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
-
-        ax_xy.set_title("Planta XY (principal)", color=PLOT_TXT)
-        ax_xz.set_title("Sección XZ", color=PLOT_TXT)
-        ax_yz.set_title("Sección YZ", color=PLOT_TXT)
-        ax_xy.set_xlabel("X")
-        ax_xy.set_ylabel("Y")
-        ax_xz.set_xlabel("X")
-        ax_xz.set_ylabel("Z")
-        ax_yz.set_xlabel("Y")
-        ax_yz.set_ylabel("Z")
-        plain_formatter = ScalarFormatter(useOffset=False)
-        plain_formatter.set_scientific(False)
-        for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
-            axis.set_major_formatter(plain_formatter)
-
-        for sc, ax in [(sc_xy, ax_xy)]:
-            colorbar = grid.figure.colorbar(sc, ax=ax, shrink=0.68, pad=0.02, label=spatial.target_label)
-            if spatial.target_tick_positions and spatial.target_tick_labels:
-                colorbar.set_ticks(spatial.target_tick_positions)
-                colorbar.set_ticklabels(spatial.target_tick_labels)
-            colorbar.ax.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=TXT_MUTED)
-            colorbar.ax.yaxis.label.set_color(TXT_MUTED)
-            colorbar.outline.set_edgecolor(BORDER_SOFT)
-
-        ax_info.axis("off")
-        msg = "Ficha espacial\n• Vistas: XY / XZ / YZ"
-        msg += f"\n• Target resuelto global: {snapshot['resolved_target_column'] or 'No definido'}"
-        msg += f"\n• Color mostrado (local): {color_by or snapshot['resolved_target_column'] or 'No definido'}"
-        msg += "\n• Uso: lectura exploratoria, no inferencia de continuidad."
-        state = self.service.get_cutoff_state()
-        if state["dynamic_enabled"]:
-            msg += f"\n• Capping confirmado: {state['dynamic_cutoff_value']:.6g}"
-        if spatial.downsampled:
-            msg += f"\n• Muestreo mostrado: {spatial.plotted_points:,}/{spatial.source_points:,}"
-        msg += "\n• Preparado para lectura por ley o por dominio."
-        ax_info.text(0.05, 0.95, msg, va="top", color=TXT_MAIN, fontsize=CHART_FONT_SIZE_LABEL, bbox={"facecolor": BG_CARD, "edgecolor": BORDER_SOFT, "boxstyle": "round,pad=0.45"})
-        grid.render()
+        self.spatial_2d_renderer.render(
+            grid,
+            spatial,
+            Spatial2DRenderContext(
+                color_by=color_by,
+                snapshot=snapshot,
+                guardrail_note=SPATIAL_GUARDRAIL_NOTE,
+                info_text_color=TXT_MAIN,
+                info_border_color=BORDER_SOFT,
+                info_bg_color=BG_CARD,
+                label_size=CHART_FONT_SIZE_LABEL,
+            ),
+        )
 
     def _render_spatial_3d_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
@@ -1239,12 +1126,22 @@ class HomePanel(ctk.CTkFrame):
             font=ui_font(FONT_SMALL),
         ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 2))
 
-        self.spatial_3d_widget = Spatial3DView(wrapper)
+        renderer, fallback_reason = self._select_spatial_3d_renderer()
+        if fallback_reason and fallback_reason != self._spatial_3d_renderer_warning_cache:
+            self._spatial_3d_renderer_warning_cache = fallback_reason
+            self.service.activity_log.log(
+                "spatial_3d_backend_fallback",
+                "warning",
+                "Fallback al renderer 3D Matplotlib.",
+                {"reason": fallback_reason},
+            )
+
+        self.spatial_3d_widget = renderer.create_widget(wrapper)
         self.spatial_3d_widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
 
-        available, reason = is_3d_backend_available()
+        available, reason = renderer.is_available()
         if not available:
-            self.spatial_3d_widget.show_unavailable(f"{reason}. Volviendo automáticamente a 2D.")
+            renderer.show_unavailable(self.spatial_3d_widget, f"{reason}. Volviendo automáticamente a 2D.")
             self.spatial_view_mode_var.set("2D")
             self.after(10, self._render_spatial_view)
             return
@@ -1252,12 +1149,22 @@ class HomePanel(ctk.CTkFrame):
         color_by = self.spatial_color_var.get() or None
         result = self.service.prepare_visual_3d_data(color_by=color_by)
         if not result.success or result.spatial_3d_data is None:
-            self.spatial_3d_widget.show_unavailable(f"No se pudo renderizar 3D: {result.message}. Volviendo a 2D.")
+            renderer.show_unavailable(self.spatial_3d_widget, f"No se pudo renderizar 3D: {result.message}. Volviendo a 2D.")
             self.spatial_view_mode_var.set("2D")
             self.after(10, self._render_spatial_view)
             return
 
-        self.spatial_3d_widget.update_cloud(result.spatial_3d_data, color_by or snapshot["resolved_target_column"] or "No definido")
+        renderer.render(
+            self.spatial_3d_widget,
+            result.spatial_3d_data,
+            color_by or snapshot["resolved_target_column"] or "No definido",
+        )
+
+    def _select_spatial_3d_renderer(self):
+        available, reason = self.pyvista_spatial_3d_renderer.is_available()
+        if available:
+            return self.pyvista_spatial_3d_renderer, ""
+        return self.spatial_3d_renderer, reason
 
     def _render_domains_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
