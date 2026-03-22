@@ -14,11 +14,24 @@ class DashboardGrid:
     """Simple reusable figure grid wrapper (1x1, 1x2, 2x2, 3x1)."""
     _instances_by_parent: dict[int, list["DashboardGrid"]] = {}
 
-    def __init__(self, parent: ctk.CTkFrame, rows: int, cols: int, figsize: tuple[float, float] = (8.0, 5.2)) -> None:
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        rows: int,
+        cols: int,
+        figsize: tuple[float, float] = (8.0, 5.2),
+        *,
+        width_ratios: list[float] | None = None,
+        height_ratios: list[float] | None = None,
+    ) -> None:
         self.parent = parent
         self.figure = Figure(figsize=figsize, dpi=100)
         apply_figure_theme(self.figure)
-        self.axes = self.figure.subplots(rows, cols, squeeze=False)
+        if width_ratios or height_ratios:
+            grid_spec = self.figure.add_gridspec(rows, cols, width_ratios=width_ratios, height_ratios=height_ratios)
+            self.axes = [[self.figure.add_subplot(grid_spec[r, c]) for c in range(cols)] for r in range(rows)]
+        else:
+            self.axes = self.figure.subplots(rows, cols, squeeze=False).tolist()
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.parent)
         for row_axes in self.axes:
             for axis in row_axes:
