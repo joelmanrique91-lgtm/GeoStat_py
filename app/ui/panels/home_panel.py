@@ -199,6 +199,7 @@ class HomePanel(ctk.CTkFrame):
         self.column_menus: dict[str, ctk.CTkOptionMenu] = {}
         self.show_aux_controls_var = ctk.BooleanVar(value=False)
         self.action_bar_body: ctk.CTkFrame | None = None
+        self.aux_window: ctk.CTkToplevel | None = None
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
         self.workspace_title_var = ctk.StringVar(value="Vista Datos")
@@ -338,7 +339,7 @@ class HomePanel(ctk.CTkFrame):
 
         head = ctk.CTkFrame(frame, fg_color="transparent")
         head.pack(fill="x", padx=8, pady=(6, 3))
-        ctk.CTkLabel(head, text="Panel de control", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(side="left")
+        ctk.CTkLabel(head, text="Panel auxiliar (avanzado)", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(side="left")
         ctk.CTkButton(head, text="Colapsar" if not self.controls_collapsed else "Expandir", width=78, height=22, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._toggle_controls).pack(side="right")
 
         self.controls_container = ctk.CTkScrollableFrame(frame, fg_color="transparent")
@@ -356,6 +357,8 @@ class HomePanel(ctk.CTkFrame):
         self._render_control_sections()
 
     def _render_control_sections(self) -> None:
+        if not hasattr(self, "controls_container"):
+            return
         for child in self.controls_container.winfo_children():
             child.destroy()
         self.column_menus = {}
@@ -363,13 +366,18 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(self.controls_container, text="Panel colapsado", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=8)
             return
 
-        self.control_sections = {
+        sections = {
             "Datos": self._build_data_controls(self.controls_container),
             "EDA": self._build_eda_controls(self.controls_container),
             "Cutoffs": self._build_cutoff_controls(self.controls_container),
             "Espacial": self._build_spatial_controls(self.controls_container),
             "Dominios": self._build_domains_controls(self.controls_container),
         }
+        active = self.service.workflow_state.current_step
+        if active in sections:
+            sections[active].destroy()
+            sections.pop(active, None)
+        self.control_sections = sections
         self._focus_sidebar_sections(self.service.workflow_state.current_step)
 
     def _section_shell(self, parent: ctk.CTkScrollableFrame, title: str) -> ctk.CTkFrame:
@@ -554,27 +562,40 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_stage_action_bar(self, parent: ctk.CTkFrame) -> None:
         block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=9)
-        block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 4))
+        block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 3))
         block.grid_columnconfigure(0, weight=1)
         block.grid_columnconfigure(1, weight=0)
         ctk.CTkLabel(block, text="Acciones de la etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
-            row=0, column=0, sticky="w", padx=7, pady=(5, 2)
+            row=0, column=0, sticky="w", padx=7, pady=(4, 1)
         )
-        ctk.CTkSwitch(
+        ctk.CTkButton(
             block,
-            text="Mostrar panel auxiliar",
-            variable=self.show_aux_controls_var,
+            text="Panel auxiliar",
+            width=96,
+            height=24,
+            fg_color=BTN_NEUTRAL,
+            hover_color=BTN_NEUTRAL_HOVER,
             command=self._toggle_aux_controls,
-            text_color=TXT_MUTED,
-        ).grid(row=0, column=1, sticky="e", padx=7, pady=(3, 2))
+        ).grid(row=0, column=1, sticky="e", padx=7, pady=(2, 1))
         self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
-        self.action_bar_body.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 5))
+        self.action_bar_body.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 4))
 
     def _toggle_aux_controls(self) -> None:
-        if bool(self.show_aux_controls_var.get()):
-            self.aux_controls_host.grid()
-        else:
-            self.aux_controls_host.grid_remove()
+        if self.aux_window is not None and self.aux_window.winfo_exists():
+            self.aux_window.destroy()
+            self.aux_window = None
+            self.show_aux_controls_var.set(False)
+            return
+        self.show_aux_controls_var.set(True)
+        self.aux_window = ctk.CTkToplevel(self)
+        self.aux_window.title("GeoStat Py · Panel auxiliar")
+        self.aux_window.geometry("390x760")
+        self.aux_window.minsize(360, 620)
+        self.aux_window.transient(self.winfo_toplevel())
+        self.aux_window.protocol("WM_DELETE_WINDOW", self._toggle_aux_controls)
+        self.aux_window.grid_columnconfigure(0, weight=1)
+        self.aux_window.grid_rowconfigure(0, weight=1)
+        self._build_control_panel(self.aux_window).grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
     def _render_stage_action_bar(self, stage: str) -> None:
         if self.action_bar_body is None:
@@ -638,26 +659,51 @@ class HomePanel(ctk.CTkFrame):
     def _build_eda_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
-        row.grid_columnconfigure((0, 1, 2), weight=1)
+        row.grid_columnconfigure((0, 1), weight=0)
+        row.grid_columnconfigure(2, weight=1)
         has_capping = self.service.has_confirmed_dynamic_capping()
         if not has_capping:
             self.eda_use_capping_var.set(False)
-        ctk.CTkSwitch(row, text="EDA con capping confirmado", variable=self.eda_use_capping_var, state="normal" if has_capping else "disabled", command=self._on_toggle_eda_capping).grid(row=0, column=0, sticky="w", padx=4, pady=3)
-        ctk.CTkButton(row, text="Actualizar EDA", height=26, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_refresh_eda).grid(row=0, column=1, padx=4, pady=3, sticky="ew")
-        ctk.CTkLabel(row, text="Vista central activa: histogramas, QQ y boxplots.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=2, sticky="e", padx=4, pady=3)
+        cluster = ctk.CTkFrame(row, fg_color=BG_CARD, corner_radius=7)
+        cluster.grid(row=0, column=0, columnspan=2, sticky="w", padx=(2, 6), pady=2)
+        ctk.CTkSwitch(cluster, text="EDA con capping confirmado", variable=self.eda_use_capping_var, state="normal" if has_capping else "disabled", command=self._on_toggle_eda_capping).pack(side="left", padx=6, pady=4)
+        ctk.CTkButton(cluster, text="Actualizar EDA", width=120, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_refresh_eda).pack(side="left", padx=(0, 6), pady=4)
+        ctk.CTkLabel(row, text="Histograma · QQ · boxplots con foco en dispersión y sesgo.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=2, sticky="e", padx=2, pady=2)
 
     def _build_cutoff_actions_inline(self, parent: ctk.CTkFrame) -> None:
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.grid(row=1, column=0, sticky="ew")
-        for col in range(7):
-            row.grid_columnconfigure(col, weight=1)
-        ctk.CTkOptionMenu(row, variable=self.cutoff_target_var, values=self.service.get_numeric_columns() or [""], state="normal" if self.service.get_numeric_columns() else "disabled", height=24, command=lambda _v: self._schedule_cutoff_preview()).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
-        ctk.CTkSwitch(row, text="Cutoff manual", variable=self.cutoff_enabled_var).grid(row=0, column=1, padx=3, pady=2, sticky="w")
-        ctk.CTkSwitch(row, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._schedule_cutoff_preview).grid(row=0, column=2, padx=3, pady=2, sticky="w")
-        ctk.CTkOptionMenu(row, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=24, command=lambda _v: self._schedule_cutoff_preview()).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
-        ctk.CTkSlider(row, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color=SEM_BLUE_SOFT, progress_color=SEM_BLUE_SOFT).grid(row=0, column=4, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Aplicar manual", height=26, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_apply_cutoffs).grid(row=0, column=5, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Confirmar capping", height=26, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_dynamic_cutoff).grid(row=0, column=6, padx=3, pady=2, sticky="ew")
+        band = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=7)
+        band.grid(row=1, column=0, sticky="ew")
+        for col in range(6):
+            band.grid_columnconfigure(col, weight=1)
+        ctk.CTkOptionMenu(
+            band,
+            variable=self.cutoff_target_var,
+            values=self.service.get_numeric_columns() or [""],
+            state="normal" if self.service.get_numeric_columns() else "disabled",
+            height=24,
+            command=lambda _v: self._schedule_cutoff_preview(),
+        ).grid(row=0, column=0, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkSwitch(band, text="Manual", variable=self.cutoff_enabled_var).grid(row=0, column=1, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkSwitch(band, text="Dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._schedule_cutoff_preview).grid(row=0, column=2, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkOptionMenu(band, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=24, command=lambda _v: self._schedule_cutoff_preview()).grid(row=0, column=3, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkLabel(band, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=4, padx=4, pady=(4, 2), sticky="e")
+        ctk.CTkButton(band, text="Aplicar", height=26, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_cutoff_primary).grid(row=0, column=5, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkSlider(
+            band,
+            from_=0,
+            to=100,
+            variable=self.dynamic_slider_var,
+            command=self._on_slider_change,
+            button_color=SEM_BLUE_SOFT,
+            progress_color=SEM_BLUE_SOFT,
+        ).grid(row=1, column=0, columnspan=5, padx=4, pady=(0, 4), sticky="ew")
+        ctk.CTkLabel(band, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=5, padx=4, pady=(0, 4), sticky="e")
+
+    def _on_apply_cutoff_primary(self) -> None:
+        if bool(self.dynamic_cutoff_enabled_var.get()):
+            self._on_apply_dynamic_cutoff()
+            return
+        self._on_apply_cutoffs()
 
     def _build_spatial_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
