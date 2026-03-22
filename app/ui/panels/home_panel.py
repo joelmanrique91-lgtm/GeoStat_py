@@ -15,6 +15,7 @@ from app.ui.theme import (
     APP_BG,
     BORDER_SOFT,
     CARD_BG,
+    CHIP_BG,
     PANEL_BG,
     SEM_BLUE,
     SEM_BLUE_SOFT,
@@ -25,6 +26,11 @@ from app.ui.theme import (
     SEM_WHITE,
     TEXT_MAIN,
     TEXT_MUTED,
+    WF_ACTIVE,
+    WF_BLOCKED,
+    WF_IDLE,
+    WF_READY,
+    WF_WARNING,
     add_reference_line,
     apply_axis_style,
     get_continuous_colormap,
@@ -42,8 +48,14 @@ C_TRUNCATED = SEM_BLUE
 C_CUTOFF = SEM_ORANGE
 C_ACTIVE = SEM_BLUE
 C_SUCCESS = SEM_GREEN
-C_TAB_IDLE = "#1E293B"
-C_TAB_DONE = "#334155"
+C_TAB_IDLE = WF_IDLE
+C_TAB_DONE = WF_READY
+BTN_NEUTRAL = "#2C3F56"
+BTN_NEUTRAL_HOVER = "#395675"
+BTN_PRIMARY_HOVER = "#4A89D6"
+DIVIDER_SOFT = BORDER_SOFT
+KPI_PRIMARY = "#244A73"
+KPI_PRIMARY_FOCUS = WF_ACTIVE
 PLOT_TXT = TEXT_MAIN
 
 STEP_TO_READINESS_KEY = {
@@ -225,7 +237,7 @@ class HomePanel(ctk.CTkFrame):
             width=130,
             height=22,
             fg_color=BG_SOFT,
-            hover_color="#333333",
+            hover_color=BTN_NEUTRAL_HOVER,
             command=self._toggle_log,
         ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
         self.log_box = ctk.CTkTextbox(self.log_panel, height=44, fg_color=BG_SOFT, text_color=TXT_MAIN)
@@ -237,8 +249,8 @@ class HomePanel(ctk.CTkFrame):
     def _build_header(self) -> ctk.CTkFrame:
         header = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=10)
         header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="GeoStat Py · Flujo de trabajo", font=ctk.CTkFont(size=15, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(5, 1))
-        ctk.CTkLabel(header, text="Contexto global activo (dataset, target, dominio y estado)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(24, 0))
+        ctk.CTkLabel(header, text="GeoStat Py · Flujo de trabajo", font=ctk.CTkFont(size=16, weight="bold"), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=10, pady=(6, 1))
+        ctk.CTkLabel(header, text="Contexto global activo (dataset, target, dominio y estado)", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(26, 0))
 
         chip_frame = ctk.CTkFrame(header, fg_color="transparent")
         chip_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
@@ -256,18 +268,18 @@ class HomePanel(ctk.CTkFrame):
                 chip_frame,
                 textvariable=var,
                 corner_radius=10,
-                fg_color="#2f3640",
+                fg_color=CHIP_BG,
                 text_color=TXT_MAIN,
-                padx=9,
-                pady=3,
+                padx=10,
+                pady=4,
                 font=ctk.CTkFont(size=10),
             ).grid(row=0, column=idx, padx=3, sticky="w")
 
         actions = ctk.CTkFrame(header, fg_color="transparent")
         actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8)
-        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=108, height=24, fg_color="#3a434f", hover_color="#4a5563", command=self._on_update_repo)
+        self.update_repo_button = ctk.CTkButton(actions, text="Actualizar repo", width=108, height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_update_repo)
         self.update_repo_button.pack(side="left", padx=3)
-        ctk.CTkButton(actions, text="Exportar log", width=88, height=24, fg_color=BG_SOFT, hover_color="#3a3d44", command=self._on_export_log).pack(side="left", padx=3)
+        ctk.CTkButton(actions, text="Exportar log", width=88, height=24, fg_color=BG_SOFT, hover_color=BTN_NEUTRAL_HOVER, command=self._on_export_log).pack(side="left", padx=3)
         return header
 
     def _build_step_progress(self) -> ctk.CTkFrame:
@@ -282,9 +294,9 @@ class HomePanel(ctk.CTkFrame):
                 height=24,
                 corner_radius=7,
                 fg_color=C_TAB_IDLE,
-                hover_color="#3a3f47",
+                hover_color=BTN_NEUTRAL_HOVER,
                 border_width=1,
-                border_color="#454b55",
+                border_color=BORDER_SOFT,
                 command=lambda s=step: self._on_change_step(s),
             )
             btn.pack(side="left", padx=3, pady=3)
@@ -298,7 +310,7 @@ class HomePanel(ctk.CTkFrame):
         head = ctk.CTkFrame(frame, fg_color="transparent")
         head.pack(fill="x", padx=8, pady=(6, 3))
         ctk.CTkLabel(head, text="Panel de control", text_color=TXT_MAIN, font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
-        ctk.CTkButton(head, text="Colapsar" if not self.controls_collapsed else "Expandir", width=78, height=22, fg_color="#363a42", hover_color="#454b55", command=self._toggle_controls).pack(side="right")
+        ctk.CTkButton(head, text="Colapsar" if not self.controls_collapsed else "Expandir", width=78, height=22, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._toggle_controls).pack(side="right")
 
         self.controls_container = ctk.CTkScrollableFrame(frame, fg_color="transparent")
         self.controls_container.pack(fill="both", expand=True, padx=8, pady=(0, 6))
@@ -335,13 +347,13 @@ class HomePanel(ctk.CTkFrame):
         section = ctk.CTkFrame(parent, fg_color="transparent")
         section.pack(fill="x", pady=(0, 6))
         ctk.CTkLabel(section, text=title, text_color=TXT_MAIN, font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=6, pady=(4, 3))
-        ctk.CTkFrame(section, height=1, fg_color="#3c4048").pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkFrame(section, height=1, fg_color=DIVIDER_SOFT).pack(fill="x", padx=6, pady=(0, 4))
         return section
 
     def _build_data_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Datos y columnas")
         ctk.CTkLabel(section, text="1) Cargar dataset", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color="#3a434f", hover_color="#4a5563", command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkButton(section, text="Cargar CSV", height=26, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_load_csv).pack(fill="x", padx=6, pady=(0, 5))
         ctk.CTkLabel(section, textvariable=self.dataset_label, text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 6))
 
         grid = ctk.CTkFrame(section, fg_color="transparent")
@@ -376,7 +388,7 @@ class HomePanel(ctk.CTkFrame):
         row += 2
         ctk.CTkLabel(grid, text="6) Confirmar", text_color=TXT_MUTED, font=ctk.CTkFont(size=10, weight="bold")).grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         row += 1
-        ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_config).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        ctk.CTkButton(grid, text="Confirmar datos", height=28, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_config).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         return section
 
     def _build_eda_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -394,7 +406,7 @@ class HomePanel(ctk.CTkFrame):
             command=self._on_toggle_eda_capping,
         )
         self.eda_capping_switch.pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_refresh_eda).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkButton(section, text="Actualizar vista", height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_refresh_eda).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -405,7 +417,7 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkSwitch(section, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkSwitch(section, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=24, placeholder_text="Cutoffs manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar cutoffs manuales", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_apply_cutoffs).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkButton(section, text="Aplicar cutoffs manuales", height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_apply_cutoffs).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_spatial_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -423,7 +435,7 @@ class HomePanel(ctk.CTkFrame):
             self.domain_filter_var.set("Todos")
         ctk.CTkLabel(section, text="Filtro global de dominio", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkOptionMenu(section, variable=self.domain_filter_var, values=domain_filters, state="normal", height=24).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar filtro dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_apply_domain_filter).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar filtro dominio", height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_apply_domain_filter).pack(fill="x", padx=6, pady=(0, 4))
         return section
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -463,12 +475,12 @@ class HomePanel(ctk.CTkFrame):
             ).pack(anchor="w", padx=4, pady=1)
         ctk.CTkLabel(section, text="Nombre dominio", text_color=TXT_MUTED, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkEntry(section, textvariable=self.domain_name_var, height=24, placeholder_text="D1").pack(fill="x", padx=6, pady=(0, 4))
-        self.domain_assign_button = ctk.CTkButton(section, text="Asignar dominio", height=24, fg_color="#363a42", hover_color="#454b55", command=self._on_assign_domain)
+        self.domain_assign_button = ctk.CTkButton(section, text="Asignar dominio", height=24, fg_color=BTN_NEUTRAL, hover_color=BTN_NEUTRAL_HOVER, command=self._on_assign_domain)
         self.domain_assign_button.pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(section, text="Dominios definidos:", text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=6, pady=(2, 2))
         summary = self._build_domain_definition_summary()
         ctk.CTkLabel(section, text=summary, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 4))
-        self.domain_apply_button = ctk.CTkButton(section, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color="#245883", command=self._on_apply_domains)
+        self.domain_apply_button = ctk.CTkButton(section, text="Aplicar dominios", height=26, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_domains)
         self.domain_apply_button.pack(fill="x", padx=6, pady=(2, 4))
         ctk.CTkLabel(section, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, justify="left", wraplength=220).pack(anchor="w", padx=6, pady=(0, 2))
         self._update_domain_action_states()
@@ -499,7 +511,7 @@ class HomePanel(ctk.CTkFrame):
         primary_keys = {"mean", "p90", "cutoff actual", "% truncado", "valid_count"}
         for idx, key in enumerate(keys):
             cards.grid_columnconfigure(idx, weight=1)
-            card_color = "#1D4ED8" if key in primary_keys else CARD_BG
+            card_color = KPI_PRIMARY if key in primary_keys else CARD_BG
             card = ctk.CTkFrame(cards, fg_color=card_color, corner_radius=6)
             card.grid(row=0, column=idx, padx=2, pady=0, sticky="nsew")
             ctk.CTkLabel(card, text=labels_by_key[key], font=ctk.CTkFont(size=8, weight="bold"), text_color=TXT_MUTED).pack(anchor="w", padx=5, pady=(2, 0))
@@ -519,7 +531,7 @@ class HomePanel(ctk.CTkFrame):
         }
         focus = focus_by_step.get(step_name, set())
         for key, card in self.kpi_cards.items():
-            card.configure(fg_color="#2563EB" if key in focus else CARD_BG)
+            card.configure(fg_color=KPI_PRIMARY_FOCUS if key in focus else CARD_BG)
 
     def _build_cutoff_decision_controls(self, parent: ctk.CTkFrame) -> None:
         parent.grid_columnconfigure((0, 1), weight=1)
@@ -534,15 +546,15 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkOptionMenu(parent, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], height=26, command=lambda _v: self._schedule_cutoff_preview()).grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 3))
         ctk.CTkEntry(parent, textvariable=self.dynamic_output_var, height=26, placeholder_text="salida capped").grid(row=2, column=1, sticky="ew", padx=8, pady=(0, 3))
 
-        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color="#4e7fad", progress_color="#4e7fad").grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
+        ctk.CTkSlider(parent, from_=0, to=100, variable=self.dynamic_slider_var, command=self._on_slider_change, button_color=SEM_BLUE_SOFT, progress_color=SEM_BLUE_SOFT).grid(row=3, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 3))
         ctk.CTkLabel(parent, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MAIN).grid(row=4, column=0, sticky="w", padx=8)
         ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=4, column=1, sticky="e", padx=8)
 
-        ctk.CTkFrame(parent, height=1, fg_color="#3c3c3c").grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
+        ctk.CTkFrame(parent, height=1, fg_color=DIVIDER_SOFT).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
         ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ctk.CTkFont(size=10, weight="bold"), wraplength=350, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
 
         ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=7, column=0, sticky="w", padx=8, pady=(5, 6))
-        ctk.CTkButton(parent, text="Confirmar capping", height=28, fg_color="#2b5f8e", hover_color="#245883", command=self._on_apply_dynamic_cutoff).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
+        ctk.CTkButton(parent, text="Confirmar capping", height=28, fg_color=C_ACTIVE, hover_color=BTN_PRIMARY_HOVER, command=self._on_apply_dynamic_cutoff).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
 
     def _show_stage_view(self, stage: str) -> None:
         DashboardGrid.clear(self.view_body)
@@ -655,7 +667,7 @@ class HomePanel(ctk.CTkFrame):
 
         box = ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.52, showfliers=True)
         for patch in box["boxes"]:
-            patch.set_facecolor("#1E3A8A")
+            patch.set_facecolor(KPI_PRIMARY)
             patch.set_alpha(0.68)
             patch.set_edgecolor(SEM_BLUE_SOFT)
         for median in box["medians"]:
@@ -959,12 +971,28 @@ class HomePanel(ctk.CTkFrame):
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
             button_text = _build_workflow_stage_label(step, active_step, readiness)
-            if idx < active_idx:
-                self.workflow_buttons[step].configure(text=button_text, fg_color=C_TAB_DONE, hover_color="#455468", border_color="#5a687a")
-            elif idx == active_idx:
-                self.workflow_buttons[step].configure(text=button_text, fg_color=C_ACTIVE, hover_color="#255b87", border_color="#4d7fae")
+            stage_key = STEP_TO_READINESS_KEY.get(step, "")
+            stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
+            is_ready = bool(stage_state.get("ready"))
+            has_warning = bool(stage_state.get("warnings"))
+            if idx == active_idx:
+                fg_color = WF_WARNING if has_warning else WF_ACTIVE
+                border_color = SEM_ORANGE if has_warning else SEM_BLUE_SOFT
+                hover_color = BTN_PRIMARY_HOVER
+            elif idx < active_idx:
+                fg_color = WF_WARNING if has_warning else WF_READY
+                border_color = SEM_ORANGE if has_warning else BORDER_SOFT
+                hover_color = BTN_NEUTRAL_HOVER
             else:
-                self.workflow_buttons[step].configure(text=button_text, fg_color=C_TAB_IDLE, hover_color="#3a3f47", border_color="#454b55")
+                fg_color = WF_BLOCKED if not is_ready else WF_IDLE
+                border_color = SEM_RED if not is_ready else BORDER_SOFT
+                hover_color = BTN_NEUTRAL_HOVER
+            self.workflow_buttons[step].configure(
+                text=button_text,
+                fg_color=fg_color,
+                hover_color=hover_color,
+                border_color=border_color,
+            )
         self.workflow_hint_var.set(_build_active_step_hint(active_step, readiness))
 
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
