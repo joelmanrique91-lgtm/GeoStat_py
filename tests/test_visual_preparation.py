@@ -162,6 +162,31 @@ class VisualPreparationTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(len(result.spatial_data.target), 3)
 
+    def test_prepare_visual_3d_data_success_and_contract(self) -> None:
+        self._load_numeric_dataset()
+        result = self.service.prepare_visual_3d_data()
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.spatial_3d_data)
+        payload = result.spatial_3d_data
+        self.assertEqual(len(payload.x), 3)
+        self.assertEqual(len(payload.y), 3)
+        self.assertEqual(len(payload.z), 3)
+        self.assertEqual(len(payload.color_values), 3)
+        self.assertEqual(payload.point_count_original, 3)
+        self.assertEqual(payload.point_count_rendered, 3)
+        self.assertFalse(payload.downsampling_applied)
+        self.assertEqual(payload.color_mode, "numeric")
+
+    def test_prepare_visual_3d_data_supports_categorical_color(self) -> None:
+        self._load_numeric_dataset()
+        result = self.service.prepare_visual_3d_data(color_by="dom")
+        self.assertTrue(result.success)
+        self.assertIsNotNone(result.spatial_3d_data)
+        payload = result.spatial_3d_data
+        self.assertEqual(payload.color_mode, "categorical")
+        self.assertIsNotNone(payload.color_tick_positions)
+        self.assertIsNotNone(payload.color_tick_labels)
+
     def test_univariate_coerces_numeric_strings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             p = Path(tmp_dir) / "data.csv"

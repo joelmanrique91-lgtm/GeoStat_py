@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from app.ui.panels.home_panel import _build_active_step_hint, _build_context_chip_texts, _build_visual_context_line, _build_workflow_stage_label
+from app.ui.panels.spatial_3d_view import is_3d_backend_available
 
 
 class HomePanelSemanticsTests(unittest.TestCase):
@@ -71,6 +73,27 @@ class HomePanelSemanticsTests(unittest.TestCase):
         self.assertIn("Target global: target_capped", line)
         self.assertIn("Override local: dom", line)
         self.assertIn("Dominio/filtro: domain_estimation · A", line)
+
+    def test_3d_backend_availability_helper_success(self) -> None:
+        available, reason = is_3d_backend_available()
+        self.assertTrue(available)
+        self.assertEqual(reason, "ok")
+
+    def test_3d_backend_availability_helper_failure(self) -> None:
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name.startswith("mpl_toolkits.mplot3d"):
+                raise ImportError("blocked for test")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            available, reason = is_3d_backend_available()
+
+        self.assertFalse(available)
+        self.assertIn("Backend 3D no disponible", reason)
 
 
 if __name__ == "__main__":
