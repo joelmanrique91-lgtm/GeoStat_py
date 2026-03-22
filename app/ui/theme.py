@@ -68,6 +68,7 @@ DOMAIN_PALETTE = [
 ]
 
 FONT_TITLE = {"size": 24, "weight": "bold"}
+FONT_TITLE_COMPACT = {"size": 19, "weight": "bold"}
 FONT_SUBTITLE = {"size": 15, "weight": "bold"}
 FONT_BODY = {"size": 13, "weight": "normal"}
 FONT_SMALL = {"size": 12, "weight": "normal"}
