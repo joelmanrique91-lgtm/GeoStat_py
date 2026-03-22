@@ -874,87 +874,86 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(3, weight=1)
+        wrapper.grid_rowconfigure(2, weight=1)
 
         state = self.service.get_cutoff_state()
         snapshot = self.service.get_analysis_context_snapshot()
         active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
 
-        header = ctk.CTkFrame(wrapper, fg_color=SURFACE_ELEVATED, corner_radius=10)
-        header.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 8))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="Diagnóstico EDA para decisión geoestadística", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
-        ctk.CTkLabel(
-            header,
-            text=f"{_build_visual_context_line(snapshot, local_override=active_variable)} · {capping_status}",
-            text_color=TXT_MUTED,
-            font=ui_font(FONT_SMALL),
-        ).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 2))
-        ctk.CTkLabel(
-            header,
-            text="Lectura rápida: no implica independencia espacial; sesgo + CV altos sugieren transformación (log/normal score) antes del variograma.",
-            text_color=TXT_MUTED,
-            font=ui_font(FONT_MICRO),
-            wraplength=1120,
-            justify="left",
-        ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
-
         try:
             data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
         except Exception as exc:
-            ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=1, column=0, sticky="w", padx=8, pady=8)
+            ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             return
 
         stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
-        cv_text = stats_table.get("cv", "-")
-        skew_text = stats_table.get("skewness", "-")
-        trunc_text = stats_table.get("% truncated", "-")
+        cv_text = str(stats_table.get("cv", "-"))
+        skew_text = str(stats_table.get("skewness", "-"))
+        trunc_text = str(stats_table.get("% truncated", "-"))
         cutoff_text = f"{state['dynamic_cutoff_value']:.5g}" if state["dynamic_enabled"] else ("Manual" if state["enabled"] else "No aplicado")
 
-        decision_strip = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=10)
-        decision_strip.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 8))
-        decision_strip.grid_columnconfigure((0, 1, 2, 3), weight=1)
-        metrics = [
-            ("CV (protagonista)", str(cv_text), True),
-            ("% truncado", str(trunc_text), False),
-            ("Cutoff operativo", str(cutoff_text), False),
-            ("Skewness", str(skew_text), False),
-        ]
-        for idx, (label, value, primary) in enumerate(metrics):
-            card = ctk.CTkFrame(decision_strip, fg_color=KPI_PRIMARY if primary else BG_CARD, corner_radius=8)
-            card.grid(row=0, column=idx, sticky="nsew", padx=5, pady=6)
-            ctk.CTkLabel(card, text=label, text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=8, pady=(5, 1))
-            ctk.CTkLabel(card, text=value, text_color=TXT_MAIN, font=ui_font(FONT_KPI if primary else FONT_BODY)).pack(anchor="w", padx=8, pady=(0, 6))
-
-        interpretation = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=10)
-        interpretation.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 8))
         try:
             cv_ratio = float(stats_table.get("cv", "nan"))
             skewness = float(stats_table.get("skewness", "nan"))
-            diagnostic = "Distribución aproximadamente simétrica y con variabilidad controlada."
+            diagnostic = "Diagnóstico: distribución estable."
             if cv_ratio >= 0.50 or abs(skewness) >= 0.75:
-                diagnostic = "Distribución moderadamente sesgada/variable: evaluar transformación antes del modelamiento variográfico."
+                diagnostic = "Diagnóstico: sesgo/variabilidad moderados; evaluar transformación."
             if cv_ratio >= 0.75 or abs(skewness) >= 1.0:
-                diagnostic = f"Distribución problemática (CV={cv_ratio*100:.1f}%, skew={skewness:.2f}): recomendada transformación (log o normal score)."
+                diagnostic = f"Diagnóstico: distribución problemática (CV={cv_ratio*100:.1f}%, skew={skewness:.2f})."
         except Exception:
-            diagnostic = "Diagnóstico no disponible por falta de estadísticas válidas."
-        ctk.CTkLabel(interpretation, text="Interpretación geoestadística", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=10, pady=(7, 1))
-        ctk.CTkLabel(interpretation, text=diagnostic, text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=1120, justify="left").pack(anchor="w", padx=10, pady=(0, 8))
+            diagnostic = "Diagnóstico: no disponible."
 
-        plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=10)
-        plot_card.grid(row=3, column=0, sticky="nsew", padx=4, pady=(0, 2))
-        ctk.CTkLabel(plot_card, text="Área analítica principal", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=10, pady=(8, 1))
+        header = ctk.CTkFrame(wrapper, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 4))
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(header, text="EDA · Diagnóstico de distribución para decisión", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=6, pady=(1, 0))
         ctk.CTkLabel(
-            plot_card,
-            text="Orden de lectura: 1) Distribución  2) Rango/outliers  3) Normalidad/cola  4) Comparación por dominio",
+            header,
+            text=f"{_build_visual_context_line(snapshot, local_override=active_variable)} · {capping_status} · {diagnostic}",
             text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
-        ).pack(anchor="w", padx=10, pady=(0, 4))
+            wraplength=1160,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(
+            header,
+            text="Guardrail: no implica independencia espacial.",
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_MICRO),
+        ).grid(row=2, column=0, sticky="w", padx=6, pady=(0, 1))
+
+        decision_strip = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
+        decision_strip.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        decision_strip.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        metrics = [
+            ("CV", cv_text, True),
+            ("% truncado", trunc_text, False),
+            ("Cutoff", str(cutoff_text), False),
+            ("Skew", skew_text, False),
+        ]
+        for idx, (label, value, primary) in enumerate(metrics):
+            card = ctk.CTkFrame(decision_strip, fg_color=KPI_PRIMARY if primary else BG_CARD, corner_radius=6)
+            card.grid(row=0, column=idx, sticky="nsew", padx=4, pady=4)
+            ctk.CTkLabel(card, text=label, text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=7, pady=(3, 0))
+            ctk.CTkLabel(card, text=value, text_color=TXT_MAIN, font=ui_font(FONT_BODY if primary else FONT_SMALL)).pack(anchor="w", padx=7, pady=(0, 3))
+
+        plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
+        plot_card.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0, 0))
+        plot_card.grid_rowconfigure(0, weight=1)
+        plot_card.grid_columnconfigure(0, weight=1)
 
         grid_host = ctk.CTkFrame(plot_card, fg_color="transparent")
-        grid_host.pack(fill="both", expand=True, padx=4, pady=(0, 6))
-        grid = DashboardGrid(grid_host, 2, 2, figsize=self._responsive_figsize(14.2, 8.4), width_ratios=[1.0, 1.0], height_ratios=[1.0, 1.0])
+        grid_host.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+
+        grid = DashboardGrid(
+            grid_host,
+            2,
+            2,
+            figsize=self._responsive_figsize(15.2, 9.6),
+            width_ratios=[1.0, 1.0],
+            height_ratios=[1.0, 1.0],
+        )
         ax_hist = grid.axis(0, 0)
         ax_box = grid.axis(0, 1)
         ax_prob = grid.axis(1, 0)
@@ -982,23 +981,22 @@ class HomePanel(ctk.CTkFrame):
             cutoff_val = float(state["dynamic_cutoff_value"])
 
         if original_values != values:
-            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="none", alpha=0.22, label="Base")
+            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="none", alpha=0.20, label="Base")
         ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="none", alpha=0.76, label="Activa")
-        add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.96)
-        add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.89)
-        add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.82)
+        add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.95)
+        add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.88)
+        add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
         if cutoff_val is not None:
-            add_reference_line(ax_hist, cutoff_val, label=f"Cutoff {cutoff_val:.3g}", color=SEM_RED, y_pos=0.75)
-        ax_hist.set_title(f"1) Distribución base vs activa · {active_variable}", color=PLOT_TXT, pad=10)
-        ax_hist.text(0.01, 1.015, "Media / P50 / P90 / cutoff para decisión", transform=ax_hist.transAxes, color=TXT_MUTED, fontsize=CHART_FONT_SIZE_LEGEND)
+            add_reference_line(ax_hist, cutoff_val, label=f"Cutoff {cutoff_val:.3g}", color=SEM_RED, y_pos=0.74)
+        ax_hist.set_title(f"1) Distribución · {active_variable}", color=PLOT_TXT, pad=8)
         ax_hist.set_xlabel("Ley Cu (%)")
         ax_hist.set_ylabel("Frecuencia (n)")
-        ax_hist.legend(loc="upper right", bbox_to_anchor=(0.99, 0.99), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
+        ax_hist.legend(loc="upper right", bbox_to_anchor=(0.995, 0.995), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
 
         box = ax_box.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
         for patch in box["boxes"]:
             patch.set_facecolor(KPI_PRIMARY)
-            patch.set_alpha(0.62)
+            patch.set_alpha(0.60)
             patch.set_edgecolor(SEM_BLUE_SOFT)
         for whisker in box["whiskers"]:
             whisker.set_color(BORDER_SOFT)
@@ -1010,17 +1008,17 @@ class HomePanel(ctk.CTkFrame):
             median.set_color(SEM_GREEN)
             median.set_linewidth(1.8)
         for flier in box["fliers"]:
-            flier.set_alpha(0.26)
+            flier.set_alpha(0.24)
             flier.set_markerfacecolor(SEM_GRAY)
             flier.set_markeredgecolor(SEM_GRAY)
         jitter_y = [1 + ((idx % 9) - 4) * 0.012 for idx in range(n_values)]
-        ax_box.scatter(values, jitter_y, s=7, color=SEM_BLUE_SOFT, alpha=0.22, edgecolors="none")
+        ax_box.scatter(values, jitter_y, s=7, color=SEM_BLUE_SOFT, alpha=0.20, edgecolors="none")
         ax_box.axvline(p50, color=SEM_GREEN, linestyle="-", linewidth=1.1, alpha=0.9)
         ax_box.axvline(p90, color=SEM_ORANGE, linestyle="--", linewidth=1.1, alpha=0.9)
         if cutoff_val is not None:
             ax_box.axvline(cutoff_val, color=SEM_RED, linestyle=":", linewidth=1.2, alpha=0.9)
         ax_box.set_yticks([])
-        ax_box.set_title(f"2) Rango y outliers · {active_variable}", color=PLOT_TXT, pad=10)
+        ax_box.set_title(f"2) Rango/outliers · {active_variable}", color=PLOT_TXT, pad=8)
         ax_box.set_xlabel("Ley Cu (%)")
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
@@ -1039,9 +1037,8 @@ class HomePanel(ctk.CTkFrame):
             ax_prob.scatter(core_x, core_y, s=13, color=SEM_BLUE, alpha=0.74, label="Cuerpo")
             if tail_x:
                 ax_prob.scatter(tail_x, tail_y, s=18, color=SEM_ORANGE, alpha=0.86, label="Cola")
-                ax_prob.annotate("Cola alta", xy=(tail_x[-1], tail_y[-1]), xytext=(8, 8), textcoords="offset points", color=SEM_ORANGE, fontsize=CHART_FONT_SIZE_LEGEND)
             ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
-            ax_prob.set_title(f"3) Normalidad y cola · QQ ({active_variable})", color=PLOT_TXT, pad=10)
+            ax_prob.set_title(f"3) Normalidad/cola · QQ", color=PLOT_TXT, pad=8)
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
             ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
@@ -1060,16 +1057,16 @@ class HomePanel(ctk.CTkFrame):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(BORDER_SOFT)
-            ax_domain.tick_params(axis="x", rotation=18)
+            ax_domain.tick_params(axis="x", rotation=14)
             ax_domain.set_ylabel("Ley Cu (%)")
-            ax_domain.set_title(f"4) Comparación por dominio · {active_variable}", color=PLOT_TXT, pad=10)
+            ax_domain.set_title(f"4) Comparación por dominio", color=PLOT_TXT, pad=8)
         else:
             ax_domain.axis("off")
             ax_domain.text(0.5, 0.5, domain_data.get("message", "No disponible"), ha="center", va="center", color=PLOT_TXT, wrap=True)
 
-        grid.figure.tight_layout(pad=1.35, w_pad=1.2, h_pad=1.35)
+        grid.figure.tight_layout(pad=1.1, w_pad=1.0, h_pad=1.05)
         grid.canvas.draw()
-        grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=2, pady=2)
+        grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=1, pady=1)
 
     def _render_cutoff_view(self) -> None:
         wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
