@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 
 @dataclass
 class WorkflowStateModel:
-    """Tracks current workflow step and context labels."""
+    """Tracks persisted workflow internals.
+
+    This model stores mutable internal state. Public consumers should prefer
+    service-level contracts such as `get_analysis_context_snapshot()` and
+    `get_workflow_readiness()` for read access.
+    """
 
     current_step: str = "Datos"
     active_domain: str = "No definido"
