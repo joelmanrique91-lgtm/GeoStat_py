@@ -59,12 +59,12 @@ class Spatial3DView(ctk.CTkFrame):
         self.canvas_host.grid_rowconfigure(1, weight=1)
 
         self.toolbar_host = ctk.CTkFrame(self.canvas_host, fg_color="transparent")
-        self.toolbar_host.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
+        self.toolbar_host.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 0))
         self.plot_host = ctk.CTkFrame(self.canvas_host, fg_color="transparent")
-        self.plot_host.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self.plot_host.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
 
         self.footer = ctk.CTkFrame(self, fg_color="transparent")
-        self.footer.grid(row=3, column=0, sticky="ew", padx=4, pady=(0, 0))
+        self.footer.grid(row=3, column=0, sticky="ew", padx=6, pady=(0, 2))
         self.footer.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(self.footer, text="Reset view", command=self.reset_view, height=28).grid(row=0, column=0, sticky="e")
 
@@ -154,7 +154,7 @@ class Spatial3DView(ctk.CTkFrame):
 
     def _ensure_plot(self) -> None:
         if self._figure is None:
-            self._figure = Figure(figsize=(8.8, 6.2), dpi=100)
+            self._figure = Figure(figsize=(12.8, 8.2), dpi=100)
         if self._canvas is None:
             self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
             self._canvas.get_tk_widget().pack(fill="both", expand=True)
