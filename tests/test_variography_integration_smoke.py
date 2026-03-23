@@ -38,6 +38,18 @@ class VariographyIntegrationSmokeTests(unittest.TestCase):
         self.assertIn("message", response)
         self.assertIn("warnings", response)
         self.assertIn("blockers", response)
+        self.assertIsInstance(response.get("result"), dict)
+
+    def test_controller_mark_dirty_updates_session(self) -> None:
+        service = GeostatService(adapter=GeostatSpyAdapter())
+        csv_path = Path("tests/fixtures/variography/variography_small_numeric.csv")
+        self.assertTrue(service.load_csv(str(csv_path)).success)
+        self.assertTrue(service.set_variable_config("x", "y", "z", "target").success)
+        controller = VariographyController(service=service)
+        controller.mark_dirty("target")
+        session = service.get_variography_session()
+        self.assertTrue(session.compute_dirty)
+        self.assertEqual(session.selected_target, "target")
 
 
 if __name__ == "__main__":

@@ -130,20 +130,29 @@ class VariographyStageView:
             self.status_var.set("Parámetros modificados. Recalcula para validar estado.")
 
     def _on_compute(self) -> None:
-        ui_state = {
-            "target_col": self.target_var.get().strip(),
-            "lag_distance": self._parse_float(self.lag_distance_var.get()),
-            "n_lags": self._parse_int(self.n_lags_var.get()),
-            "lag_tolerance": self._parse_float(self.lag_tolerance_var.get()),
-            "max_distance": self._parse_float(self.max_distance_var.get()),
-            "azimuth": self._parse_float(self.azimuth_var.get()),
-            "dip": self._parse_float(self.dip_var.get()),
-            "ang_tol_h": self._parse_float(self.ang_tol_h_var.get()),
-            "ang_tol_v": self._parse_float(self.ang_tol_v_var.get()),
-            "band_width": self._parse_float(self.band_width_var.get()),
-            "band_height": self._parse_float(self.band_height_var.get()),
-            "estimator": self.estimator_var.get().strip() or "classical",
-        }
+        self.status_var.set("Calculando variograma experimental...")
+        try:
+            ui_state = {
+                "target_col": self.target_var.get().strip(),
+                "lag_distance": self._parse_float(self.lag_distance_var.get()),
+                "n_lags": self._parse_int(self.n_lags_var.get()),
+                "lag_tolerance": self._parse_float(self.lag_tolerance_var.get()),
+                "max_distance": self._parse_float(self.max_distance_var.get()),
+                "azimuth": self._parse_float(self.azimuth_var.get()),
+                "dip": self._parse_float(self.dip_var.get()),
+                "ang_tol_h": self._parse_float(self.ang_tol_h_var.get()),
+                "ang_tol_v": self._parse_float(self.ang_tol_v_var.get()),
+                "band_width": self._parse_float(self.band_width_var.get()),
+                "band_height": self._parse_float(self.band_height_var.get()),
+                "estimator": self.estimator_var.get().strip() or "classical",
+            }
+        except Exception as exc:
+            self.warning_var.set("")
+            self.blocker_var.set(f"[INVALID_INPUT_FORMAT] Revisa el formato numérico de parámetros: {exc}")
+            self.status_var.set("No se pudo iniciar cálculo por parámetros inválidos.")
+            self._render_empty_plot(message="Sin cálculo: formato inválido en parámetros.")
+            return
+
         response = self.controller.compute(ui_state)
         self.status_var.set(str(response.get("message", "")))
         warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
@@ -152,7 +161,7 @@ class VariographyStageView:
         self.blocker_var.set("\n".join(blockers) if blockers else "")
         result = response.get("result")
         if not isinstance(result, dict):
-            self._render_empty_plot(message="Sin resultado numérico para renderizar.")
+            self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
             return
         self._render_result_plot(result, bool(response.get("ok", False)))
 
@@ -186,7 +195,8 @@ class VariographyStageView:
 
     @staticmethod
     def _parse_float(value: str) -> float:
-        return float(str(value).strip())
+        normalized = str(value).strip().replace(",", ".")
+        return float(normalized)
 
     @staticmethod
     def _parse_int(value: str) -> int:

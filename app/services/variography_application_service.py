@@ -90,6 +90,13 @@ class VariographyApplicationService:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
         if request.direction.ang_tol_h > 90 or request.direction.ang_tol_v > 90:
             warnings.append(VariographyIssue("WIDE_DIRECTION_TOL", "Tolerancias angulares altas pueden mezclar direcciones.", "warning"))
+        warnings.append(
+            VariographyIssue(
+                "DIRECTION_PENDING_BACKEND",
+                "Parámetros direccionales aún no filtran pares en este slice; cálculo actual es omnidireccional.",
+                "warning",
+            )
+        )
         if request.estimator != "classical":
             warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
 
@@ -116,6 +123,18 @@ class VariographyApplicationService:
                 result=None,
                 warnings=warnings,
                 blockers=[VariographyIssue("MISSING_DATASET", "No hay dataset cargado.", "blocker")],
+            )
+            self.session.mark_computed(response)
+            return response
+        if dataframe.empty:
+            response = VariographyComputeResponse(
+                schema_version=SCHEMA_VERSION,
+                ok=False,
+                message="No hay filas activas para calcular variografía (revisa filtros/contexto).",
+                request=request,
+                result=None,
+                warnings=warnings,
+                blockers=[VariographyIssue("NO_ACTIVE_ROWS", "El conjunto activo quedó vacío por filtros/contexto.", "blocker")],
             )
             self.session.mark_computed(response)
             return response

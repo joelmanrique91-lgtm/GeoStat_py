@@ -68,6 +68,55 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertIn("INVALID_N_LAGS", codes)
         self.assertIn("INVALID_MAX_DISTANCE", codes)
 
+    def test_compute_returns_low_npairs_warning(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 5.0,
+                "n_lags": 20,
+                "lag_tolerance": 2.5,
+                "max_distance": 100.0,
+                "azimuth": 0.0,
+                "dip": 0.0,
+                "ang_tol_h": 90.0,
+                "ang_tol_v": 90.0,
+                "band_width": 0.0,
+                "band_height": 0.0,
+                "estimator": "classical",
+            }
+        )
+        warning_codes = {item.code for item in response.warnings}
+        self.assertIn("LOW_NPAIRS_LAG", warning_codes)
+        self.assertIn("DIRECTION_PENDING_BACKEND", warning_codes)
+
+    def test_compute_blocks_when_dataframe_is_empty(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        self.service.current_dataset.dataframe = self.service.current_dataset.dataframe.iloc[0:0]
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "azimuth": 0.0,
+                "dip": 0.0,
+                "ang_tol_h": 90.0,
+                "ang_tol_v": 90.0,
+                "band_width": 0.0,
+                "band_height": 0.0,
+                "estimator": "classical",
+            }
+        )
+        self.assertFalse(response.ok)
+        blocker_codes = {item.code for item in response.blockers}
+        self.assertIn("NO_ACTIVE_ROWS", blocker_codes)
+
 
 if __name__ == "__main__":
     unittest.main()

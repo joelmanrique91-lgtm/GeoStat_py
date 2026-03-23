@@ -49,13 +49,16 @@ After compute, verify all:
 2. Confirm last parameter state and compute status remain usable for continuing workflow.
 3. Recompute with updated parameters and verify deterministic update.
 
-## 8) Known limitations in this first slice
+## 8) Known current limitation
 1. Directional parameters are validated and logged but current compute path is omnidirectional.
-2. Advanced variogram model fitting/editor and publish workflow are not part of this vertical slice.
-3. Compute uses capped points (`max_points=2500`) to keep responsiveness.
 
-## 9) Troubleshooting
+## 9) Additional known limitations in this first slice
+1. Advanced variogram model fitting/editor and publish workflow are not part of this vertical slice.
+2. Compute uses capped points (`max_points=2500`) to keep responsiveness.
+
+## 10) Troubleshooting
 - **"Configura X/Y/Z/target antes de variografía"**: return to Datos and confirm columns.
 - **"Target no numérico" / compute failure**: select numeric target and retry.
 - **No pairs found / insufficient coverage**: increase `max_distance`, reduce `n_lags`, or use denser dataset.
 - **UI shows blockers after parameter changes**: this is expected; recalculate after editing.
+- **Se mantiene en “Sin cálculo aún”**: presiona **Compute experimental variogram** y revisa el panel de blockers (p.ej. formato inválido o parámetros no positivos).
