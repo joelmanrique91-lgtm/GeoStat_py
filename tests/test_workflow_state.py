@@ -47,6 +47,7 @@ class WorkflowStateTests(unittest.TestCase):
         self.assertIn("eda", readiness["stages"])
         self.assertIn("spatial", readiness["stages"])
         self.assertIn("domains", readiness["stages"])
+        self.assertIn("variography", readiness["stages"])
         self.assertFalse(readiness["stages"]["eda"]["ready"])
         self.assertIn("missing_dataset", readiness["stages"]["eda"]["blocking_reasons"])
 
@@ -78,7 +79,7 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertFalse(readiness["stages"]["spatial"]["ready"])
             self.assertIn("missing_spatial_columns", readiness["stages"]["spatial"]["blocking_reasons"])
 
-    def test_workflow_readiness_domains_blocked_when_domain_or_target_missing(self) -> None:
+    def test_workflow_readiness_domains_stage_is_unblocked_when_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = GeostatService(adapter=GeostatSpyAdapter())
             csv_path = Path(tmp_dir) / "workflow_domains_missing.csv"
@@ -87,22 +88,8 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertTrue(service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
 
             readiness = service.get_workflow_readiness()
-            self.assertFalse(readiness["stages"]["domains"]["ready"])
-            self.assertIn("missing_domain_column", readiness["stages"]["domains"]["blocking_reasons"])
-
-            self.assertTrue(
-                service.apply_dynamic_cutoff(
-                    enabled=True,
-                    target_column="target",
-                    mode="percentile",
-                    slider_percent=50.0,
-                    output_column="target_capped_missing",
-                    keep_category_column=False,
-                ).success
-            )
-            service.current_dataset.dataframe.drop(columns=["target_capped_missing"], inplace=True)
-            readiness_after = service.get_workflow_readiness()
-            self.assertIn("missing_resolved_target_column", readiness_after["stages"]["domains"]["blocking_reasons"])
+            self.assertTrue(readiness["stages"]["domains"]["ready"])
+            self.assertEqual(readiness["stages"]["domains"]["blocking_reasons"], [])
 
     def test_workflow_readiness_all_core_stages_ready_when_configured(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -111,15 +98,14 @@ class WorkflowStateTests(unittest.TestCase):
             csv_path.write_text("x,y,z,target,dom\n0,0,0,1,a\n1,1,1,2,a\n2,2,2,4,b\n", encoding="utf-8")
             self.assertTrue(service.load_csv(str(csv_path)).success)
             self.assertTrue(service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
-            self.assertTrue(
-                service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success
-            )
+            self.assertFalse(service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}}).success)
             readiness = service.get_workflow_readiness()
             self.assertTrue(readiness["stages"]["data"]["ready"])
             self.assertTrue(readiness["stages"]["eda"]["ready"])
             self.assertTrue(readiness["stages"]["cutoffs"]["ready"])
             self.assertTrue(readiness["stages"]["spatial"]["ready"])
             self.assertTrue(readiness["stages"]["domains"]["ready"])
+            self.assertTrue(readiness["stages"]["variography"]["ready"])
 
     def test_workflow_readiness_exposes_current_step(self) -> None:
         service = GeostatService(adapter=GeostatSpyAdapter())

@@ -58,7 +58,7 @@ class GeometryManagerRegressionTests(unittest.TestCase):
         self.assertIn("no implica independencia espacial", source)
         self.assertIn("no inferencia de continuidad", source)
         self.assertIn("Screening exploratorio: no reemplaza decisión minera final", source)
-        self.assertIn("Comparación exploratoria de dominios", source)
+        self.assertIn("Módulo temporalmente deshabilitado", source)
 
 
 if __name__ == "__main__":
