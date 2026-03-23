@@ -18,8 +18,10 @@ class MainWindow:
 
         self.root = ctk.CTk()
         self.root.title("GeoStat Py - Geostatistics Desktop")
-        self.root.geometry("1360x860")
-        self.root.minsize(1180, 760)
+        self.root.geometry("2560x1600")
+        self.root.minsize(2560, 1600)
+        self.root.maxsize(2560, 1600)
+        self.root.resizable(False, False)
 
         self._build_layout()
 

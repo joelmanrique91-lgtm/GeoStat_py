@@ -88,11 +88,19 @@ KPI_PRIMARY = KPI_PRIMARY_BG
 KPI_PRIMARY_FOCUS = WF_ACTIVE
 PLOT_TXT = TEXT_MAIN
 
-PAD_MAIN_X = 10
-PAD_CARD_X = 14
-PAD_STACK_Y = 4
-PAD_SECTION_Y = 8
-SIDEBAR_WIDTH = 308
+PAD_MAIN_X = 16
+PAD_CARD_X = 18
+PAD_STACK_Y = 6
+PAD_SECTION_Y = 10
+SIDEBAR_WIDTH = 420
+STEP_BUTTON_WIDTH = 146
+STEP_BUTTON_HEIGHT = 28
+ACTION_TOGGLE_WIDTH = 88
+LOG_TOGGLE_WIDTH = 156
+LOG_BOX_HEIGHT = 58
+WRAP_STAGE_BLOCKED = 1580
+WRAP_STAGE_SUMMARY = 1680
+WRAP_DYNAMIC_IMPACT = 520
 SPATIAL_GUARDRAIL_NOTE = "Uso: lectura exploratoria, no inferencia de continuidad."
 
 
@@ -328,8 +336,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 1))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
@@ -342,7 +350,7 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel.grid_rowconfigure(3, weight=1)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 1))
+        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ui_font(FONT_SUBTITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
@@ -352,26 +360,26 @@ class HomePanel(ctk.CTkFrame):
         self._build_stage_action_bar(self.content_panel)
 
         self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 4))
+        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 6))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
-        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
         self.aux_controls_host.grid_remove()
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
             text="Ocultar/Mostrar log",
-            width=130,
+            width=LOG_TOGGLE_WIDTH,
             **self._button_style("aux"),
             command=self._toggle_log,
         ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
-        self.log_box = ctk.CTkTextbox(self.log_panel, height=44, fg_color=BG_SOFT, text_color=TXT_MAIN, font=ui_font(FONT_SMALL))
+        self.log_box = ctk.CTkTextbox(self.log_panel, height=LOG_BOX_HEIGHT, fg_color=BG_SOFT, text_color=TXT_MAIN, font=ui_font(FONT_SMALL))
         self.log_box.grid(row=0, column=1, sticky="ew", padx=6, pady=3)
         self.log_box.insert("1.0", "Actividad reciente\n")
         self.log_box.configure(state="disabled")
@@ -418,8 +426,8 @@ class HomePanel(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 frame,
                 text=labels[step],
-                width=112,
-                height=24,
+                width=STEP_BUTTON_WIDTH,
+                height=STEP_BUTTON_HEIGHT,
                 corner_radius=BTN_CORNER_RADIUS,
                 fg_color=C_TAB_IDLE,
                 hover_color=BTN_NEUTRAL_HOVER,
@@ -641,7 +649,7 @@ class HomePanel(ctk.CTkFrame):
         head.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(head, text="Controles etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).grid(row=0, column=0, sticky="w")
         toggle_text = "Expandir" if self.stage_actions_collapsed else "Ocultar"
-        self.action_bar_toggle_button = ctk.CTkButton(head, text=toggle_text, width=74, command=self._toggle_stage_actions, **self._button_style("aux"))
+        self.action_bar_toggle_button = ctk.CTkButton(head, text=toggle_text, width=ACTION_TOGGLE_WIDTH, command=self._toggle_stage_actions, **self._button_style("aux"))
         self.action_bar_toggle_button.grid(row=0, column=1, sticky="e")
         self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
         self.action_bar_body.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 2))
@@ -845,7 +853,7 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=4, column=1, sticky="e", padx=8)
 
         ctk.CTkFrame(parent, height=1, fg_color=DIVIDER_SOFT).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
-        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ui_font(FONT_SMALL), wraplength=350, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
+        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ui_font(FONT_SMALL), wraplength=WRAP_DYNAMIC_IMPACT, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
 
         ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=7, column=0, sticky="w", padx=8, pady=(5, 6))
         ctk.CTkButton(parent, text="Confirmar capping", command=self._on_apply_dynamic_cutoff, **self._button_style("primary")).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
@@ -961,13 +969,13 @@ class HomePanel(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(card, text=f"Etapa {stage} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
         hint = _build_active_step_hint(stage, self.service.get_workflow_readiness())
-        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=1020, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
+        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_BLOCKED, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
         ctk.CTkLabel(
             card,
             text="Usa la barra de acciones superior para completar la etapa requerida y desbloquear esta vista.",
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
-            wraplength=1020,
+            wraplength=WRAP_STAGE_BLOCKED,
             justify="left",
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
@@ -1033,7 +1041,7 @@ class HomePanel(ctk.CTkFrame):
             text=f"{snapshot.get('active_domain_column') or 'Sin dominio'} · {snapshot.get('active_domain_filter') or 'Todos'} · {capping_status}",
             text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
-            wraplength=1120,
+            wraplength=WRAP_STAGE_SUMMARY,
             justify="left",
         ).grid(row=1, column=0, sticky="w", padx=2, pady=(0, 0))
 
@@ -1049,7 +1057,7 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            figsize=self._responsive_figsize(17.4, 9.6),
+            figsize=self._responsive_figsize(19.2, 10.8),
             width_ratios=[2.55, 1.0],
             height_ratios=[1.0, 1.0],
         )
@@ -1115,7 +1123,7 @@ class HomePanel(ctk.CTkFrame):
 
         container = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
         container.pack(fill="both", expand=True)
-        container.grid_columnconfigure(0, weight=0, minsize=360)
+        container.grid_columnconfigure(0, weight=0, minsize=440)
         container.grid_columnconfigure(1, weight=1)
         container.grid_rowconfigure((0, 1), weight=1)
 
@@ -1169,7 +1177,7 @@ class HomePanel(ctk.CTkFrame):
             wrapper,
             2,
             2,
-            figsize=self._responsive_figsize(14.2, 8.0),
+            figsize=self._responsive_figsize(16.8, 9.6),
             width_ratios=[1.45, 1.0],
             height_ratios=[1.2, 1.0],
         )
@@ -1376,13 +1384,13 @@ class HomePanel(ctk.CTkFrame):
             self.column_menus[key] = menu
 
     def _responsive_figsize(self, base_width: float, base_height: float) -> tuple[float, float]:
-        width = max(int(self.view_body.winfo_width()), int(self.content_panel.winfo_width()), 640)
-        height = max(int(self.view_body.winfo_height()), 420)
+        width = max(int(self.view_body.winfo_width()), int(self.content_panel.winfo_width()), 1280)
+        height = max(int(self.view_body.winfo_height()), 760)
         if width <= 20 or height <= 20:
             return (base_width, base_height)
         dpi = 100.0
-        usable_w = max((width - 24) / dpi, 4.0)
-        usable_h = max((height - 20) / dpi, 3.0)
+        usable_w = max((width - 42) / dpi, 8.0)
+        usable_h = max((height - 34) / dpi, 5.2)
         base_ratio = base_width / max(base_height, 1e-6)
         if usable_w / usable_h > base_ratio:
             usable_w = usable_h * base_ratio
@@ -1584,7 +1592,7 @@ class HomePanel(ctk.CTkFrame):
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
 
-        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(9.4, 7.4))
+        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(11.8, 8.6))
         ax_hist = chart.axis(0, 0)
         ax_cdf = chart.axis(1, 0)
         ax_before_after = chart.axis(1, 1)
