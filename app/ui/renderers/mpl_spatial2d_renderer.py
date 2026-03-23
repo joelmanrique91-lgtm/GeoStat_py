@@ -27,6 +27,9 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         sc_xy = ax_xy.scatter(spatial.x, spatial.y, c=spatial.target, cmap=cmap, **point_kwargs)
         ax_xz.scatter(spatial.x, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
         ax_yz.scatter(spatial.y, spatial.z, c=spatial.target, cmap=cmap, **point_kwargs)
+        self._set_equal_xy(ax_xy, spatial.x, spatial.y)
+        self._set_equal_xy(ax_xz, spatial.x, spatial.z)
+        self._set_equal_xy(ax_yz, spatial.y, spatial.z)
 
         ax_xy.set_title("Planta XY (principal)", color=context.info_text_color)
         ax_xz.set_title("Sección XZ", color=context.info_text_color)
@@ -75,3 +78,17 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
             bbox={"facecolor": context.info_bg_color, "edgecolor": context.info_border_color, "boxstyle": "round,pad=0.55"},
         )
         grid.render()
+
+    @staticmethod
+    def _set_equal_xy(axis, xs: list[float], ys: list[float]) -> None:
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        x_span = max(x_max - x_min, 1e-6)
+        y_span = max(y_max - y_min, 1e-6)
+        span = max(x_span, y_span)
+        x_mid = (x_max + x_min) * 0.5
+        y_mid = (y_max + y_min) * 0.5
+        half = span * 0.5
+        axis.set_xlim(x_mid - half, x_mid + half)
+        axis.set_ylim(y_mid - half, y_mid + half)
+        axis.set_aspect("equal", adjustable="box")

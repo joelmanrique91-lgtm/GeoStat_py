@@ -40,6 +40,7 @@ class Spatial3DView(ctk.CTkFrame):
         self._canvas: FigureCanvasTkAgg | None = None
         self._toolbar: NavigationToolbar2Tk | None = None
         self._axis = None
+        self._colorbar = None
         self._last_elev = 26.0
         self._last_azim = -54.0
 
@@ -80,15 +81,17 @@ class Spatial3DView(ctk.CTkFrame):
             plt.close(self._figure)
             self._figure = None
             self._axis = None
+            self._colorbar = None
 
     def show_unavailable(self, reason: str) -> None:
         self.destroy_plot()
         self.meta_label.configure(text=reason)
 
     def update_cloud(self, data: Spatial3DDataBundle, color_display_label: str) -> None:
-        self.destroy_plot()
-
-        self._figure = Figure(figsize=(11.2, 7.0), dpi=100)
+        self._ensure_plot()
+        if self._figure is None:
+            return
+        self._figure.clear()
         apply_figure_theme(self._figure)
         self._axis = self._figure.add_subplot(111, projection="3d")
         self._axis.set_facecolor("#F7FAFE")
@@ -125,22 +128,17 @@ class Spatial3DView(ctk.CTkFrame):
         self._axis.set_box_aspect((x_span / max_span, y_span / max_span, z_span / max_span))
         self._axis.view_init(elev=self._last_elev, azim=self._last_azim)
 
-        colorbar = self._figure.colorbar(scatter, ax=self._axis, shrink=0.74, pad=0.05, fraction=0.04, label=color_display_label)
+        self._colorbar = self._figure.colorbar(scatter, ax=self._axis, shrink=0.82, pad=0.03, fraction=0.045, label=color_display_label)
         if data.color_tick_positions and data.color_tick_labels:
-            colorbar.set_ticks(data.color_tick_positions)
-            colorbar.set_ticklabels(data.color_tick_labels)
-        colorbar.ax.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=TEXT_MUTED)
-        colorbar.ax.yaxis.label.set_color(TEXT_MUTED)
-        colorbar.outline.set_edgecolor(BORDER_SOFT)
+            self._colorbar.set_ticks(data.color_tick_positions)
+            self._colorbar.set_ticklabels(data.color_tick_labels)
+        self._colorbar.ax.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=TEXT_MUTED)
+        self._colorbar.ax.yaxis.label.set_color(TEXT_MUTED)
+        self._colorbar.outline.set_edgecolor(BORDER_SOFT)
 
-        self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
-        self._canvas.get_tk_widget().pack(fill="both", expand=True)
-
-        self._toolbar = NavigationToolbar2Tk(self._canvas, self.toolbar_host, pack_toolbar=False)
-        self._toolbar.update()
-        self._toolbar.pack(fill="x")
-        self._figure.tight_layout(pad=0.8)
-        self._canvas.draw()
+        self._figure.subplots_adjust(left=0.03, right=0.90, bottom=0.04, top=0.98)
+        if self._canvas is not None:
+            self._canvas.draw_idle()
 
         rendered_info = f"{data.point_count_rendered:,}/{data.point_count_original:,} puntos"
         if data.downsampling_applied:
@@ -153,3 +151,14 @@ class Spatial3DView(ctk.CTkFrame):
             return
         self._axis.view_init(elev=26.0, azim=-54.0)
         self._canvas.draw_idle()
+
+    def _ensure_plot(self) -> None:
+        if self._figure is None:
+            self._figure = Figure(figsize=(8.8, 6.2), dpi=100)
+        if self._canvas is None:
+            self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
+            self._canvas.get_tk_widget().pack(fill="both", expand=True)
+        if self._toolbar is None:
+            self._toolbar = NavigationToolbar2Tk(self._canvas, self.toolbar_host, pack_toolbar=False)
+            self._toolbar.update()
+            self._toolbar.pack(fill="x")

@@ -25,6 +25,10 @@ class DashboardGrid:
         height_ratios: list[float] | None = None,
     ) -> None:
         self.parent = parent
+        self._last_parent_size: tuple[int, int] | None = None
+        self._resize_after_id: str | None = None
+        self._configure_bound = False
+        self._configured_figsize = figsize
         self.figure = Figure(figsize=figsize, dpi=100)
         apply_figure_theme(self.figure)
         if width_ratios or height_ratios:
@@ -46,11 +50,54 @@ class DashboardGrid:
         self.axes[row][col].axis("off")
 
     def render(self) -> None:
+        widget = self.canvas.get_tk_widget()
+        if not widget.winfo_manager():
+            widget.pack(fill="both", expand=True, padx=0, pady=0)
+        if not self._configure_bound:
+            widget.bind("<Configure>", self._on_parent_configure, add="+")
+            self._configure_bound = True
+        self._resize_to_parent(force=True)
+
+    def _on_parent_configure(self, _event) -> None:
+        if self._resize_after_id is not None:
+            try:
+                self.parent.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+        self._resize_after_id = self.parent.after(80, self._resize_to_parent)
+
+    def _resize_to_parent(self, *, force: bool = False) -> None:
+        self._resize_after_id = None
+        width = int(self.parent.winfo_width())
+        height = int(self.parent.winfo_height())
+        if width <= 16 or height <= 16:
+            self.parent.after(50, self._resize_to_parent)
+            return
+        size = (width, height)
+        if not force and self._last_parent_size == size:
+            return
+        self._last_parent_size = size
+        dpi = float(self.figure.get_dpi())
+        new_w = max(width / dpi, 2.0)
+        new_h = max(height / dpi, 1.6)
+        if self._configured_figsize:
+            ratio = self._configured_figsize[0] / max(self._configured_figsize[1], 1e-6)
+            max_h_by_ratio = new_w / max(ratio, 1e-6)
+            if max_h_by_ratio < new_h:
+                new_h = max_h_by_ratio
+            else:
+                new_w = new_h * ratio
+        self.figure.set_size_inches(new_w, new_h, forward=True)
         self.figure.tight_layout(pad=0.9, w_pad=0.8, h_pad=0.8)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
+        self.canvas.draw_idle()
 
     def destroy(self) -> None:
+        if self._resize_after_id is not None:
+            try:
+                self.parent.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+            self._resize_after_id = None
         widget = self.canvas.get_tk_widget()
         if widget.winfo_exists():
             widget.destroy()
