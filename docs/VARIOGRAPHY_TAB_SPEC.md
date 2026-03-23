@@ -261,7 +261,13 @@ Sea `theta_h` y `theta_v` la desviación respecto a `v_dir` en proyecciones H y 
 - distancia ortogonal horizontal al eje direccional `<= band_width`
 - distancia ortogonal vertical al eje direccional `<= band_height`
 
-4. **Cutoffs globales**
+4. **Tolerancia vertical explícita (opcional)**
+
+- si `vertical_tolerance` está definido, además debe cumplirse:
+  `|Δz_ij - h_k * sin(dip)| <= vertical_tolerance`.
+- si `vertical_tolerance=null`, la restricción vertical queda completamente representada por `ang_tol_v` y `band_height`.
+
+5. **Cutoffs globales**
 
 \[
 min\_distance \le d_{ij} \le max\_distance
@@ -294,7 +300,11 @@ por defecto `min_distance = 0` y `max_distance = 0.5 * max_sample_separation`.
 - `n_lags`: número de bins.
 - `max_distance`: cutoff superior de pares.
 
-### 8.2 Data Quality Rules
+## Data Quality Rules
+
+Aplican por lag `k` y son obligatorias para visualización, ajuste y publicación.
+
+### 8.2 Umbrales de calidad por lag
 
 Por lag `k`:
 
@@ -312,7 +322,14 @@ Parámetros configurables globales:
 - Lags excluidos no entran al objetivo de optimización.
 - Lags en warning sí entran, con peso reducido opcional `weight_factor_low_pairs`.
 
-### 8.4 Pesos por lag
+### 8.4 Comportamiento visual obligatorio
+
+- `excluded_from_fit=true`: punto experimental con opacidad ≤ 35%, marcador hueco, etiqueta `EXCLUDED`.
+- `low_pairs`: punto en color `state.warning`, tooltip con `npairs` y texto `low_pairs`.
+- `ok`: estilo normal de serie experimental.
+- barra `npairs` de lags excluidos debe renderizarse en patrón rayado para evitar interpretación errónea.
+
+### 8.5 Pesos por lag
 
 Por defecto:
 
@@ -367,9 +384,12 @@ Propiedades:
 - no admite desfase temporal;
 - no calculable en heterotopía total.
 
+## Model Parameter Conventions
+
 ### 10.3 Modelos soportados y convención de rango
 
-**Convención oficial:** en UI y JSON se reporta `practical_range_95` para modelos sin meseta instantánea.
+**Convención oficial y única:** UI, backend y JSON deben exponer `range_display = practical_range_95` para **todos** los modelos con rango finito.  
+El parámetro interno del motor (`range_param`) puede variar por modelo, pero la capa de aplicación siempre serializa y muestra `practical_range_95`.
 
 | Modelo | Forma | Parámetro interno | Conversión a `practical_range_95` |
 |---|---|---|---|
@@ -384,12 +404,15 @@ Reglas:
 
 - `power` permitido solo en modo exploratorio (`exploratory_only=true`).
 - publicación bloqueada si existe `power` y `allow_power_publish=false`.
+- para modelos con rango finito (`spherical`, `exponential`, `gaussian`, `cubic`), `practical_range_95` es el valor normativo para validaciones, UX y exportación.
 
 ### 10.4 LMR (univariado)
 
 \[
 \gamma(h)=\sum_{s=1}^{S} c_s g_s(h), \quad c_s\ge0
 \]
+
+## LMC Constraints (Multivariable)
 
 ### 10.5 LMC Constraints (multivariable)
 
@@ -406,6 +429,7 @@ Reglas duras:
 Validación:
 
 - Si `n_variables=2`: `|c12^{(s)}| <= sqrt(c11^{(s)} c22^{(s)})`.
+- Equivalente obligatorio en backend (`n=2`): `det(C_s)=c11*c22-c12^2 >= -eps_psd`.
 - Si `n_variables>2`: `lambda_min(C_s) >= -eps_psd`.
 - Default `eps_psd = 1e-10`.
 
@@ -482,7 +506,7 @@ Reglas:
 
 ---
 
-## 13) Support and compositing
+## 13) Support and Compositing Rules
 
 - Variografía opera sobre `support_type` explícito: `raw_samples | composites`.
 - Si cambia soporte, longitud de compuesto, o campaña principal:
@@ -512,7 +536,7 @@ Campo obligatorio de sesión: `support_signature_hash`.
 
 ---
 
-## 15) Motor reactivo, invalidaciones y caching
+## 15) Performance & Caching Rules
 
 ### 15.1 Cache de pares
 
@@ -547,7 +571,7 @@ Publicación permitida solo en `clean`.
 
 ---
 
-## 17) Contratos JSON sugeridos (hardened)
+## 17) JSON Contracts (EXPANSION)
 
 ### 17.1 `VariographySession`
 
@@ -581,6 +605,7 @@ Publicación permitida solo en `clean`.
     "ang_tol_v": 22.5,
     "band_width": 40.0,
     "band_height": 40.0,
+    "vertical_tolerance": null,
     "bin_assignment_mode": "unique_nearest_bin",
     "estimator": "classical"
   },
@@ -689,7 +714,7 @@ Publicación permitida solo en `clean`.
 
 ---
 
-## 18) Hard blockers for publish
+## 18) Hard Blockers for Publish
 
 Un modelo **no puede** publicarse si existe al menos uno:
 
@@ -732,4 +757,3 @@ La implementación se considera completa cuando:
 - Revisar primero calidad de lags y anisotropía antes de auto-fit.
 - Usar residuales + npairs + PSD como tríada mínima de validación.
 - Auditar decisiones de override (trend/no estacionaridad y bloqueos).
-
