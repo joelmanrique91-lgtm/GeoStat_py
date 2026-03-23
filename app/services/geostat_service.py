@@ -12,8 +12,10 @@ import subprocess
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.models.dataset_model import DatasetModel
 from app.models.variable_config_model import VariableConfigModel
+from app.models.variography import VariographyComputeResponse, VariographySession
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
+from app.services.variography_application_service import VariographyApplicationService
 from app.services.visualization_service import (
     Spatial3DDataBundle,
     SpatialDataBundle,
@@ -213,6 +215,7 @@ class GeostatService:
         self.variable_config: VariableConfigModel | None = None
         self.workflow_state = WorkflowStateModel()
         self.autodetected_columns: dict[str, str] = {}
+        self.variography_service = VariographyApplicationService(host_service=self)
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -1281,6 +1284,12 @@ class GeostatService:
             "Estado": "Listo" if bool(workflow["stages"]["eda"]["ready"]) else "Configurar variables",
             "Dominio": self.workflow_state.active_domain,
         }
+
+    def get_variography_session(self) -> VariographySession:
+        return self.variography_service.get_session()
+
+    def compute_experimental_variography(self, params: dict[str, object]) -> VariographyComputeResponse:
+        return self.variography_service.compute(params)
 
     def update_repository(self) -> RepoUpdateResult:
         if getattr(self, "_repo_update_running", False):
