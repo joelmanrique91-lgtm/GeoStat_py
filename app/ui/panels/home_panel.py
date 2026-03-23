@@ -259,6 +259,10 @@ class HomePanel(ctk.CTkFrame):
         self._spatial_3d_renderer_warning_cache: str = ""
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
+        self._stage_hosts: dict[str, ctk.CTkFrame] = {}
+        self._rendered_stage_signatures: dict[str, tuple[object, ...]] = {}
+        self._resize_after_id: str | None = None
+        self._last_view_body_size: tuple[int, int] = (0, 0)
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
         self._build_layout()
@@ -339,6 +343,7 @@ class HomePanel(ctk.CTkFrame):
         self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 4))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
+        self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
         self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
@@ -861,23 +866,71 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=7, column=0, sticky="w", padx=8, pady=(5, 6))
         ctk.CTkButton(parent, text="Confirmar capping", command=self._on_apply_dynamic_cutoff, **self._button_style("primary")).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
 
-    def _show_stage_view(self, stage: str) -> None:
-        DashboardGrid.clear(self.view_body)
-        self.view_body.grid_columnconfigure(0, weight=1)
-        self.view_body.grid_rowconfigure(0, weight=1)
+    def _on_view_body_configure(self, _event) -> None:
+        if self._resize_after_id is not None:
+            self.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.after(120, self._handle_view_resize)
+
+    def _handle_view_resize(self) -> None:
+        self._resize_after_id = None
+        width = int(self.view_body.winfo_width())
+        height = int(self.view_body.winfo_height())
+        if width <= 20 or height <= 20:
+            return
+        current_size = (width, height)
+        if current_size == self._last_view_body_size:
+            return
+        self._last_view_body_size = current_size
+        self._show_stage_view(self.service.workflow_state.current_step, force_rebuild=True)
+
+    def _get_stage_host(self, stage: str) -> ctk.CTkFrame:
+        host = self._stage_hosts.get(stage)
+        if host is not None and host.winfo_exists():
+            return host
+        host = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+        host.grid(row=0, column=0, sticky="nsew")
+        host.grid_remove()
+        self._stage_hosts[stage] = host
+        return host
+
+    def _show_only_stage_host(self, stage: str) -> ctk.CTkFrame:
+        for name, host in self._stage_hosts.items():
+            if not host.winfo_exists():
+                continue
+            if name == stage:
+                host.grid()
+            else:
+                host.grid_remove()
+        return self._get_stage_host(stage)
+
+    def _invalidate_stage_cache(self, stage: str | None = None) -> None:
+        if stage is None:
+            self._rendered_stage_signatures.clear()
+            return
+        self._rendered_stage_signatures.pop(stage, None)
+
+    def _show_stage_view(self, stage: str, *, force_rebuild: bool = False) -> None:
+        stage_host = self._show_only_stage_host(stage)
+        stage_host.grid_columnconfigure(0, weight=1)
+        stage_host.grid_rowconfigure(0, weight=1)
         readiness = self.service.get_workflow_readiness()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
         if stage != "Datos" and not bool(stage_state.get("ready")):
             self.workspace_title_var.set(f"{stage} – etapa bloqueada")
             self.workspace_subtitle_var.set("Completa la configuración indicada para habilitar esta vista.")
-            self._render_blocked_stage_view(stage)
+            DashboardGrid.clear(stage_host)
+            self._render_blocked_stage_view(stage, stage_host)
+            self._rendered_stage_signatures[stage] = ("blocked",)
             return
 
         if stage == "Datos":
+            if not force_rebuild and self._rendered_stage_signatures.get(stage) == ("ready",):
+                return
+            DashboardGrid.clear(stage_host)
             self.workspace_title_var.set("Preparación de datos – habilitación del flujo")
             self.workspace_subtitle_var.set("Paso 1 de workflow: carga y validación estructural para habilitar todas las vistas.")
-            card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
+            card = ctk.CTkFrame(stage_host, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
             card.grid_rowconfigure(2, weight=1)
             card.grid_columnconfigure(0, weight=1)
@@ -888,32 +941,33 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(summary, textvariable=self.dataset_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=(6, 2))
             ctk.CTkLabel(summary, textvariable=self.target_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=2)
             ctk.CTkLabel(summary, textvariable=self.domain_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=(2, 6))
+            self._rendered_stage_signatures[stage] = ("ready",)
             return
 
         if stage == "EDA":
             self.workspace_title_var.set("Diagnóstico de distribución")
             self.workspace_subtitle_var.set("")
-            self._render_eda_view()
+            self._render_eda_view(stage_host, force_rebuild=force_rebuild)
             return
 
         if stage == "Cutoffs":
             self.workspace_title_var.set("Impacto de capping – control de outliers")
             self.workspace_subtitle_var.set("Cuantifica cuánto cambia la distribución antes de confirmar cutoff operativo.")
-            self._render_cutoff_view()
+            self._render_cutoff_view(stage_host, force_rebuild=force_rebuild)
             return
 
         if stage == "Espacial":
             self.workspace_title_var.set("Continuidad espacial – lectura exploratoria")
             self.workspace_subtitle_var.set("Contrasta continuidad visual en XY/XZ/YZ con el target activo.")
-            self._render_spatial_view()
+            self._render_spatial_view(stage_host, force_rebuild=force_rebuild)
             return
 
         self.workspace_title_var.set("Estabilidad por dominios – media vs variabilidad")
         self.workspace_subtitle_var.set("Prioriza dominios consistentes según CV y media para soporte de decisión.")
-        self._render_domains_view()
+        self._render_domains_view(stage_host, force_rebuild=force_rebuild)
 
-    def _render_blocked_stage_view(self, stage: str) -> None:
-        card = ctk.CTkFrame(self.view_body, fg_color=BG_SOFT, corner_radius=8)
+    def _render_blocked_stage_view(self, stage: str, parent: ctk.CTkFrame) -> None:
+        card = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(card, text=f"Etapa {stage} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
@@ -928,14 +982,26 @@ class HomePanel(ctk.CTkFrame):
             justify="left",
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
-    def _render_eda_view(self) -> None:
-        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+    def _render_eda_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        state = self.service.get_cutoff_state()
+        snapshot = self.service.get_analysis_context_snapshot()
+        signature = (
+            snapshot.get("resolved_target_column"),
+            snapshot.get("active_domain_column"),
+            snapshot.get("active_domain_filter"),
+            bool(self.eda_use_capping_var.get()),
+            bool(state.get("dynamic_enabled")),
+            float(state.get("dynamic_cutoff_value") or 0.0),
+        )
+        if not force_rebuild and self._rendered_stage_signatures.get("EDA") == signature:
+            return
+        DashboardGrid.clear(parent)
+        self._rendered_stage_signatures["EDA"] = signature
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
         wrapper.grid_rowconfigure(1, weight=1)
 
-        state = self.service.get_cutoff_state()
-        snapshot = self.service.get_analysis_context_snapshot()
         active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
 
@@ -1037,8 +1103,20 @@ class HomePanel(ctk.CTkFrame):
             font=ui_font(FONT_MICRO),
         ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 0))
 
-    def _render_cutoff_view(self) -> None:
-        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+    def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        signature = (
+            self.cutoff_target_var.get(),
+            self.target_var.get(),
+            self.dynamic_mode_var.get(),
+            float(self.dynamic_slider_var.get()),
+            bool(self.dynamic_cutoff_enabled_var.get()),
+        )
+        if not force_rebuild and self._rendered_stage_signatures.get("Cutoffs") == signature:
+            self._refresh_cutoff_preview()
+            return
+        DashboardGrid.clear(parent)
+        self._rendered_stage_signatures["Cutoffs"] = signature
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         snapshot = self.service.get_analysis_context_snapshot()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
@@ -1062,17 +1140,26 @@ class HomePanel(ctk.CTkFrame):
         self._last_cutoff_preview_signature = None
         self._refresh_cutoff_preview()
 
-    def _render_spatial_view(self) -> None:
-        if self.spatial_3d_widget is not None:
-            self.spatial_3d_widget.destroy()
-            self.spatial_3d_widget = None
-        if self.spatial_view_mode_var.get() == "3D":
-            self._render_spatial_3d_view()
+    def _render_spatial_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        signature = (
+            self.spatial_view_mode_var.get(),
+            self.spatial_color_var.get(),
+            self.domain_filter_var.get(),
+            self.service.get_analysis_context_snapshot().get("active_domain_filter"),
+        )
+        if not force_rebuild and self._rendered_stage_signatures.get("Espacial") == signature:
             return
-        self._render_spatial_2d_view()
+        DashboardGrid.clear(parent)
+        self._rendered_stage_signatures["Espacial"] = signature
+        if self.spatial_view_mode_var.get() == "3D":
+            self._render_spatial_3d_view(parent)
+            return
+        if self.spatial_3d_widget is not None and self.spatial_3d_widget.winfo_exists():
+            self.spatial_3d_widget.grid_remove()
+        self._render_spatial_2d_view(parent)
 
-    def _render_spatial_2d_view(self) -> None:
-        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+    def _render_spatial_2d_view(self, parent: ctk.CTkFrame) -> None:
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         snapshot = self.service.get_analysis_context_snapshot()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(0, 2))
@@ -1111,8 +1198,8 @@ class HomePanel(ctk.CTkFrame):
             ),
         )
 
-    def _render_spatial_3d_view(self) -> None:
-        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+    def _render_spatial_3d_view(self, parent: ctk.CTkFrame) -> None:
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
         wrapper.grid_rowconfigure(1, weight=1)
@@ -1143,7 +1230,7 @@ class HomePanel(ctk.CTkFrame):
         if not available:
             renderer.show_unavailable(self.spatial_3d_widget, f"{reason}. Volviendo automáticamente a 2D.")
             self.spatial_view_mode_var.set("2D")
-            self.after(10, self._render_spatial_view)
+            self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
             return
 
         color_by = self.spatial_color_var.get() or None
@@ -1151,7 +1238,7 @@ class HomePanel(ctk.CTkFrame):
         if not result.success or result.spatial_3d_data is None:
             renderer.show_unavailable(self.spatial_3d_widget, f"No se pudo renderizar 3D: {result.message}. Volviendo a 2D.")
             self.spatial_view_mode_var.set("2D")
-            self.after(10, self._render_spatial_view)
+            self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
             return
 
         renderer.render(
@@ -1166,14 +1253,26 @@ class HomePanel(ctk.CTkFrame):
             return self.pyvista_spatial_3d_renderer, ""
         return self.spatial_3d_renderer, reason
 
-    def _render_domains_view(self) -> None:
-        wrapper = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+    def _render_domains_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        payload = self.service.prepare_iterative_domain_data()
+        signature = (
+            payload.get("ready"),
+            payload.get("preview_count"),
+            str(payload.get("target_column")),
+            tuple(sorted((payload.get("filters") or {}).items())),
+            len(payload.get("scatter_rows", [])),
+        )
+        if not force_rebuild and self._rendered_stage_signatures.get("Dominios") == signature:
+            self._update_domain_preview_and_history(payload)
+            return
+        DashboardGrid.clear(parent)
+        self._rendered_stage_signatures["Dominios"] = signature
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
         wrapper.grid_rowconfigure(1, weight=3)
         wrapper.grid_rowconfigure(2, weight=2)
 
-        payload = self.service.prepare_iterative_domain_data()
         if not payload.get("ready"):
             ctk.CTkLabel(
                 wrapper,
@@ -1284,7 +1383,6 @@ class HomePanel(ctk.CTkFrame):
                 self.action_bar_body.grid()
         self._paint_workflow_state(step_name)
         self._focus_sidebar_sections(step_name)
-        self._render_stage_action_bar(step_name)
         self._refresh_dashboard(reason="step_render")
 
     def _paint_workflow_state(self, active_step: str) -> None:
@@ -1329,7 +1427,7 @@ class HomePanel(ctk.CTkFrame):
         current_step = self.service.workflow_state.current_step
         self._apply_kpi_focus(current_step)
         self._render_stage_action_bar(current_step)
-        self._show_stage_view(current_step)
+        self._show_stage_view(current_step, force_rebuild=force)
 
     def _sync_eda_capping_state(self) -> None:
         has_capping = self.service.has_confirmed_dynamic_capping()
@@ -1371,10 +1469,19 @@ class HomePanel(ctk.CTkFrame):
             self.column_menus[key] = menu
 
     def _responsive_figsize(self, base_width: float, base_height: float) -> tuple[float, float]:
-        self.update_idletasks()
-        content_width = max(self.content_panel.winfo_width(), self.view_body.winfo_width(), 1280)
-        scale = min(1.65, max(1.0, content_width / 1500.0))
-        return (base_width * scale, base_height * scale)
+        width = max(int(self.view_body.winfo_width()), int(self.content_panel.winfo_width()), 640)
+        height = max(int(self.view_body.winfo_height()), 420)
+        if width <= 20 or height <= 20:
+            return (base_width, base_height)
+        dpi = 100.0
+        usable_w = max((width - 24) / dpi, 4.0)
+        usable_h = max((height - 20) / dpi, 3.0)
+        base_ratio = base_width / max(base_height, 1e-6)
+        if usable_w / usable_h > base_ratio:
+            usable_w = usable_h * base_ratio
+        else:
+            usable_h = usable_w / base_ratio
+        return (usable_w, usable_h)
 
     def _get_spatial_color_options(self) -> list[str]:
         target = self.service.get_cutoff_state().get("effective_target_column", "") or self.target_var.get()
@@ -1433,6 +1540,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success and result.dataset:
+            self._invalidate_stage_cache()
             self.dataset_label.set(f"Dataset: {result.dataset.file_name}")
             self.domain_definition_local = {}
             self.domain_selected_categories = set()
@@ -1481,6 +1589,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
+            self._invalidate_stage_cache()
             self.target_label.set(f"Target: {self.target_var.get()}")
             self.domain_label.set(f"Dominio: {selected_domain or 'No definido'}")
             self.spatial_color_var.set(self.target_var.get())
@@ -1513,6 +1622,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
+            self._invalidate_stage_cache("Cutoffs")
             self._refresh_dashboard(reason="manual_cutoffs_applied")
 
     def _schedule_cutoff_preview(self) -> None:
@@ -1630,6 +1740,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
         if result.success:
+            self._invalidate_stage_cache()
             self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
             self._refresh_dashboard(reason="dynamic_cutoff_confirmed")
 
@@ -1678,6 +1789,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
+            self._invalidate_stage_cache()
             self._refresh_dashboard(reason="domain_filter_changed")
 
     def _on_domain_filters_changed(self) -> None:
@@ -1687,6 +1799,7 @@ class HomePanel(ctk.CTkFrame):
             "mine": self.domain_filter_mine_var.get(),
         }
         self.service.set_domain_ui_filters(filters)
+        self._invalidate_stage_cache("Dominios")
         self._refresh_dashboard(reason="domain_ui_filters_changed")
 
     def _update_domain_preview_and_history(self, payload: dict[str, object]) -> None:
@@ -1723,6 +1836,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
+            self._invalidate_stage_cache()
             self.domain_label.set("Dominio: domain_estimation")
             self.domain_confirm_var.set("")
             self._refresh_dashboard(reason="domain_assignment_confirmed")
@@ -1744,6 +1858,7 @@ class HomePanel(ctk.CTkFrame):
             self.domain_feedback_var.set(result.message)
             self._append_activity(result.message)
         if result.success:
+            self._invalidate_stage_cache()
             self.domain_label.set("Dominio: domain_estimation")
             self.domain_records_var.set("Selecciona una burbuja para ver índices y resumen del dominio.")
             self._refresh_dashboard(reason="domains_applied")
@@ -1751,23 +1866,27 @@ class HomePanel(ctk.CTkFrame):
     def _on_toggle_eda_capping(self) -> None:
         if self.service.workflow_state.current_step != "EDA":
             return
+        self._invalidate_stage_cache("EDA")
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_capping_switch"})
         self._refresh_dashboard(reason="eda_capping_switch")
 
     def _on_refresh_eda(self) -> None:
         if self.service.workflow_state.current_step != "EDA":
             return
+        self._invalidate_stage_cache("EDA")
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
         self._refresh_dashboard(reason="eda_manual_button", force=True)
 
     def _on_spatial_mode_changed(self, _value: str) -> None:
         if self.service.workflow_state.current_step != "Espacial":
             return
+        self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_mode_changed", force=True)
 
     def _on_spatial_color_changed(self) -> None:
         if self.service.workflow_state.current_step != "Espacial":
             return
+        self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_color_changed", force=True)
 
     def _refresh_summary_cards(self) -> None:

@@ -125,6 +125,4 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.set_xlabel("Ley Cu (%)")
             ax_secondary.margins(x=0.03)
 
-        grid.figure.tight_layout(pad=0.92, w_pad=1.0, h_pad=0.95)
-        grid.canvas.draw()
-        grid.canvas.get_tk_widget().pack(fill="both", expand=True, padx=0, pady=0)
+        grid.render()
