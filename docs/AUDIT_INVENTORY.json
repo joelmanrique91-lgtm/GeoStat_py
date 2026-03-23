@@ -1,0 +1,174 @@
+{
+  "entry_points": [
+    {
+      "path": "app/main.py",
+      "description": "Application bootstrap; creates adapter, log service, GeostatService, and MainWindow."
+    },
+    {
+      "path": "app/ui/main_window.py",
+      "description": "Desktop shell window; hosts HomePanel and mainloop."
+    }
+  ],
+  "ui_views": [
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "Datos",
+      "description": "Data loading and variable configuration stage."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "EDA",
+      "description": "Univariate diagnostics stage with histogram/QQ/boxplot rendering."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "Cutoffs",
+      "description": "Manual and dynamic capping stage with preview charts."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "Espacial",
+      "description": "2D/3D spatial visualization stage."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "Dominios",
+      "description": "Visible stage but currently disabled in service and UI content."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "id": "Variografía",
+      "description": "Visible placeholder stage; no active computation or charting yet."
+    }
+  ],
+  "ui_components": [
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "description": "Main composite UI controller/view with callbacks, local vars, and stage rendering."
+    },
+    {
+      "path": "app/ui/panels/dashboard_grid.py",
+      "description": "Reusable Matplotlib grid host with resize debounce and cleanup."
+    },
+    {
+      "path": "app/ui/panels/spatial_3d_view.py",
+      "description": "Encapsulated 3D cloud widget with toolbar and metadata labels."
+    },
+    {
+      "path": "app/ui/theme.py",
+      "description": "Shared visual tokens and Matplotlib style helpers."
+    }
+  ],
+  "plotting_components": [
+    {
+      "path": "app/ui/renderers/mpl_eda_renderer.py",
+      "description": "EDA renderer implementation using Matplotlib."
+    },
+    {
+      "path": "app/ui/renderers/mpl_spatial2d_renderer.py",
+      "description": "2D spatial renderer for XY/XZ/YZ sections."
+    },
+    {
+      "path": "app/ui/renderers/mpl_spatial3d_renderer.py",
+      "description": "Matplotlib 3D adapter."
+    },
+    {
+      "path": "app/ui/renderers/pyvista_spatial3d_renderer.py",
+      "description": "PyVista pilot adapter currently availability-gated to fallback."
+    }
+  ],
+  "state_modules": [
+    {
+      "path": "app/models/workflow_state_model.py",
+      "description": "Mutable workflow state backing current step, cutoffs, domains, dynamic capping."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "description": "Large distributed UI state through StringVar/BooleanVar/DoubleVar fields."
+    }
+  ],
+  "services": [
+    {
+      "path": "app/services/geostat_service.py",
+      "description": "Primary application service for CSV load, config, readiness, EDA/spatial prep, cutoffs, placeholders."
+    },
+    {
+      "path": "app/services/visualization_service.py",
+      "description": "Data prep/statistical helper functions and dataclasses for spatial/swath/variogram payloads."
+    },
+    {
+      "path": "app/services/activity_log_service.py",
+      "description": "Session JSONL event logging and export."
+    }
+  ],
+  "domain_modules": [
+    {
+      "path": "app/services/visualization_service.py",
+      "description": "Core computations: prepare_spatial_sections, prepare_spatial_3d_cloud, compute_swath_series, compute_experimental_variogram."
+    },
+    {
+      "path": "app/adapters/geostatspy_adapter.py",
+      "description": "GeostatsPy import availability adapter for future domain expansion."
+    }
+  ],
+  "persistence_modules": [
+    {
+      "path": "app/services/activity_log_service.py",
+      "description": "Only concrete persistence path found (JSONL logs)."
+    },
+    {
+      "path": "scripts/update_repo.py",
+      "description": "Out-of-GUI git update script for runtime safety."
+    }
+  ],
+  "test_modules": [
+    {
+      "path": "tests/test_service_features.py",
+      "description": "Service contract and regression tests (cutoff/readiness/snapshot/domain placeholders)."
+    },
+    {
+      "path": "tests/test_visual_preparation.py",
+      "description": "EDA/spatial payload tests including swath and 3D prep."
+    },
+    {
+      "path": "tests/test_workflow_state.py",
+      "description": "Workflow stage/readiness consistency tests."
+    },
+    {
+      "path": "tests/test_ui_geometry_manager.py",
+      "description": "AST-based regression tests for UI structure and guardrail strings."
+    },
+    {
+      "path": "tests/test_ui_render_hardening.py",
+      "description": "AST-based tests for render hardening and resize debounce signals."
+    }
+  ],
+  "variography_related_modules": [
+    {
+      "path": "app/services/visualization_service.py",
+      "description": "compute_experimental_variogram and VariogramResult exist but are not wired to UI/service workflow."
+    },
+    {
+      "path": "app/ui/panels/home_panel.py",
+      "description": "Variography tab/button/action placeholders present; no operational view logic."
+    },
+    {
+      "path": "app/services/geostat_service.py",
+      "description": "variography stage exists in readiness and step map, plus variogram_placeholder method only."
+    }
+  ],
+  "risks": [
+    "HomePanel monolith causes high coupling and difficult feature isolation.",
+    "Domain/variography readiness status may mislead because modules are disabled/placeholders.",
+    "No formal DTO/schema versioning for analysis payloads.",
+    "State duplication across UI vars, workflow_state, and mutable dataframe.",
+    "Variogram algorithm is O(n^2) and can become a performance bottleneck."
+  ],
+  "recommended_next_steps": [
+    "Define formal VariographyRequest/VariographyResponse contracts and lock them before ticket slicing.",
+    "Create dedicated variography application service and keep HomePanel integration thin.",
+    "Extract stage-specific UI classes (EDA/Cutoffs/Espacial/Variography) to reduce HomePanel complexity.",
+    "Add end-to-end interaction tests for key user flows beyond AST structure checks.",
+    "Introduce persisted session/model configuration format for reproducible analytical workflows."
+  ]
+}

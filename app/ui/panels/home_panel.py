@@ -9,7 +9,9 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
+from app.ui.controllers.variography_controller import VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
+from app.ui.panels.stages import VariographyStageView
 from app.ui.renderers import (
     EDARenderContext,
     MatplotlibEDARenderer,
@@ -264,6 +266,8 @@ class HomePanel(ctk.CTkFrame):
         self.spatial_2d_renderer = MatplotlibSpatial2DRenderer(service=self.service)
         self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
+        self.variography_controller = VariographyController(service=self.service)
+        self.variography_stage_view = VariographyStageView(controller=self.variography_controller)
         self._spatial_3d_renderer_warning_cache: str = ""
         self._cutoff_preview_after_id: str | None = None
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
@@ -592,7 +596,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_variography_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "06 Variografía")
-        ctk.CTkLabel(section, text="Módulo de variografía en construcción", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
+        ctk.CTkLabel(section, text="Configura parámetros y calcula variograma experimental en la vista principal.", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
         return section
 
     def _focus_sidebar_sections(self, step_name: str) -> None:
@@ -808,7 +812,7 @@ class HomePanel(ctk.CTkFrame):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
         row.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(row, text="Módulo de variografía en construcción", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        ctk.CTkLabel(row, text="Variografía experimental activa: usa la vista para configurar y calcular.", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
 
     def _apply_kpi_focus(self, step_name: str) -> None:
         focus_by_step = {
@@ -1249,14 +1253,21 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkLabel(wrapper, text="Módulo temporalmente deshabilitado", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
 
     def _render_variography_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
-        signature = ("placeholder",)
+        session = self.service.get_variography_session()
+        signature = (
+            "live",
+            str(session.selected_target),
+            float(session.lag_distance),
+            int(session.n_lags),
+            float(session.max_distance),
+            bool(session.compute_dirty),
+            bool(session.last_response is not None),
+        )
         if not force_rebuild and self._rendered_stage_signatures.get("Variografía") == signature:
             return
         DashboardGrid.clear(parent)
         self._rendered_stage_signatures["Variografía"] = signature
-        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
-        wrapper.grid(row=0, column=0, sticky="nsew")
-        ctk.CTkLabel(wrapper, text="Módulo de variografía en construcción", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        self.variography_stage_view.mount(parent)
 
     def _on_change_step(self, step_name: str) -> None:
         current_step = self.service.workflow_state.current_step

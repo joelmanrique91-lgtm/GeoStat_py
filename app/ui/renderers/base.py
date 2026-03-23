@@ -57,3 +57,18 @@ class Spatial3DRenderer(ABC):
     @abstractmethod
     def show_unavailable(self, widget: Any, reason: str) -> None:
         """Display backend unavailability message in widget."""
+
+
+@dataclass
+class VariographyRenderContext:
+    target_label: str
+    info_text: str
+    chart_text_color: str
+    chart_label_size: int
+    chart_legend_size: int
+
+
+class VariographyRenderer(ABC):
+    @abstractmethod
+    def render(self, grid: Any, response: dict[str, object], context: VariographyRenderContext) -> None:
+        """Render experimental variography outputs (gamma + npairs + diagnostics)."""
