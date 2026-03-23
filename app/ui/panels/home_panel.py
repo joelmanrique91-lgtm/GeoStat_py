@@ -103,6 +103,7 @@ STEP_TO_READINESS_KEY = {
     "Cutoffs": "cutoffs",
     "Espacial": "spatial",
     "Dominios": "domains",
+    "Variografía": "variography",
 }
 
 BLOCKING_REASON_HINTS = {
@@ -117,7 +118,14 @@ BLOCKING_REASON_HINTS = {
 
 
 def _build_workflow_stage_label(step_name: str, active_step: str, readiness: dict[str, object]) -> str:
-    labels = {"Datos": "01 Datos", "EDA": "02 EDA", "Cutoffs": "03 Cutoffs", "Espacial": "04 Espacial", "Dominios": "05 Dominios"}
+    labels = {
+        "Datos": "01 Datos",
+        "EDA": "02 EDA",
+        "Cutoffs": "03 Cutoffs",
+        "Espacial": "04 Espacial",
+        "Dominios": "05 Dominios",
+        "Variografía": "06 Variografía",
+    }
     stage_key = STEP_TO_READINESS_KEY.get(step_name, "")
     stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
     is_ready = bool(stage_state.get("ready"))
@@ -394,8 +402,15 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=8)
-        labels = {"Datos": "01 Datos", "EDA": "02 EDA", "Cutoffs": "03 Cutoffs", "Espacial": "04 Espacial", "Dominios": "05 Dominios"}
-        for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]:
+        labels = {
+            "Datos": "01 Datos",
+            "EDA": "02 EDA",
+            "Cutoffs": "03 Cutoffs",
+            "Espacial": "04 Espacial",
+            "Dominios": "05 Dominios",
+            "Variografía": "06 Variografía",
+        }
+        for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]:
             btn = ctk.CTkButton(
                 frame,
                 text=labels[step],
@@ -452,6 +467,7 @@ class HomePanel(ctk.CTkFrame):
             "Cutoffs": self._build_cutoff_controls(self.controls_container),
             "Espacial": self._build_spatial_controls(self.controls_container),
             "Dominios": self._build_domains_controls(self.controls_container),
+            "Variografía": self._build_variography_controls(self.controls_container),
         }
         active = self.service.workflow_state.current_step
         if active in sections:
@@ -570,51 +586,13 @@ class HomePanel(ctk.CTkFrame):
         return section
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
-        section = self._section_shell(parent, "Constructor explícito de dominios")
-        ctk.CTkLabel(section, text="Opciones locales de definición de dominios", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        candidates = self.service.get_domain_candidate_columns() or [""]
-        if not self.domain_base_var.get() and candidates and candidates[0]:
-            self.domain_base_var.set(candidates[0])
-        if self.domain_base_var.get() not in candidates:
-            self.domain_base_var.set(candidates[0] if candidates else "")
-            self.domain_selected_categories = set()
-        ctk.CTkLabel(section, text="Variable base", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkOptionMenu(
-            section,
-            variable=self.domain_base_var,
-            values=candidates,
-            state="normal" if candidates[0] else "disabled",
-            command=lambda _value: self._on_domain_base_changed(),
-            **self._option_menu_style(),
-        ).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkLabel(section, text="Selecciona categorías", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        categories_box = ctk.CTkScrollableFrame(section, height=140, fg_color=BG_SOFT)
-        categories_box.pack(fill="x", padx=6, pady=(0, 4))
-        self.domain_category_checkbox_vars = {}
-        category_counts = self._get_domain_category_counts()
-        if not category_counts:
-            ctk.CTkLabel(categories_box, text="No hay categorías disponibles.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=4, pady=4)
-        for category, count in category_counts:
-            var = ctk.BooleanVar(value=category in self.domain_selected_categories)
-            self.domain_category_checkbox_vars[category] = var
-            ctk.CTkCheckBox(
-                categories_box,
-                text=f"{category} (n={count})",
-                variable=var,
-                command=lambda cat=category: self._on_toggle_domain_category(cat),
-                text_color=TXT_MAIN,
-            ).pack(anchor="w", padx=4, pady=1)
-        ctk.CTkLabel(section, text="Nombre dominio", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
-        ctk.CTkEntry(section, textvariable=self.domain_name_var, height=INPUT_HEIGHT, placeholder_text="D1").pack(fill="x", padx=6, pady=(0, 4))
-        self.domain_assign_button = ctk.CTkButton(section, text="Asignar dominio", command=self._on_assign_domain, **self._button_style("secondary"))
-        self.domain_assign_button.pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkLabel(section, text="Dominios definidos:", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(2, 2))
-        summary = self._build_domain_definition_summary()
-        ctk.CTkLabel(section, text=summary, text_color=TXT_MUTED, justify="left", wraplength=SIDEBAR_WIDTH - 72).pack(anchor="w", padx=6, pady=(0, 4))
-        self.domain_apply_button = ctk.CTkButton(section, text="Aplicar dominios", command=self._on_apply_domains, **self._button_style("primary"))
-        self.domain_apply_button.pack(fill="x", padx=6, pady=(2, 4))
-        ctk.CTkLabel(section, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, justify="left", wraplength=SIDEBAR_WIDTH - 72).pack(anchor="w", padx=6, pady=(0, 2))
-        self._update_domain_action_states()
+        section = self._section_shell(parent, "05 Dominios")
+        ctk.CTkLabel(section, text="Módulo temporalmente deshabilitado", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
+        return section
+
+    def _build_variography_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
+        section = self._section_shell(parent, "06 Variografía")
+        ctk.CTkLabel(section, text="Módulo de variografía en construcción", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
         return section
 
     def _focus_sidebar_sections(self, step_name: str) -> None:
@@ -701,8 +679,10 @@ class HomePanel(ctk.CTkFrame):
             self._build_cutoff_actions_inline(self.action_bar_body)
         elif stage == "Espacial":
             self._build_spatial_actions_inline(self.action_bar_body)
-        else:
+        elif stage == "Dominios":
             self._build_domains_actions_inline(self.action_bar_body)
+        else:
+            self._build_variography_actions_inline(self.action_bar_body)
 
     def _build_blocked_message_card(self, parent: ctk.CTkFrame, stage: str) -> None:
         readiness = self.service.get_workflow_readiness()
@@ -821,15 +801,14 @@ class HomePanel(ctk.CTkFrame):
     def _build_domains_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
-        row.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
-        candidates = self.service.get_domain_candidate_columns() or [""]
-        if self.domain_base_var.get() not in candidates:
-            self.domain_base_var.set(candidates[0] if candidates else "")
-        ctk.CTkOptionMenu(row, variable=self.domain_base_var, values=candidates, state="normal" if candidates and candidates[0] else "disabled", command=lambda _v: self._on_domain_base_changed(), **self._option_menu_style()).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
-        ctk.CTkEntry(row, textvariable=self.domain_name_var, height=INPUT_HEIGHT, placeholder_text="Nombre dominio").grid(row=0, column=1, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Asignar dominio", command=self._on_assign_domain, **self._button_style("secondary")).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Aplicar dominios", command=self._on_apply_domains, **self._button_style("primary")).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
-        ctk.CTkLabel(row, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=4, sticky="e", padx=4, pady=2)
+        row.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(row, text="Módulo temporalmente deshabilitado", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
+
+    def _build_variography_actions_inline(self, parent: ctk.CTkFrame) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.grid(row=1, column=0, sticky="ew")
+        row.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(row, text="Módulo de variografía en construcción", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
 
     def _apply_kpi_focus(self, step_name: str) -> None:
         focus_by_step = {
@@ -838,6 +817,7 @@ class HomePanel(ctk.CTkFrame):
             "Cutoffs": {"cv"},
             "Espacial": {"cv"},
             "Dominios": {"cv"},
+            "Variografía": {"cv"},
         }
         focus = focus_by_step.get(step_name, set())
         for key, card in self.kpi_cards.items():
@@ -962,9 +942,14 @@ class HomePanel(ctk.CTkFrame):
             self._render_spatial_view(stage_host, force_rebuild=force_rebuild)
             return
 
-        self.workspace_title_var.set("Estabilidad por dominios – media vs variabilidad")
-        self.workspace_subtitle_var.set("Prioriza dominios consistentes según CV y media para soporte de decisión.")
-        self._render_domains_view(stage_host, force_rebuild=force_rebuild)
+        if stage == "Dominios":
+            self.workspace_title_var.set("05 Dominios")
+            self.workspace_subtitle_var.set("")
+            self._render_domains_view(stage_host, force_rebuild=force_rebuild)
+            return
+        self.workspace_title_var.set("06 Variografía")
+        self.workspace_subtitle_var.set("")
+        self._render_variography_view(stage_host, force_rebuild=force_rebuild)
 
     def _render_blocked_stage_view(self, stage: str, parent: ctk.CTkFrame) -> None:
         card = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
@@ -1254,113 +1239,24 @@ class HomePanel(ctk.CTkFrame):
         return self.spatial_3d_renderer, reason
 
     def _render_domains_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
-        payload = self.service.prepare_iterative_domain_data()
-        signature = (
-            payload.get("ready"),
-            payload.get("preview_count"),
-            str(payload.get("target_column")),
-            tuple(sorted((payload.get("filters") or {}).items())),
-            len(payload.get("scatter_rows", [])),
-        )
+        signature = ("disabled",)
         if not force_rebuild and self._rendered_stage_signatures.get("Dominios") == signature:
-            self._update_domain_preview_and_history(payload)
             return
         DashboardGrid.clear(parent)
         self._rendered_stage_signatures["Dominios"] = signature
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
-        wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(1, weight=3)
-        wrapper.grid_rowconfigure(2, weight=2)
+        ctk.CTkLabel(wrapper, text="Módulo temporalmente deshabilitado", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
 
-        if not payload.get("ready"):
-            ctk.CTkLabel(
-                wrapper,
-                text=str(payload.get("message", "No hay dataset/configuración suficiente para Dominios.")),
-                text_color=TXT_MAIN,
-            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+    def _render_variography_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        signature = ("placeholder",)
+        if not force_rebuild and self._rendered_stage_signatures.get("Variografía") == signature:
             return
-
-        options = self.service.get_domain_filter_options()
-        filters = payload.get("filters", {})
-        for var, key in [
-            (self.domain_filter_lithology_var, "lithology"),
-            (self.domain_filter_alteration_var, "alteration"),
-            (self.domain_filter_mine_var, "mine"),
-        ]:
-            value = str(filters.get(key, "")).strip() or "Todos"
-            choices = options.get(key, ["Todos"])
-            if value not in choices:
-                value = "Todos"
-            var.set(value)
-
-        top_panel = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        top_panel.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 4))
-        top_panel.grid_columnconfigure((1, 3, 5), weight=1)
-        ctk.CTkLabel(top_panel, text="Filtros dinámicos", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2), columnspan=6)
-        ctk.CTkLabel(top_panel, text="Litología", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=(8, 2), pady=(2, 6))
-        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_lithology_var, values=options.get("lithology", ["Todos"]), command=lambda _v: self._on_domain_filters_changed(), **self._option_menu_style()).grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(2, 6))
-        ctk.CTkLabel(top_panel, text="Alteración", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=2, sticky="w", padx=(0, 2), pady=(2, 6))
-        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_alteration_var, values=options.get("alteration", ["Todos"]), command=lambda _v: self._on_domain_filters_changed(), **self._option_menu_style()).grid(row=1, column=3, sticky="ew", padx=(0, 8), pady=(2, 6))
-        ctk.CTkLabel(top_panel, text="Mina", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=4, sticky="w", padx=(0, 2), pady=(2, 6))
-        ctk.CTkOptionMenu(top_panel, variable=self.domain_filter_mine_var, values=options.get("mine", ["Todos"]), command=lambda _v: self._on_domain_filters_changed(), **self._option_menu_style()).grid(row=1, column=5, sticky="ew", padx=(0, 8), pady=(2, 6))
-
-        ctk.CTkLabel(top_panel, textvariable=self.domain_preview_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6), columnspan=6)
-
-        plot_card = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
-        plot_card.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
-        chart = DashboardGrid(plot_card, 1, 1, figsize=self._responsive_figsize(11.0, 5.2))
-        ax = chart.axis(0, 0)
-        apply_axis_style(ax)
-        scatter_rows = payload.get("scatter_rows", [])
-        if not scatter_rows:
-            ax.text(0.5, 0.5, "Sin datos para scatter con filtros actuales.", ha="center", va="center", color=TXT_MAIN)
-            ax.set_title("Media vs CV por categoría", color=PLOT_TXT)
-        else:
-            x_values = [float(item["mean"]) for item in scatter_rows]
-            y_values = [float(item["cv"]) for item in scatter_rows]
-            categories = [str(item["category"]) for item in scatter_rows]
-            counts = [int(item["count"]) for item in scatter_rows]
-            colors = [get_domain_color(category) for category in categories]
-            size_base = [max(70.0, min(420.0, 40.0 + (count * 8.0))) for count in counts]
-            ax.scatter(x_values, y_values, s=size_base, c=colors, alpha=0.80, edgecolors=BORDER_SOFT, linewidths=0.6)
-            for xv, yv, label in zip(x_values, y_values, categories):
-                ax.text(xv, yv, f" {label}", color=TXT_MUTED, fontsize=CHART_FONT_SIZE_LEGEND, va="center")
-            ax.set_title("Comparación exploratoria de dominios", color=PLOT_TXT)
-            ax.axhline(0.5, color=SEM_RED, linestyle=":", linewidth=1.0, alpha=0.75)
-            ax.set_xlabel(f"Media ({payload.get('target_column', '')})")
-            ax.set_ylabel("Coeficiente de variación (CV)")
-        chart.render()
-
-        bottom = ctk.CTkFrame(wrapper, fg_color="transparent")
-        bottom.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0, 0))
-        bottom.grid_columnconfigure(0, weight=1)
-        bottom.grid_columnconfigure(1, weight=1)
-
-        stats_card = ctk.CTkFrame(bottom, fg_color=BG_SOFT, corner_radius=8)
-        stats_card.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
-        ctk.CTkLabel(stats_card, text="Resumen estadístico (subconjunto filtrado)", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
-        stats = payload.get("preview_stats", {})
-        preview_count = int(payload.get("preview_count", 0))
-        preview_text = (
-            f"N filtrado: {preview_count}\n"
-            f"N válido target: {int(stats.get('n', 0))}\n"
-            f"Media: {float(stats.get('mean', math.nan)):.5g}\n"
-            f"Std: {float(stats.get('std', math.nan)):.5g}\n"
-            f"CV: {float(stats.get('cv', math.nan)):.5g}\n"
-            f"Mín: {float(stats.get('min', math.nan)):.5g}\n"
-            f"Máx: {float(stats.get('max', math.nan)):.5g}"
-        )
-        ctk.CTkLabel(stats_card, text=preview_text, text_color=TXT_MUTED, justify="left", font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
-
-        confirm_card = ctk.CTkFrame(bottom, fg_color=BG_SOFT, corner_radius=8)
-        confirm_card.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
-        ctk.CTkLabel(confirm_card, text="Confirmar dominio persistente", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2))
-        ctk.CTkEntry(confirm_card, textvariable=self.domain_confirm_var, placeholder_text="Ej: D1", height=INPUT_HEIGHT).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
-        ctk.CTkButton(confirm_card, text="Confirmar dominio sobre filtros", command=self._on_confirm_domain_assignment, **self._button_style("primary")).grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
-        ctk.CTkLabel(confirm_card, textvariable=self.domain_history_var, text_color=TXT_MUTED, justify="left", wraplength=480, font=ui_font(FONT_SMALL)).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
-
-        self._update_domain_preview_and_history(payload)
+        DashboardGrid.clear(parent)
+        self._rendered_stage_signatures["Variografía"] = signature
+        wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
+        wrapper.grid(row=0, column=0, sticky="nsew")
+        ctk.CTkLabel(wrapper, text="Módulo de variografía en construcción", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
 
     def _on_change_step(self, step_name: str) -> None:
         current_step = self.service.workflow_state.current_step
@@ -1386,7 +1282,7 @@ class HomePanel(ctk.CTkFrame):
         self._refresh_dashboard(reason="step_render")
 
     def _paint_workflow_state(self, active_step: str) -> None:
-        ordered = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios"]
+        ordered = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]
         readiness = self.service.get_workflow_readiness()
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
