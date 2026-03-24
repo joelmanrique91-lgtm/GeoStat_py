@@ -19,7 +19,7 @@ class DashboardGrid:
         parent: ctk.CTkFrame,
         rows: int,
         cols: int,
-        figsize: tuple[float, float] = (8.0, 5.2),
+        figsize: tuple[float, float] | None = None,
         *,
         width_ratios: list[float] | None = None,
         height_ratios: list[float] | None = None,
@@ -29,7 +29,10 @@ class DashboardGrid:
         self._resize_after_id: str | None = None
         self._configure_bound = False
         self._configured_figsize = figsize
-        self.figure = Figure(figsize=figsize, dpi=100)
+        figure_kwargs: dict[str, object] = {"dpi": 100, "constrained_layout": True}
+        if figsize is not None:
+            figure_kwargs["figsize"] = figsize
+        self.figure = Figure(**figure_kwargs)
         apply_figure_theme(self.figure)
         if width_ratios or height_ratios:
             grid_spec = self.figure.add_gridspec(rows, cols, width_ratios=width_ratios, height_ratios=height_ratios)
@@ -81,7 +84,6 @@ class DashboardGrid:
         new_w = max(width / dpi, 2.0)
         new_h = max(height / dpi, 1.6)
         self.figure.set_size_inches(new_w, new_h, forward=True)
-        self.figure.tight_layout(pad=0.65, w_pad=0.55, h_pad=0.55)
         self.canvas.draw_idle()
 
     def destroy(self) -> None:

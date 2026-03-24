@@ -1003,7 +1003,12 @@ class HomePanel(ctk.CTkFrame):
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
 
         try:
-            data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
+            selected_domain_filter = self.domain_filter_var.get().strip()
+            data = self.service.prepare_univariate_data(
+                max_domain_categories=10,
+                use_effective_target=bool(self.eda_use_capping_var.get()),
+                domain_filter=selected_domain_filter if selected_domain_filter and selected_domain_filter != "Todos" else None,
+            )
         except Exception as exc:
             ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             return
@@ -1057,7 +1062,6 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            figsize=self._responsive_figsize(19.2, 10.8),
             width_ratios=[2.55, 1.0],
             height_ratios=[1.0, 1.0],
         )
@@ -1177,7 +1181,6 @@ class HomePanel(ctk.CTkFrame):
             wrapper,
             2,
             2,
-            figsize=self._responsive_figsize(16.8, 9.6),
             width_ratios=[1.45, 1.0],
             height_ratios=[1.2, 1.0],
         )
@@ -1592,7 +1595,7 @@ class HomePanel(ctk.CTkFrame):
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
 
-        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(11.8, 8.6))
+        chart = DashboardGrid(parent, 2, 2)
         ax_hist = chart.axis(0, 0)
         ax_cdf = chart.axis(1, 0)
         ax_before_after = chart.axis(1, 1)
