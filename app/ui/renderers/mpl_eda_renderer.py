@@ -74,10 +74,10 @@ class MatplotlibEDARenderer(EDARenderer):
     ) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.055,
+            "left": 0.05,
             "right": 0.992,
-            "top": 0.975,
-            "bottom": 0.105,
+            "top": 0.985,
+            "bottom": 0.09,
             "wspace": 0.12,
             "hspace": 0.12,
         }
@@ -113,10 +113,10 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.13,
+            "left": 0.12,
             "right": 0.985,
-            "top": 0.955,
-            "bottom": 0.17,
+            "top": 0.97,
+            "bottom": 0.12,
             "wspace": 0.12,
             "hspace": 0.12,
         }
@@ -152,10 +152,10 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_boxplot(self, grid, *, data: dict[str, object], values: list[float], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.13,
+            "left": 0.12,
             "right": 0.985,
-            "top": 0.955,
-            "bottom": 0.20 if data.get("domain_boxplot", {}).get("enabled") else 0.16,
+            "top": 0.97,
+            "bottom": 0.18 if data.get("domain_boxplot", {}).get("enabled") else 0.13,
             "wspace": 0.12,
             "hspace": 0.12,
         }
@@ -202,8 +202,8 @@ class MatplotlibEDARenderer(EDARenderer):
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.06,
             "right": 0.992,
-            "top": 0.90,
-            "bottom": 0.30,
+            "top": 0.88,
+            "bottom": 0.38,
             "wspace": 0.10,
             "hspace": 0.10,
         }
