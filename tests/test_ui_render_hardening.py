@@ -67,7 +67,7 @@ class UIRenderHardeningTests(unittest.TestCase):
     def test_eda_renderer_adjusts_boxplot_bottom_margin_for_long_labels(self) -> None:
         source = Path("app/ui/renderers/mpl_eda_renderer.py").read_text(encoding="utf-8")
         self.assertIn("max_label_len", source)
-        self.assertIn("bottom_margin = min(bottom_margin, 0.33)", source)
+        self.assertIn("bottom_margin = min(bottom_margin, 0.35)", source)
         self.assertIn("labelrotation=rotation", source)
 
     def test_variography_view_restores_busy_state_after_compute_callback(self) -> None:
