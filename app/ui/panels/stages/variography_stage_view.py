@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import customtkinter as ctk
 
 from app.ui.controllers.variography_controller import VariographyController
@@ -33,6 +34,8 @@ class VariographyStageView:
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
         self._plot_host: ctk.CTkFrame | None = None
+        self._compute_button: ctk.CTkButton | None = None
+        self._compute_in_progress = False
         self._bind_dirty_traces()
 
     def mount(self, parent: ctk.CTkFrame) -> None:
@@ -106,7 +109,8 @@ class VariographyStageView:
             ctk.CTkEntry(parent, textvariable=var).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
             row += 1
 
-        ctk.CTkButton(parent, text="Compute experimental variogram", command=self._on_compute).grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
+        self._compute_button = ctk.CTkButton(parent, text="Compute experimental variogram", command=self._on_compute)
+        self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
         parent.grid_columnconfigure(0, weight=1)
 
     def _bind_dirty_traces(self) -> None:
@@ -133,6 +137,10 @@ class VariographyStageView:
             self.status_var.set("Parámetros modificados. Recalcula para validar estado.")
 
     def _on_compute(self) -> None:
+        if self._compute_in_progress:
+            self.status_var.set("Ya hay un cálculo en progreso. Espera a que termine.")
+            return
+        self._set_compute_busy(True)
         self.status_var.set("Calculando variograma experimental...")
         try:
             ui_state = {
@@ -154,19 +162,52 @@ class VariographyStageView:
             self.blocker_var.set(f"[INVALID_INPUT_FORMAT] Revisa el formato numérico de parámetros: {exc}")
             self.status_var.set("No se pudo iniciar cálculo por parámetros inválidos.")
             self._render_empty_plot(message="Sin cálculo: formato inválido en parámetros.")
+            self._set_compute_busy(False)
             return
 
-        response = self.controller.compute(ui_state)
-        self.status_var.set(str(response.get("message", "")))
-        warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
-        blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]
-        self.warning_var.set("\n".join(warnings) if warnings else "")
-        self.blocker_var.set("\n".join(blockers) if blockers else "")
-        result = response.get("result")
-        if not isinstance(result, dict):
-            self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
+        def _worker() -> None:
+            try:
+                response = self.controller.compute(ui_state)
+            except Exception as exc:  # defensive fallback for background execution
+                response = {
+                    "ok": False,
+                    "message": f"No se pudo calcular variograma experimental: {exc}",
+                    "warnings": [],
+                    "blockers": [{"code": "COMPUTE_THREAD_ERROR", "message": str(exc)}],
+                    "result": None,
+                }
+            host = self._plot_host
+            if host is not None:
+                try:
+                    host.after(0, lambda: self._on_compute_finished(response))
+                    return
+                except Exception:
+                    pass
+            if self._compute_in_progress:
+                self._compute_in_progress = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_compute_finished(self, response: dict[str, object]) -> None:
+        try:
+            self.status_var.set(str(response.get("message", "")))
+            warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
+            blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]
+            self.warning_var.set("\n".join(warnings) if warnings else "")
+            self.blocker_var.set("\n".join(blockers) if blockers else "")
+            result = response.get("result")
+            if not isinstance(result, dict):
+                self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
+                return
+            self._render_result_plot(result, bool(response.get("ok", False)))
+        finally:
+            self._set_compute_busy(False)
+
+    def _set_compute_busy(self, busy: bool) -> None:
+        self._compute_in_progress = bool(busy)
+        if self._compute_button is None:
             return
-        self._render_result_plot(result, bool(response.get("ok", False)))
+        self._compute_button.configure(state="disabled" if busy else "normal")
 
     def _render_empty_plot(self, message: str = "Sin cálculo aún.") -> None:
         if self._plot_host is None:

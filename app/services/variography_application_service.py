@@ -6,6 +6,8 @@ from dataclasses import asdict
 import hashlib
 import json
 
+from pandas.api.types import is_numeric_dtype
+
 from app.models.variography import (
     AnalysisContextRef,
     DirectionDefinition,
@@ -34,6 +36,7 @@ class VariographyApplicationService:
         snapshot = self.host_service.get_analysis_context_snapshot()
         dataset_name = self.host_service.current_dataset.file_name if self.host_service.current_dataset is not None else ""
         target = str(params.get("target_col") or snapshot.get("resolved_target_column") or "")
+        variable_config = self.host_service.variable_config
         context = AnalysisContextRef(
             dataset_file=dataset_name,
             resolved_target_column=str(snapshot.get("resolved_target_column") or ""),
@@ -44,9 +47,9 @@ class VariographyApplicationService:
         request = ExperimentalVariogramRequest(
             schema_version=SCHEMA_VERSION,
             context=context,
-            x_col=str(params.get("x_col") or self.host_service.variable_config.x_column),
-            y_col=str(params.get("y_col") or self.host_service.variable_config.y_column),
-            z_col=str(params.get("z_col") or self.host_service.variable_config.z_column),
+            x_col=str(params.get("x_col") or (variable_config.x_column if variable_config else "")),
+            y_col=str(params.get("y_col") or (variable_config.y_column if variable_config else "")),
+            z_col=str(params.get("z_col") or (variable_config.z_column if variable_config else "")),
             target_col=target,
             estimator=str(params.get("estimator") or "classical"),
             lag=LagDefinition(
@@ -233,6 +236,15 @@ class VariographyApplicationService:
         for col in [request.x_col, request.y_col, request.z_col, request.target_col]:
             if not col or col not in df.columns:
                 issues.append(VariographyIssue("INVALID_CONTEXT_COLUMNS", f"Columna inválida o faltante: {col}", "blocker"))
+        numeric_columns = [
+            ("x_col", request.x_col),
+            ("y_col", request.y_col),
+            ("z_col", request.z_col),
+            ("target_col", request.target_col),
+        ]
+        for label, col in numeric_columns:
+            if col and col in df.columns and not is_numeric_dtype(df[col]):
+                issues.append(VariographyIssue("NON_NUMERIC_CONTEXT_COLUMN", f"{label} debe ser numérica: {col}", "blocker"))
         if request.lag.lag_distance <= 0:
             issues.append(VariographyIssue("INVALID_LAG_DISTANCE", "lag_distance debe ser > 0.", "blocker"))
         if request.lag.n_lags <= 0:
