@@ -1313,14 +1313,27 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_variography_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         session = self.service.get_variography_session()
+        snapshot = self.service.get_analysis_context_snapshot()
         signature = (
             "live",
             str(session.selected_target),
+            str(snapshot.get("active_domain_column", "")),
+            str(snapshot.get("active_domain_filter", "")),
             float(session.lag_distance),
             int(session.n_lags),
+            float(session.lag_tolerance),
             float(session.max_distance),
+            float(session.azimuth),
+            float(session.dip),
+            float(session.ang_tol_h),
+            float(session.ang_tol_v),
+            float(session.band_width),
+            float(session.band_height),
+            str(session.estimator),
             bool(session.compute_dirty),
             bool(session.last_response is not None),
+            tuple(session.latest_blocker_codes),
+            tuple(session.latest_warning_codes),
         )
         if not force_rebuild and self._rendered_stage_signatures.get("Variografía") == signature:
             return

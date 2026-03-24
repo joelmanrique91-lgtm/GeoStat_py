@@ -144,12 +144,20 @@ class VariographyApplicationService:
             )
             self.session.mark_computed(response)
             return response
-
+        effective_rows = int(len(dataframe))
         logger.info(
-            "Variography compute start | rows=%s target=%s",
-            len(dataframe),
+            "Variography compute request | target=%s rows=%s x=%s y=%s z=%s n_lags=%s lag=%s max_distance=%s domain_filter=%s",
             request.target_col,
+            effective_rows,
+            request.x_col,
+            request.y_col,
+            request.z_col,
+            request.lag.n_lags,
+            request.lag.lag_distance,
+            request.lag.max_distance,
+            request.context.active_domain_filter,
         )
+
         try:
             raw = compute_experimental_variogram(
                 dataframe,
@@ -163,6 +171,8 @@ class VariographyApplicationService:
                 max_points=2500,
             )
         except Exception as exc:
+            message = str(exc)
+            blocker_code = "NO_PAIRS_IN_RANGE" if "No se encontraron pares dentro de max_distance" in message else "COMPUTE_FAILED"
             response = VariographyComputeResponse(
                 schema_version=SCHEMA_VERSION,
                 ok=False,
@@ -170,7 +180,7 @@ class VariographyApplicationService:
                 request=request,
                 result=None,
                 warnings=warnings,
-                blockers=[VariographyIssue("COMPUTE_FAILED", str(exc), "blocker")],
+                blockers=[VariographyIssue(blocker_code, str(exc), "blocker")],
             )
             self.session.mark_computed(response)
             return response
@@ -189,12 +199,32 @@ class VariographyApplicationService:
         if len(finite_gamma) < 2:
             blockers.append(VariographyIssue("INSUFFICIENT_LAG_COVERAGE", "Cobertura de pares insuficiente para interpretar el variograma.", "blocker"))
 
+        estimated_defaults = self.host_service.estimate_variography_defaults(
+            n_lags=request.lag.n_lags,
+            context_snapshot=self.host_service.get_analysis_context_snapshot(),
+            dataframe=dataframe,
+        )
+        dominant_blocker = blockers[0].code if blockers else ""
+        dominant_warning = warnings[0].code if warnings else ""
         metadata = {
             "computation_hash": self._compute_hash(request),
             "direction_applied": False,
             "direction_note": "Slice inicial: cálculo omni; parámetros direccionales validados y auditados, aún no aplicados al set de pares.",
             "lag_tolerance": request.lag.lag_tolerance,
             "estimator": request.estimator,
+            "effective_rows": effective_rows,
+            "total_pairs": int(sum(pair_counts)),
+            "dominant_blocker": dominant_blocker,
+            "dominant_warning": dominant_warning,
+            "spatial_extent": float(estimated_defaults.get("spatial_extent", 0.0)),
+            "recommended_max_distance": float(estimated_defaults.get("max_distance", request.lag.max_distance)),
+            "recommended_lag_distance": float(estimated_defaults.get("lag_distance", request.lag.lag_distance)),
+            "effective_params": {
+                "lag_distance": float(request.lag.lag_distance),
+                "n_lags": int(request.lag.n_lags),
+                "max_distance": float(request.lag.max_distance),
+                "lag_tolerance": float(request.lag.lag_tolerance),
+            },
         }
         result = ExperimentalVariogramResult(
             schema_version=SCHEMA_VERSION,
@@ -232,7 +262,10 @@ class VariographyApplicationService:
             },
         )
         logger.info(
-            "Variography compute done | lags=%s pairs=%s",
+            "Variography compute done | ok=%s blocker=%s warning=%s lags=%s pairs=%s",
+            ok,
+            dominant_blocker or "-",
+            dominant_warning or "-",
             len(result.lag_centers),
             sum(result.pair_counts),
         )

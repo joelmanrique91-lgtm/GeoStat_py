@@ -46,6 +46,12 @@ class UIRenderHardeningTests(unittest.TestCase):
     def test_variography_view_marshals_worker_result_back_to_ui_thread(self) -> None:
         source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
         self.assertIn("host.after(0, lambda: self._on_compute_finished(response))", source)
+        self.assertNotIn("except Exception:\n                    pass", source)
+
+    def test_variography_view_has_contextual_fallback_panel(self) -> None:
+        source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
+        self.assertIn("def _render_compute_failure_panel", source)
+        self.assertIn("Variografía no renderizable", source)
 
 
 if __name__ == "__main__":
