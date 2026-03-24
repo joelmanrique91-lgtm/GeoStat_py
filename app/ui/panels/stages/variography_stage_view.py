@@ -34,6 +34,7 @@ class VariographyStageView:
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
         self._plot_host: ctk.CTkFrame | None = None
+        self._compute_button: ctk.CTkButton | None = None
         self._compute_in_progress = False
         self._bind_dirty_traces()
 
@@ -108,7 +109,8 @@ class VariographyStageView:
             ctk.CTkEntry(parent, textvariable=var).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
             row += 1
 
-        ctk.CTkButton(parent, text="Compute experimental variogram", command=self._on_compute).grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
+        self._compute_button = ctk.CTkButton(parent, text="Compute experimental variogram", command=self._on_compute)
+        self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
         parent.grid_columnconfigure(0, weight=1)
 
     def _bind_dirty_traces(self) -> None:
@@ -138,6 +140,7 @@ class VariographyStageView:
         if self._compute_in_progress:
             self.status_var.set("Ya hay un cálculo en progreso. Espera a que termine.")
             return
+        self._set_compute_busy(True)
         self.status_var.set("Calculando variograma experimental...")
         try:
             ui_state = {
@@ -159,9 +162,8 @@ class VariographyStageView:
             self.blocker_var.set(f"[INVALID_INPUT_FORMAT] Revisa el formato numérico de parámetros: {exc}")
             self.status_var.set("No se pudo iniciar cálculo por parámetros inválidos.")
             self._render_empty_plot(message="Sin cálculo: formato inválido en parámetros.")
+            self._set_compute_busy(False)
             return
-
-        self._compute_in_progress = True
 
         def _worker() -> None:
             try:
@@ -176,24 +178,36 @@ class VariographyStageView:
                 }
             host = self._plot_host
             if host is not None:
-                host.after(0, lambda: self._on_compute_finished(response))
-            else:
+                try:
+                    host.after(0, lambda: self._on_compute_finished(response))
+                    return
+                except Exception:
+                    pass
+            if self._compute_in_progress:
                 self._compute_in_progress = False
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_compute_finished(self, response: dict[str, object]) -> None:
-        self._compute_in_progress = False
-        self.status_var.set(str(response.get("message", "")))
-        warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
-        blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]
-        self.warning_var.set("\n".join(warnings) if warnings else "")
-        self.blocker_var.set("\n".join(blockers) if blockers else "")
-        result = response.get("result")
-        if not isinstance(result, dict):
-            self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
+        try:
+            self.status_var.set(str(response.get("message", "")))
+            warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
+            blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]
+            self.warning_var.set("\n".join(warnings) if warnings else "")
+            self.blocker_var.set("\n".join(blockers) if blockers else "")
+            result = response.get("result")
+            if not isinstance(result, dict):
+                self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
+                return
+            self._render_result_plot(result, bool(response.get("ok", False)))
+        finally:
+            self._set_compute_busy(False)
+
+    def _set_compute_busy(self, busy: bool) -> None:
+        self._compute_in_progress = bool(busy)
+        if self._compute_button is None:
             return
-        self._render_result_plot(result, bool(response.get("ok", False)))
+        self._compute_button.configure(state="disabled" if busy else "normal")
 
     def _render_empty_plot(self, message: str = "Sin cálculo aún.") -> None:
         if self._plot_host is None:
