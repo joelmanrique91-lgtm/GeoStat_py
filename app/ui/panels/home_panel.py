@@ -91,7 +91,7 @@ PLOT_TXT = TEXT_MAIN
 PAD_MAIN_X = 8
 PAD_CARD_X = 12
 PAD_STACK_Y = 2
-PAD_SECTION_Y = 7
+PAD_SECTION_Y = 5
 SIDEBAR_WIDTH = 308
 STEP_BUTTON_WIDTH = 106
 STEP_BUTTON_HEIGHT = 24
@@ -336,8 +336,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(3, 1))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 0))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 0))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
@@ -1036,8 +1036,8 @@ class HomePanel(ctk.CTkFrame):
         evidence = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
         evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 1))
         evidence.grid_columnconfigure(0, weight=1)
-        evidence.grid_rowconfigure(0, weight=0)
-        evidence.grid_rowconfigure(1, weight=1)
+        evidence.grid_rowconfigure(0, weight=4)
+        evidence.grid_rowconfigure(1, weight=1, minsize=40)
 
         summary = ctk.CTkFrame(evidence, fg_color=BG_PANEL)
         summary.grid(row=0, column=0, sticky="ew", padx=3, pady=(0, 1))
@@ -1064,8 +1064,8 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            width_ratios=[2.2, 1.25],
-            height_ratios=[1.0, 1.0],
+            width_ratios=[2.0, 1.4],
+            height_ratios=[3.0, 1.0],
         )
 
         values = [float(v) for v in data["target_values"]]

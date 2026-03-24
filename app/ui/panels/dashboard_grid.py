@@ -29,7 +29,7 @@ class DashboardGrid:
         self._resize_after_id: str | None = None
         self._configure_bound = False
         self._configured_figsize = figsize
-        figure_kwargs: dict[str, object] = {"dpi": 100, "constrained_layout": True}
+        figure_kwargs: dict[str, object] = {"dpi": 100}
         if figsize is not None:
             figure_kwargs["figsize"] = figsize
         self.figure = Figure(**figure_kwargs)
@@ -86,6 +86,10 @@ class DashboardGrid:
         new_w = max(width / dpi, 2.0)
         new_h = max(height / dpi, 1.6)
         self.figure.set_size_inches(new_w, new_h, forward=True)
+        try:
+            self.figure.tight_layout(pad=1.0)
+        except Exception:
+            pass
         self.canvas.draw_idle()
 
     def destroy(self) -> None:

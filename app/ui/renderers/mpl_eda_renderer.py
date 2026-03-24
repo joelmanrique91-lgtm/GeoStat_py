@@ -27,9 +27,23 @@ class MatplotlibEDARenderer(EDARenderer):
         ax_hist_bottom = grid.axis(1, 0)
         ax_prob = grid.axis(0, 1)
         ax_secondary = grid.axis(1, 1)
+        fig = grid.figure
 
         for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
             apply_axis_style(axis)
+
+        # Rebalance right column: QQ con aire y boxplot con mayor jerarquía comparativa.
+        pos_prob = ax_prob.get_position()
+        pos_box = ax_secondary.get_position()
+        col_x0 = pos_prob.x0
+        col_w = pos_prob.width
+        col_y0 = pos_box.y0
+        col_h = pos_prob.y1 - pos_box.y0
+        gap = max(0.01, col_h * 0.07)
+        qq_h = col_h * 0.44
+        box_h = max(0.08, col_h - qq_h - gap)
+        ax_secondary.set_position([col_x0, col_y0, col_w, box_h])
+        ax_prob.set_position([col_x0, col_y0 + box_h + gap, col_w, qq_h])
 
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
@@ -127,10 +141,10 @@ class MatplotlibEDARenderer(EDARenderer):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            ax_secondary.tick_params(axis="x", rotation=18, labelsize=context.chart_legend_size)
+            ax_secondary.tick_params(axis="x", labelrotation=30, labelsize=context.chart_legend_size)
             ax_secondary.set_ylabel("Ley Cu (%)")
             ax_secondary.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
-            ax_secondary.margins(x=0.02)
+            ax_secondary.margins(x=0.10)
         else:
             box = ax_secondary.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
             for patch in box["boxes"]:
@@ -149,4 +163,5 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.set_xlabel("Ley Cu (%)")
             ax_secondary.margins(x=0.03)
 
+        fig.subplots_adjust(bottom=0.20, hspace=0.25, wspace=0.20)
         grid.render()
