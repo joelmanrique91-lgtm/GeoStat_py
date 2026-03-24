@@ -46,6 +46,18 @@ STEP_EVENT_MAP = {
     "Variografía": "workflow_step_variography_opened",
 }
 DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
+BLOCKING_REASON_HINTS = {
+    "missing_dataset": "Carga un CSV para continuar.",
+    "missing_variable_config": "Configura y confirma X/Y/Z/target.",
+    "missing_resolved_target_column": "Revisa target/cutoffs y confirma la variable activa.",
+    "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
+    "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
+    "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
+    "non_numeric_target_for_domain_stats": "Usa un target numérico para estadísticas de dominios.",
+    "invalid_active_domain_filter_column": "Limpia o corrige el filtro de dominio activo.",
+    "insufficient_data": "Datos insuficientes para variografía. Amplía muestra o ajusta filtros/dominio.",
+    "low_data_after_domain_filter": "El filtro de dominio deja pocos datos; revisa la selección activa.",
+}
 
 
 @dataclass
