@@ -51,7 +51,7 @@ class GeometryManagerRegressionTests(unittest.TestCase):
         self.assertIsNotNone(target_method, "_build_cutoff_controls debe existir en HomePanel.")
         method_source = ast.get_source_segment(source, target_method) or ""
         self.assertIn("cutoff_enabled_var", method_source)
-        self.assertIn("Activar cutoffs manuales", method_source)
+        self.assertIn("Activar límites manuales", method_source)
 
     def test_methodological_guardrail_texts_present(self) -> None:
         source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")

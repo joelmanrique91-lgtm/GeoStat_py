@@ -46,11 +46,14 @@ STEP_EVENT_MAP = {
     "Dominios": "workflow_step_domains_opened",
     "Variografía": "workflow_step_variography_opened",
 }
+STEP_DISPLAY_NAMES = {
+    "Cutoffs": "Control de Outliers",
+}
 DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
 BLOCKING_REASON_HINTS = {
     "missing_dataset": "Carga un CSV para continuar.",
     "missing_variable_config": "Configura y confirma X/Y/Z/target.",
-    "missing_resolved_target_column": "Revisa target/cutoffs y confirma la variable activa.",
+    "missing_resolved_target_column": "Revisa target/Control de Outliers y confirma la variable activa.",
     "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
     "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
     "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
@@ -256,9 +259,10 @@ class GeostatService:
         if step_name not in WORKFLOW_STEPS:
             return "Paso de workflow no válido."
         self.workflow_state.current_step = step_name
-        self.activity_log.log("workflow_step_changed", "info", f"Paso activo: {step_name}", {"step": step_name})
-        self.activity_log.log(STEP_EVENT_MAP[step_name], "info", f"Se abrió el paso {step_name}.", {"step": step_name})
-        return f"Paso activo: {step_name} (funcional)."
+        step_display_name = STEP_DISPLAY_NAMES.get(step_name, step_name)
+        self.activity_log.log("workflow_step_changed", "info", f"Paso activo: {step_display_name}", {"step": step_name, "step_display": step_display_name})
+        self.activity_log.log(STEP_EVENT_MAP[step_name], "info", f"Se abrió el paso {step_display_name}.", {"step": step_name, "step_display": step_display_name})
+        return f"Paso activo: {step_display_name} (funcional)."
 
     def get_workflow_step_status(self) -> list[tuple[str, str]]:
         self.activity_log.log("workflow_simplified_view_loaded", "info", "Workflow simplificado cargado.", {"steps": WORKFLOW_STEPS})
