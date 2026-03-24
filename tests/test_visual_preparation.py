@@ -49,15 +49,13 @@ class VisualPreparationTests(unittest.TestCase):
 
     def test_prepare_visual_data_respects_active_domain_filter_from_snapshot(self) -> None:
         self._load_numeric_dataset()
-        applied = self.service.apply_domain_definition({"variable_base": "dom", "domains": {"A": ["a"], "B": ["b"]}})
-        self.assertFalse(applied.success)
-        self.assertTrue(self.service.set_active_domain("A").success)
+        self.assertTrue(self.service.set_active_domain("a").success)
 
         snapshot = self.service.get_analysis_context_snapshot()
-        self.assertEqual(snapshot["active_domain_filter"], "")
+        self.assertEqual(snapshot["active_domain_filter"], "a")
         result = self.service.prepare_visual_data()
         self.assertTrue(result.success)
-        self.assertEqual(len(result.spatial_data.target), 3)
+        self.assertEqual(len(result.spatial_data.target), 2)
 
     def test_statistics_table_contains_expected_metrics(self) -> None:
         self._load_numeric_dataset()
@@ -72,7 +70,7 @@ class VisualPreparationTests(unittest.TestCase):
         self._load_numeric_dataset()
         payload = self.service.prepare_univariate_data(max_domain_categories=5)
         self.assertEqual(len(payload["probplot_x"]), 3)
-        self.assertFalse(payload["domain_boxplot"]["enabled"])
+        self.assertTrue(payload["domain_boxplot"]["enabled"])
         self.assertTrue(payload["availability"]["histogram"]["available"])
         self.assertTrue(payload["availability"]["boxplot"]["available"])
         self.assertTrue(payload["availability"]["probability"]["available"])
