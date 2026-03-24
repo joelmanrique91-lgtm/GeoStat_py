@@ -1064,9 +1064,8 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            width_ratios=[1.8, 1.35],
-            height_ratios=[3.0, 1.0],
-            max_aspect_ratio=1.65,
+            width_ratios=[1.9, 1.2],
+            height_ratios=[2.25, 1.0],
         )
 
         values = [float(v) for v in data["target_values"]]

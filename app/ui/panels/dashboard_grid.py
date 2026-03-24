@@ -31,7 +31,7 @@ class DashboardGrid:
         self._configure_bound = False
         self._configured_figsize = figsize
         self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
-        figure_kwargs: dict[str, object] = {"dpi": 100}
+        figure_kwargs: dict[str, object] = {"dpi": 100, "constrained_layout": True}
         if figsize is not None:
             figure_kwargs["figsize"] = figsize
         self.figure = Figure(**figure_kwargs)
@@ -94,10 +94,6 @@ class DashboardGrid:
             if ratio > self._max_aspect_ratio:
                 new_w = max(avail_h * self._max_aspect_ratio, 2.0)
         self.figure.set_size_inches(new_w, new_h, forward=True)
-        try:
-            self.figure.tight_layout(pad=1.0)
-        except Exception:
-            pass
         self.canvas.draw_idle()
 
     def destroy(self) -> None:

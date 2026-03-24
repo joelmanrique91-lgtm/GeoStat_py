@@ -32,25 +32,6 @@ class MatplotlibEDARenderer(EDARenderer):
         for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
             apply_axis_style(axis)
 
-        # Rebalance right column: QQ con aire y boxplot con mayor jerarquía comparativa.
-        pos_prob = ax_prob.get_position()
-        pos_box = ax_secondary.get_position()
-        col_x0 = pos_prob.x0
-        col_w = pos_prob.width
-        col_y0 = pos_box.y0
-        col_h = pos_prob.y1 - pos_box.y0
-        gap = max(0.01, col_h * 0.07)
-        qq_h = col_h * 0.44
-        box_h = max(0.08, col_h - qq_h - gap)
-        ax_secondary.set_position([col_x0, col_y0, col_w, box_h])
-        ax_prob.set_position([col_x0, col_y0 + box_h + gap, col_w, qq_h])
-        try:
-            ax_hist.set_box_aspect(0.58)
-            ax_prob.set_box_aspect(0.88)
-            ax_secondary.set_box_aspect(0.62)
-        except Exception:
-            pass
-
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
         n_values = len(sorted_values)
