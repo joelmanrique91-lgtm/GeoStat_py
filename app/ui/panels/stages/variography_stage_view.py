@@ -52,8 +52,8 @@ class VariographyStageView:
         wrapper.grid_columnconfigure(1, weight=1)
         wrapper.grid_rowconfigure(0, weight=1)
 
-        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=320)
-        controls.grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=0)
+        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=300)
+        controls.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=0)
         controls.grid_propagate(False)
         self._build_controls(controls, [str(v) for v in init.get("target_options", [])])
 

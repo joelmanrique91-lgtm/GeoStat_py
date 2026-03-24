@@ -88,7 +88,7 @@ class DashboardGrid:
             else:
                 new_w = new_h * ratio
         self.figure.set_size_inches(new_w, new_h, forward=True)
-        self.figure.tight_layout(pad=0.9, w_pad=0.8, h_pad=0.8)
+        self.figure.tight_layout(pad=0.85, w_pad=0.75, h_pad=0.75)
         self.canvas.draw_idle()
 
     def destroy(self) -> None:
