@@ -13,12 +13,23 @@ class VariographyController:
 
     def compute(self, ui_state: dict[str, object]) -> dict[str, object]:
         response = self.service.compute_experimental_variography(ui_state)
+        defaults = self.service.estimate_variography_defaults(
+            n_lags=int(ui_state.get("n_lags") or 16),
+            context_snapshot=self.service.get_analysis_context_snapshot(),
+        )
         payload = {
             "ok": response.ok,
             "message": response.message,
             "warnings": [asdict(item) for item in response.warnings],
             "blockers": [asdict(item) for item in response.blockers],
             "result": None,
+            "metadata": {
+                "dominant_blocker": response.blockers[0].code if response.blockers else "",
+                "dominant_warning": response.warnings[0].code if response.warnings else "",
+                "recommended_max_distance": float(defaults["max_distance"]),
+                "recommended_lag_distance": float(defaults["lag_distance"]),
+                "effective_rows": int(defaults["effective_rows"]),
+            },
         }
         if response.result is not None:
             payload["result"] = {
@@ -30,6 +41,7 @@ class VariographyController:
                 "downsampled": response.result.downsampled,
                 "metadata": response.result.metadata,
             }
+            payload["metadata"] = dict(response.result.metadata)
         return payload
 
     def mark_dirty(self, target_col: str) -> None:
@@ -44,15 +56,24 @@ class VariographyController:
         target_default = session.selected_target or str(snapshot.get("resolved_target_column") or "")
         if target_default not in target_options:
             target_default = target_options[0] if target_options else ""
+        dynamic_defaults = self.service.estimate_variography_defaults(
+            n_lags=int(session.n_lags),
+            context_snapshot=snapshot,
+        )
+        use_dynamic_defaults = bool(session.last_response is None and session.last_request is None)
+        lag_distance = float(dynamic_defaults["lag_distance"]) if use_dynamic_defaults else float(session.lag_distance)
+        n_lags = int(dynamic_defaults["n_lags"]) if use_dynamic_defaults else int(session.n_lags)
+        max_distance = float(dynamic_defaults["max_distance"]) if use_dynamic_defaults else float(session.max_distance)
+        lag_tolerance = float(dynamic_defaults["lag_tolerance"]) if use_dynamic_defaults else float(session.lag_tolerance)
         return {
             "target_col": target_default,
             "x_col": self.service.variable_config.x_column if self.service.variable_config else "",
             "y_col": self.service.variable_config.y_column if self.service.variable_config else "",
             "z_col": self.service.variable_config.z_column if self.service.variable_config else "",
-            "lag_distance": float(session.lag_distance),
-            "n_lags": int(session.n_lags),
-            "lag_tolerance": float(session.lag_tolerance),
-            "max_distance": float(session.max_distance),
+            "lag_distance": lag_distance,
+            "n_lags": n_lags,
+            "lag_tolerance": lag_tolerance,
+            "max_distance": max_distance,
             "azimuth": float(session.azimuth),
             "dip": float(session.dip),
             "ang_tol_h": float(session.ang_tol_h),
