@@ -19,17 +19,22 @@ class DashboardGrid:
         parent: ctk.CTkFrame,
         rows: int,
         cols: int,
-        figsize: tuple[float, float] = (8.0, 5.2),
+        figsize: tuple[float, float] | None = None,
         *,
         width_ratios: list[float] | None = None,
         height_ratios: list[float] | None = None,
+        max_aspect_ratio: float | None = None,
     ) -> None:
         self.parent = parent
         self._last_parent_size: tuple[int, int] | None = None
         self._resize_after_id: str | None = None
         self._configure_bound = False
         self._configured_figsize = figsize
-        self.figure = Figure(figsize=figsize, dpi=100)
+        self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
+        figure_kwargs: dict[str, object] = {"dpi": 100, "constrained_layout": True}
+        if figsize is not None:
+            figure_kwargs["figsize"] = figsize
+        self.figure = Figure(**figure_kwargs)
         apply_figure_theme(self.figure)
         if width_ratios or height_ratios:
             grid_spec = self.figure.add_gridspec(rows, cols, width_ratios=width_ratios, height_ratios=height_ratios)
@@ -55,6 +60,7 @@ class DashboardGrid:
             widget.pack(fill="both", expand=True, padx=0, pady=0)
         if not self._configure_bound:
             widget.bind("<Configure>", self._on_parent_configure, add="+")
+            self.parent.bind("<Configure>", self._on_parent_configure, add="+")
             self._configure_bound = True
         self._resize_to_parent(force=True)
 
@@ -68,8 +74,9 @@ class DashboardGrid:
 
     def _resize_to_parent(self, *, force: bool = False) -> None:
         self._resize_after_id = None
-        width = int(self.parent.winfo_width())
-        height = int(self.parent.winfo_height())
+        widget = self.canvas.get_tk_widget()
+        width = int(widget.winfo_width() or self.parent.winfo_width())
+        height = int(widget.winfo_height() or self.parent.winfo_height())
         if width <= 16 or height <= 16:
             self.parent.after(50, self._resize_to_parent)
             return
@@ -78,10 +85,15 @@ class DashboardGrid:
             return
         self._last_parent_size = size
         dpi = float(self.figure.get_dpi())
-        new_w = max(width / dpi, 2.0)
-        new_h = max(height / dpi, 1.6)
+        avail_w = max(width / dpi, 2.0)
+        avail_h = max(height / dpi, 1.6)
+        new_w = avail_w
+        new_h = avail_h
+        if self._max_aspect_ratio is not None:
+            ratio = avail_w / max(avail_h, 1e-6)
+            if ratio > self._max_aspect_ratio:
+                new_w = max(avail_h * self._max_aspect_ratio, 2.0)
         self.figure.set_size_inches(new_w, new_h, forward=True)
-        self.figure.tight_layout(pad=0.65, w_pad=0.55, h_pad=0.55)
         self.canvas.draw_idle()
 
     def destroy(self) -> None:

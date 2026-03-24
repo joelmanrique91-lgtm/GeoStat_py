@@ -167,6 +167,15 @@ def _empty_domain_payload(message: str = "") -> dict[str, object]:
     return {"enabled": False, "labels": [], "values": [], "message": message, "valid_rows": 0, "valid_categories": 0}
 
 
+def _resolve_active_domain_column(dataframe, configured_domain_column: str) -> str:
+    candidate = str(configured_domain_column or "").strip()
+    if candidate and candidate in dataframe.columns:
+        return candidate
+    if DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
+        return DOMAIN_ESTIMATION_COLUMN
+    return ""
+
+
 def _compute_target_statistics(clean, total: int) -> dict[str, float]:
     """Compute descriptive target metrics while preserving output contract."""
     if clean.empty:
@@ -398,13 +407,42 @@ class GeostatService:
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
-        del domain_name
-        # Temporary neutral behavior while Dominios assignment workflow is disabled.
-        self.workflow_state.active_domain_filter = ""
-        return CutoffResult(True, "Módulo Dominios temporalmente deshabilitado.")
+        if self.current_dataset is None:
+            return CutoffResult(False, "No hay dataset cargado.")
+        snapshot = self.get_analysis_context_snapshot()
+        active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
+        if not active_domain_column:
+            self.workflow_state.active_domain_filter = ""
+            return CutoffResult(False, "No hay columna de dominio disponible.")
+        selected = str(domain_name or "").strip()
+        if not selected or selected.lower() == "todos":
+            self.workflow_state.active_domain_filter = ""
+            self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio limpiado.", {"column": active_domain_column})
+            return CutoffResult(True, "Filtro de dominio limpiado.")
+        options = set(self.get_domain_estimation_values())
+        if selected not in options:
+            return CutoffResult(False, f"Dominio no válido: '{selected}'.")
+        self.workflow_state.active_domain_filter = selected
+        self.activity_log.log(
+            "domain_filter_applied",
+            "success",
+            "Filtro de dominio aplicado.",
+            {"column": active_domain_column, "value": selected},
+        )
+        return CutoffResult(True, f"Filtro de dominio aplicado: {selected}")
 
     def get_domain_estimation_values(self) -> list[str]:
-        return []
+        if self.current_dataset is None:
+            return []
+        dataframe = self.current_dataset.dataframe
+        active_domain_column = _resolve_active_domain_column(
+            dataframe,
+            self.variable_config.domain_column if self.variable_config is not None else "",
+        )
+        if not active_domain_column:
+            return []
+        values = sorted({str(value).strip() for value in dataframe[active_domain_column].dropna().tolist() if str(value).strip()})
+        return values
 
     def get_domain_state(self) -> dict[str, object]:
         snapshot = self.get_analysis_context_snapshot()
@@ -828,10 +866,23 @@ class GeostatService:
         base_target_column = self.variable_config.target_column if self.variable_config else ""
         effective_target_column = self._get_effective_target_column()
         resolved_target_column = effective_target_column or base_target_column
-        # Domain orchestration remains intentionally neutral while the Dominios module
-        # is disabled (`set_active_domain` is a no-op). Consumers should treat these
-        # fields as reserved contract keys with empty values for this release.
         active_domain_column = ""
+        active_domain_filter = ""
+        if self.current_dataset is not None:
+            active_domain_column = _resolve_active_domain_column(
+                self.current_dataset.dataframe,
+                self.variable_config.domain_column if self.variable_config is not None else "",
+            )
+            active_domain_filter = str(self.workflow_state.active_domain_filter or "").strip()
+            if active_domain_filter and active_domain_column:
+                valid_values = {
+                    str(value).strip()
+                    for value in self.current_dataset.dataframe[active_domain_column].dropna().tolist()
+                    if str(value).strip()
+                }
+                if active_domain_filter not in valid_values:
+                    active_domain_filter = ""
+                    self.workflow_state.active_domain_filter = ""
 
         readiness = "ready"
         blocking_reason = ""
@@ -859,7 +910,7 @@ class GeostatService:
             "resolved_target_column": resolved_target_column,
             "resolved_target_type": resolved_target_type,
             "active_domain_column": active_domain_column,
-            "active_domain_filter": "",
+            "active_domain_filter": active_domain_filter,
             "current_step": self.workflow_state.current_step,
             "readiness": readiness,
             "blocking_reason": blocking_reason,
@@ -1071,9 +1122,10 @@ class GeostatService:
         df = self.current_dataset.dataframe
         snapshot = self.get_analysis_context_snapshot()
         requested_filter = (domain_filter or "").strip()
+        active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
         if requested_filter:
-            if DOMAIN_ESTIMATION_COLUMN in df.columns:
-                df = df[df[DOMAIN_ESTIMATION_COLUMN].astype(str) == requested_filter]
+            if active_domain_column and active_domain_column in df.columns:
+                df = df[df[active_domain_column].astype(str) == requested_filter]
             else:
                 df = df.iloc[0:0]
         elif str(snapshot["active_domain_filter"]).strip():
@@ -1151,9 +1203,36 @@ class GeostatService:
                     {"component": "probability", "target": target, "valid_count": valid_count},
                 )
 
-        del max_domain_categories
-        domain_payload = _empty_domain_payload(message="Módulo temporalmente deshabilitado")
-        domain_col = ""
+        domain_payload = _empty_domain_payload()
+        domain_col = str(snapshot.get("active_domain_column") or "").strip()
+        if domain_col and domain_col in df.columns:
+            grouped: list[tuple[str, list[float]]] = []
+            valid_rows = 0
+            for label, subset in df.groupby(domain_col, dropna=True):
+                label_text = str(label).strip()
+                if not label_text:
+                    continue
+                numeric_values = _to_numeric(subset[target]).dropna().astype(float).tolist()
+                if not numeric_values:
+                    continue
+                grouped.append((label_text, numeric_values))
+                valid_rows += len(numeric_values)
+
+            grouped.sort(key=lambda item: len(item[1]), reverse=True)
+            if max_domain_categories > 0 and len(grouped) > max_domain_categories:
+                grouped = grouped[:max_domain_categories]
+                domain_payload["message"] = f"Mostrando top {max_domain_categories} dominios por cantidad de muestras."
+            if grouped:
+                domain_payload = {
+                    "enabled": len(grouped) > 1,
+                    "labels": [label for label, _values in grouped],
+                    "values": [values for _label, values in grouped],
+                    "message": domain_payload.get("message", ""),
+                    "valid_rows": int(valid_rows),
+                    "valid_categories": len(grouped),
+                }
+                if len(grouped) <= 1:
+                    domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
 
         payload = {
             "target_values": clean_target.tolist(),
