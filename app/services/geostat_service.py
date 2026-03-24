@@ -22,6 +22,7 @@ from app.models.variable_config_model import VariableConfigModel
 from app.models.variography import VariographyComputeResponse, VariographySession
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
+from app.services.cutoff_service import CutoffService
 from app.services.operational_state_service import OperationalStateService
 from app.services.variography_application_service import VariographyApplicationService
 from app.services.visualization_service import (
@@ -246,6 +247,7 @@ class GeostatService:
         self.autodetected_columns: dict[str, str] = {}
         self.variography_service = VariographyApplicationService(host_service=self)
         self.operational_state_service = OperationalStateService(host_service=self)
+        self.cutoff_service = CutoffService(host_service=self)
         self._domain_filter_context_enabled = True
 
     def set_workflow_step(self, step_name: str) -> str:
@@ -611,54 +613,10 @@ class GeostatService:
         return self.get_cutoff_state_typed().as_dict()
 
     def has_confirmed_dynamic_capping(self) -> bool:
-        return bool(self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column)
+        return self.cutoff_service.has_confirmed_dynamic_capping()
 
     def prepare_dynamic_cutoff_preview(self, target_column: str, mode: str, slider_percent: float) -> dict[str, object]:
-        if self.current_dataset is None:
-            raise ValueError("No hay dataset cargado.")
-        if target_column not in self.current_dataset.columns:
-            raise ValueError("La variable seleccionada no existe en el dataset.")
-
-        numeric = _to_numeric(self.current_dataset.dataframe[target_column]).dropna().astype(float)
-        if numeric.empty:
-            raise ValueError("La variable seleccionada no tiene valores numéricos válidos.")
-
-        values = numeric.tolist()
-        min_val = float(numeric.min())
-        max_val = float(numeric.max())
-        slider_clamped = max(0.0, min(100.0, float(slider_percent)))
-        if mode == "absolute":
-            cutoff = min_val + ((max_val - min_val) * (slider_clamped / 100.0))
-        else:
-            cutoff = float(numeric.quantile(slider_clamped / 100.0))
-
-        retained = numeric[numeric <= cutoff]
-        truncated = numeric[numeric > cutoff]
-        capped = numeric.clip(upper=cutoff)
-        capped_max = float(min(max_val, cutoff))
-        percentile_at_cutoff = float((numeric <= cutoff).sum() / len(numeric) * 100.0)
-
-        sorted_vals = sorted(values)
-        n = len(sorted_vals)
-        normal = statistics.NormalDist()
-        theoretical = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)] if n > 1 else [0.0]
-
-        return {
-            "values": values,
-            "sorted_values": sorted_vals,
-            "theoretical_quantiles": theoretical,
-            "cutoff_value": float(cutoff),
-            "min": min_val,
-            "max": max_val,
-            "affected_count": int(len(truncated)),
-            "affected_pct": float((len(truncated) / len(values)) * 100.0),
-            "retained_pct": percentile_at_cutoff,
-            "retained_values": retained.tolist(),
-            "truncated_values": truncated.tolist(),
-            "capped_values": capped.tolist(),
-            "max_original": max_val,
-            "max_truncated": capped_max,
-        }
+        return self.cutoff_service.prepare_dynamic_cutoff_preview(target_column, mode, slider_percent)
 
     def apply_dynamic_cutoff(
         self,
@@ -669,164 +627,39 @@ class GeostatService:
         output_column: str | None = None,
         keep_category_column: bool = True,
     ) -> DynamicCutoffResult:
-        if self.current_dataset is None:
-            return DynamicCutoffResult(False, "No hay dataset cargado.")
-        if self.variable_config is None:
-            return DynamicCutoffResult(False, "Configura X/Y/Z/target antes de aplicar capping.")
-        if not enabled:
-            self._clear_dynamic_cutoff_state()
-            return DynamicCutoffResult(True, "Capping dinámico desactivado.")
-
-        try:
-            preview = self.prepare_dynamic_cutoff_preview(target_column, mode, slider_percent)
-        except ValueError as exc:
-            return DynamicCutoffResult(False, str(exc))
-
-        cutoff = float(preview["cutoff_value"])
-        out_col = (output_column or f"{target_column}_capped").strip()
-        if out_col in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
-            return DynamicCutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
-
-        source = _to_numeric(self.current_dataset.dataframe[target_column])
-        self.current_dataset.dataframe[out_col] = source.clip(upper=cutoff)
-        if out_col not in self.current_dataset.columns:
-            self.current_dataset.columns.append(out_col)
-            self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        category_col = ""
-        if keep_category_column:
-            category_col = f"{out_col}_class"
-            labels = [f"<= {self._format_cutoff_number(cutoff)}", f"> {self._format_cutoff_number(cutoff)}"]
-            import pandas as pd
-
-            self.current_dataset.dataframe[category_col] = pd.cut(source, bins=[-math.inf, cutoff, math.inf], labels=labels, right=True, include_lowest=True)
-            if category_col not in self.current_dataset.columns:
-                self.current_dataset.columns.append(category_col)
-                self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        self.workflow_state.dynamic_cutoff_enabled = True
-        self.workflow_state.dynamic_cutoff_target_column = target_column
-        self.workflow_state.dynamic_cutoff_mode = "absolute" if mode == "absolute" else "percentile"
-        self.workflow_state.dynamic_cutoff_percent = float(max(0.0, min(100.0, slider_percent)))
-        self.workflow_state.dynamic_cutoff_value = cutoff
-        self.workflow_state.dynamic_cutoff_output_column = out_col
-        self.workflow_state.dynamic_cutoff_category_column = category_col
-        self.workflow_state.effective_target_column = out_col
-        self.activity_log.log(
-            "dynamic_cutoff_applied",
-            "success",
-            "Capping dinámico aplicado.",
-            {
-                "target": target_column,
-                "mode": self.workflow_state.dynamic_cutoff_mode,
-                "slider_percent": self.workflow_state.dynamic_cutoff_percent,
-                "cutoff_value": cutoff,
-                "output_column": out_col,
-                "category_column": category_col,
-            },
+        success, message, cutoff = self.cutoff_service.apply_dynamic_cutoff(
+            enabled=enabled,
+            target_column=target_column,
+            mode=mode,
+            slider_percent=slider_percent,
+            output_column=output_column,
+            keep_category_column=keep_category_column,
         )
-        return DynamicCutoffResult(True, f"Capping aplicado. Nueva variable: {out_col}", cutoff)
+        return DynamicCutoffResult(success, message, cutoff)
 
     def apply_cutoffs(self, enabled: bool, target_column: str, limits_text: str, output_column: str | None = None) -> CutoffResult:
-        if self.current_dataset is None:
-            return CutoffResult(False, "No hay dataset cargado.")
-        if self.variable_config is None:
-            return CutoffResult(False, "Configura X/Y/Z/target antes de aplicar cutoffs.")
-
-        if not enabled:
-            self._clear_cutoff_state()
-            self.workflow_state.effective_target_column = self.variable_config.target_column
-            self.activity_log.log("cutoff_disabled", "info", "Cutoffs desactivados. Se usa target original.", {"target": self.variable_config.target_column})
-            return CutoffResult(True, "Cutoffs desactivados. Se mantiene variable original.")
-
-        if target_column not in self.current_dataset.columns:
-            return CutoffResult(False, "La variable seleccionada no existe en el dataset.")
-        if not _is_numeric_dtype(self.current_dataset.dataframe[target_column]):
-            return CutoffResult(False, "La variable seleccionada debe ser numérica.")
-
-        limits, parse_error = self._parse_cutoff_limits(limits_text)
-        if parse_error:
-            return CutoffResult(False, parse_error)
-
-        labels = self._build_cutoff_labels(limits)
-        output_name = (output_column or f"{target_column}_cutoff").strip()
-        if output_name in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
-            return CutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
-
-        import pandas as pd
-
-        source = _to_numeric(self.current_dataset.dataframe[target_column])
-        bins = [-math.inf, *limits, math.inf]
-        categorized = pd.cut(source, bins=bins, labels=labels, right=False, include_lowest=True)
-        self.current_dataset.dataframe[output_name] = categorized
-        if output_name not in self.current_dataset.columns:
-            self.current_dataset.columns.append(output_name)
-            self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        self.workflow_state.cutoffs_enabled = True
-        self.workflow_state.cutoff_target_column = target_column
-        self.workflow_state.cutoff_limits = [float(v) for v in limits]
-        self.workflow_state.cutoff_labels = labels
-        self.workflow_state.cutoff_output_column = output_name
-        self.workflow_state.effective_target_column = output_name
-        self.activity_log.log(
-            "cutoff_applied",
-            "success",
-            "Cutoffs aplicados y variable categorizada persistida.",
-            {"target": target_column, "output_column": output_name, "limits": limits, "labels": labels},
+        success, message = self.cutoff_service.apply_cutoffs(
+            enabled=enabled,
+            target_column=target_column,
+            limits_text=limits_text,
+            output_column=output_column,
         )
-        return CutoffResult(True, f"Cutoffs aplicados. Nueva variable: {output_name}")
+        return CutoffResult(success, message)
 
     def _parse_cutoff_limits(self, limits_text: str) -> tuple[list[float], str]:
-        raw = (limits_text or "").strip()
-        if not raw:
-            return [], "Debes ingresar al menos un cutoff."
-        tokens = [token for token in raw.replace(";", ",").split(",") if token.strip()]
-        if not tokens:
-            return [], "Debes ingresar al menos un cutoff válido."
-        values: list[float] = []
-        for token in tokens:
-            try:
-                values.append(float(token.strip()))
-            except ValueError:
-                return [], f"Cutoff inválido: '{token.strip()}'. Usa solo números."
-        unique_sorted = sorted(set(values))
-        if not unique_sorted:
-            return [], "No se detectaron cutoffs válidos."
-        if len(unique_sorted) < len(values):
-            self.activity_log.log("cutoff_duplicates_ignored", "warning", "Se ignoraron cutoffs repetidos.", {"input_count": len(values), "unique_count": len(unique_sorted)})
-        return unique_sorted, ""
+        return self.cutoff_service.parse_cutoff_limits(limits_text)
 
     def _build_cutoff_labels(self, limits: list[float]) -> list[str]:
-        if len(limits) == 1:
-            c0 = self._format_cutoff_number(limits[0])
-            return [f"< {c0}", f">= {c0}"]
-
-        labels: list[str] = [f"< {self._format_cutoff_number(limits[0])}"]
-        for left, right in zip(limits[:-1], limits[1:]):
-            labels.append(f"[{self._format_cutoff_number(left)}, {self._format_cutoff_number(right)})")
-        labels.append(f">= {self._format_cutoff_number(limits[-1])}")
-        return labels
+        return self.cutoff_service.build_cutoff_labels(limits)
 
     def _format_cutoff_number(self, value: float) -> str:
-        return f"{value:.6g}"
+        return self.cutoff_service.format_cutoff_number(value)
 
     def _clear_cutoff_state(self) -> None:
-        self.workflow_state.cutoffs_enabled = False
-        self.workflow_state.cutoff_target_column = ""
-        self.workflow_state.cutoff_limits = []
-        self.workflow_state.cutoff_labels = []
-        self.workflow_state.cutoff_output_column = ""
-        self.workflow_state.effective_target_column = ""
+        self.cutoff_service.clear_cutoff_state()
 
     def _clear_dynamic_cutoff_state(self) -> None:
-        self.workflow_state.dynamic_cutoff_enabled = False
-        self.workflow_state.dynamic_cutoff_target_column = ""
-        self.workflow_state.dynamic_cutoff_mode = "percentile"
-        self.workflow_state.dynamic_cutoff_percent = 95.0
-        self.workflow_state.dynamic_cutoff_value = 0.0
-        self.workflow_state.dynamic_cutoff_output_column = ""
-        self.workflow_state.dynamic_cutoff_category_column = ""
+        self.cutoff_service.clear_dynamic_cutoff_state()
 
     def _clear_domain_state(self) -> None:
         self.workflow_state.domain_layers_order = []
