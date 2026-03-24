@@ -71,6 +71,7 @@ from app.ui.theme import (
     BTN_PRIMARY_BG,
     BTN_TERTIARY_BG,
     BTN_TERTIARY_HOVER,
+    add_reference_line,
     apply_axis_style,
 )
 BG_SOFT = BG_CARD
@@ -116,12 +117,15 @@ STEP_TO_READINESS_KEY = {
     "Dominios": "domains",
     "Variografía": "variography",
 }
+STEP_DISPLAY_NAMES = {
+    "Cutoffs": "Control de Outliers",
+}
 
 def _build_workflow_stage_label(step_name: str, active_step: str, readiness: WorkflowReadinessState) -> str:
     labels = {
         "Datos": "01 Datos",
         "EDA": "02 EDA",
-        "Cutoffs": "03 Cutoffs",
+        "Cutoffs": "03 Control de Outliers",
         "Espacial": "04 Espacial",
         "Dominios": "05 Dominios",
         "Variografía": "06 Variografía",
@@ -133,6 +137,10 @@ def _build_workflow_stage_label(step_name: str, active_step: str, readiness: Wor
     readiness_marker = "✓ LISTO" if is_ready else ("⚠ ALERTA" if has_warning else "! BLOQ")
     nav_marker = "●" if step_name == active_step else "○"
     return f"{nav_marker} {labels.get(step_name, step_name)} · {readiness_marker}"
+
+
+def _display_step_name(step_name: str) -> str:
+    return STEP_DISPLAY_NAMES.get(step_name, step_name)
 
 
 def _build_active_step_hint(step_name: str, state: GeostatOperationalState) -> str:
@@ -215,7 +223,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_output_var = ctk.StringVar(value="")
         self.dynamic_keep_class_var = ctk.BooleanVar(value=True)
         self.dynamic_percentile_label_var = ctk.StringVar(value="Percentil: P95.0")
-        self.dynamic_cutoff_label_var = ctk.StringVar(value="Cutoff actual: -")
+        self.dynamic_cutoff_label_var = ctk.StringVar(value="Umbral actual: -")
         self.dynamic_impact_label_var = ctk.StringVar(value="Impacto: -")
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
         self.domain_base_var = ctk.StringVar(value="")
@@ -406,7 +414,7 @@ class HomePanel(ctk.CTkFrame):
         labels = {
             "Datos": "01 Datos",
             "EDA": "02 EDA",
-            "Cutoffs": "03 Cutoffs",
+            "Cutoffs": "03 Control de Outliers",
             "Espacial": "04 Espacial",
             "Dominios": "05 Dominios",
             "Variografía": "06 Variografía",
@@ -544,14 +552,14 @@ class HomePanel(ctk.CTkFrame):
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
-        section = self._section_shell(parent, "Control de outliers")
+        section = self._section_shell(parent, "Control de Outliers")
         ctk.CTkLabel(section, text="Opciones locales de preview/aplicación", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
         numeric_columns = self.service.get_numeric_columns()
         ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", command=lambda _v: self._schedule_cutoff_preview(), **self._option_menu_style()).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkSwitch(section, text="Activar cutoffs manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkSwitch(section, text="Activar límites manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkSwitch(section, text="Activar capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=INPUT_HEIGHT, placeholder_text="Cutoffs manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar cutoffs manuales", command=self._on_apply_cutoffs, **self._button_style("secondary")).pack(fill="x", padx=6, pady=(0, 5))
+        ctk.CTkEntry(section, textvariable=self.cutoff_limits_var, height=INPUT_HEIGHT, placeholder_text="Límites manuales: 0.5, 1.2, 2.0").pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar límites manuales", command=self._on_apply_cutoffs, **self._button_style("secondary")).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
     def _build_spatial_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -610,7 +618,7 @@ class HomePanel(ctk.CTkFrame):
             "valid_count": "N válido",
             "p90": "P90",
             "cv": "Coeficiente de variación (%)",
-            "cutoff actual": "Cutoff actual",
+            "cutoff actual": "Umbral actual",
         }
         keys = list(labels_by_key.keys())
         primary_keys = {"cv"}
@@ -902,7 +910,7 @@ class HomePanel(ctk.CTkFrame):
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.stages.get(stage_key, None)
         if stage != "Datos" and not bool(stage_state.ready) if stage_state is not None else False:
-            self.workspace_title_var.set(f"{stage} – etapa bloqueada")
+            self.workspace_title_var.set(f"{_display_step_name(stage)} – etapa bloqueada")
             self.workspace_subtitle_var.set("Completa la configuración indicada para habilitar esta vista.")
             DashboardGrid.clear(stage_host)
             self._render_blocked_stage_view(stage, stage_host)
@@ -937,7 +945,7 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "Cutoffs":
             self.workspace_title_var.set("Impacto de capping – control de outliers")
-            self.workspace_subtitle_var.set("Cuantifica cuánto cambia la distribución antes de confirmar cutoff operativo.")
+            self.workspace_subtitle_var.set("Cuantifica cuánto cambia la distribución antes de confirmar el umbral operativo.")
             self._render_cutoff_view(stage_host, force_rebuild=force_rebuild)
             return
 
@@ -960,7 +968,7 @@ class HomePanel(ctk.CTkFrame):
         card = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(card, text=f"Etapa {stage} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
+        ctk.CTkLabel(card, text=f"Etapa {_display_step_name(stage)} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
         hint = _build_active_step_hint(stage, self.service.get_operational_state())
         ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_BLOCKED, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
         ctk.CTkLabel(
@@ -1178,7 +1186,7 @@ class HomePanel(ctk.CTkFrame):
         snapshot = self.service.get_analysis_context_state()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot)} · Ajustes de capping locales en esta vista.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
-        ctk.CTkLabel(wrapper, text="Microlectura: identifica cuánto porcentaje de muestras y máximos cambia por cutoff.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkLabel(wrapper, text="Microlectura: identifica cuánto porcentaje de muestras y máximos cambia por umbral.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
         ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
 
         container = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
@@ -1355,7 +1363,7 @@ class HomePanel(ctk.CTkFrame):
             self._trace_ui_action("cambiar_vista", refresh_type="none", extra={"requested_step": step_name, "reason": "same_step_ignored"})
             return
         self.status_text.set(self.service.set_workflow_step(step_name))
-        self.step_label.set(f"Paso actual: {step_name}")
+        self.step_label.set(f"Paso actual: {_display_step_name(step_name)}")
         self._append_activity(self.status_text.get())
         self._trace_ui_action("cambiar_vista", refresh_type="dashboard_full", extra={"requested_step": step_name})
         self._render_step(step_name)
@@ -1591,7 +1599,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_output_var.set(f"{self.target_var.get()}_capped" if self.target_var.get() else "")
         self.dynamic_keep_class_var.set(True)
         self.dynamic_percentile_label_var.set("Percentil: P95.0")
-        self.dynamic_cutoff_label_var.set("Cutoff actual: -")
+        self.dynamic_cutoff_label_var.set("Umbral actual: -")
         self.dynamic_impact_label_var.set("Impacto: Sin preview.")
         self.spatial_color_var.set(self.target_var.get())
 
@@ -1640,7 +1648,7 @@ class HomePanel(ctk.CTkFrame):
     def _render_cutoff_preview_plots(self, parent: ctk.CTkFrame) -> None:
         target = self.cutoff_target_var.get() or self.target_var.get()
         if not target:
-            self.dynamic_cutoff_label_var.set("Cutoff actual: -")
+            self.dynamic_cutoff_label_var.set("Umbral actual: -")
             self.dynamic_impact_label_var.set("Impacto: sin datos para preview")
             ctk.CTkLabel(parent, text="Selecciona variable numérica para preview.", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
@@ -1649,66 +1657,82 @@ class HomePanel(ctk.CTkFrame):
         try:
             preview = self.service.prepare_dynamic_cutoff_preview(target, mode, float(self.dynamic_slider_var.get()))
         except Exception as exc:
-            self.dynamic_cutoff_label_var.set("Cutoff actual: -")
+            self.dynamic_cutoff_label_var.set("Umbral actual: -")
             self.dynamic_impact_label_var.set("Impacto: no disponible")
             ctk.CTkLabel(parent, text=f"No se pudo generar preview: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
 
         cutoff = float(preview["cutoff_value"])
         self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
-        self.dynamic_cutoff_label_var.set(f"Cutoff actual: {cutoff:.6g}")
+        self.dynamic_cutoff_label_var.set(f"Umbral actual: {cutoff:.6g}")
         self.dynamic_impact_label_var.set(
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
 
-        chart = DashboardGrid(parent, 2, 2)
-        ax_hist = chart.axis(0, 0)
-        ax_cdf = chart.axis(1, 0)
-        ax_before_after = chart.axis(1, 1)
-        ax_prob = chart.axis(0, 1)
-        for axis in (ax_hist, ax_cdf, ax_before_after, ax_prob):
-            apply_axis_style(axis)
+        try:
+            chart = DashboardGrid(parent, 2, 2)
+            ax_hist = chart.axis(0, 0)
+            ax_cdf = chart.axis(1, 0)
+            ax_before_after = chart.axis(1, 1)
+            ax_prob = chart.axis(0, 1)
+            for axis in (ax_hist, ax_cdf, ax_before_after, ax_prob):
+                apply_axis_style(axis)
 
-        ax_hist.hist(preview["retained_values"], bins="sturges", color=SEM_GRAY, alpha=0.24, label="Base")
-        if preview["truncated_values"]:
-            ax_hist.hist(preview["truncated_values"], bins="sturges", color=SEM_BLUE, alpha=0.78, label="Cap")
-        add_reference_line(ax_hist, cutoff, label=f"Cutoff {cutoff:.3g}", color=SEM_ORANGE, y_pos=0.92)
-        ax_hist.set_title("Distribución original vs operativa", color=PLOT_TXT)
-        ax_hist.set_xlabel("Ley Cu (%)")
-        ax_hist.set_ylabel("Frecuencia (n)")
-        ax_hist.legend(fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
+            ax_hist.hist(preview["retained_values"], bins="sturges", color=SEM_GRAY, alpha=0.24, label="Base")
+            if preview["truncated_values"]:
+                ax_hist.hist(preview["truncated_values"], bins="sturges", color=SEM_BLUE, alpha=0.78, label="Cap")
+            add_reference_line(ax_hist, cutoff, label=f"Umbral {cutoff:.3g}", color=SEM_ORANGE, y_pos=0.92)
+            ax_hist.set_title("Distribución original vs operativa", color=PLOT_TXT)
+            ax_hist.set_xlabel("Ley Cu (%)")
+            ax_hist.set_ylabel("Frecuencia (n)")
+            ax_hist.legend(fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
 
-        retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
-        for x_val, y_val in zip(preview["sorted_values"], preview["theoretical_quantiles"]):
-            if x_val <= cutoff:
-                retained_x.append(x_val)
-                retained_y.append(y_val)
-            else:
-                trunc_x.append(x_val)
-                trunc_y.append(y_val)
-        ax_prob.scatter(retained_x, retained_y, s=9, color=SEM_BLUE, alpha=0.70)
-        if trunc_x:
-            ax_prob.scatter(trunc_x, trunc_y, s=10, color=SEM_ORANGE, alpha=0.9)
-        ax_prob.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
-        ax_prob.set_title("QQ diagnóstico (secundario)", color=TXT_MUTED)
-        ax_prob.set_xlabel("Ley Cu (%)")
-        ax_prob.set_ylabel("Cuantiles teóricos")
+            retained_x, retained_y, trunc_x, trunc_y = [], [], [], []
+            for x_val, y_val in zip(preview["sorted_values"], preview["theoretical_quantiles"]):
+                if x_val <= cutoff:
+                    retained_x.append(x_val)
+                    retained_y.append(y_val)
+                else:
+                    trunc_x.append(x_val)
+                    trunc_y.append(y_val)
+            ax_prob.scatter(retained_x, retained_y, s=9, color=SEM_BLUE, alpha=0.70)
+            if trunc_x:
+                ax_prob.scatter(trunc_x, trunc_y, s=10, color=SEM_ORANGE, alpha=0.9)
+            ax_prob.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
+            ax_prob.set_title("QQ diagnóstico (secundario)", color=TXT_MUTED)
+            ax_prob.set_xlabel("Ley Cu (%)")
+            ax_prob.set_ylabel("Cuantiles teóricos")
 
-        original_sorted = sorted(preview["values"])
-        capped_sorted = sorted(preview["capped_values"])
-        original_cdf = [(idx + 1) / len(original_sorted) for idx in range(len(original_sorted))]
-        capped_cdf = [(idx + 1) / len(capped_sorted) for idx in range(len(capped_sorted))]
-        ax_cdf.plot(original_sorted, original_cdf, color=SEM_GRAY, label="Original", linewidth=1.4)
-        ax_cdf.plot(capped_sorted, capped_cdf, color=SEM_BLUE, label="Operativa", linewidth=1.6)
-        ax_cdf.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
-        ax_cdf.set_title("Impacto acumulado del capping", color=PLOT_TXT)
-        ax_cdf.set_xlabel("Ley Cu (%)")
-        ax_cdf.set_ylabel("F(x)")
-        ax_cdf.legend(fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
+            original_sorted = sorted(preview["values"])
+            capped_sorted = sorted(preview["capped_values"])
+            original_cdf = [(idx + 1) / len(original_sorted) for idx in range(len(original_sorted))]
+            capped_cdf = [(idx + 1) / len(capped_sorted) for idx in range(len(capped_sorted))]
+            ax_cdf.plot(original_sorted, original_cdf, color=SEM_GRAY, label="Original", linewidth=1.4)
+            ax_cdf.plot(capped_sorted, capped_cdf, color=SEM_BLUE, label="Operativa", linewidth=1.6)
+            ax_cdf.axvline(cutoff, color=SEM_ORANGE, linestyle="--", linewidth=1.2)
+            ax_cdf.set_title("Impacto acumulado del capping", color=PLOT_TXT)
+            ax_cdf.set_xlabel("Ley Cu (%)")
+            ax_cdf.set_ylabel("F(x)")
+            ax_cdf.legend(fontsize=CHART_FONT_SIZE_LEGEND, frameon=False)
 
-        ax_before_after.boxplot([preview["values"], preview["capped_values"]], labels=["Base", "Cap"], patch_artist=True, showfliers=False, widths=0.55)
-        ax_before_after.set_title("Comparación resumen", color=TXT_MUTED)
-        chart.render()
+            ax_before_after.boxplot([preview["values"], preview["capped_values"]], tick_labels=["Base", "Cap"], patch_artist=True, showfliers=False, widths=0.55)
+            ax_before_after.set_title("Comparación resumen", color=TXT_MUTED)
+            chart.render()
+        except Exception as exc:
+            DashboardGrid.clear(parent)
+            ctk.CTkLabel(parent, text=f"No se pudo renderizar el panel de outliers ({type(exc).__name__}).", text_color=SEM_ORANGE).pack(anchor="w", padx=8, pady=8)
+            self.service.activity_log.log(
+                "cutoff_preview_render_failed",
+                "error",
+                "Fallo en render Matplotlib de Control de Outliers.",
+                {
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "target": target,
+                    "mode": mode,
+                },
+            )
+            self._append_activity(f"⚠️ Render Control de Outliers falló: {type(exc).__name__}: {exc}")
 
     def _on_apply_dynamic_cutoff(self) -> None:
         self._trace_ui_action("confirmar_capping", refresh_type="none")

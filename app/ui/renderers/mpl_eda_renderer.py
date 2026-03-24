@@ -74,12 +74,12 @@ class MatplotlibEDARenderer(EDARenderer):
     ) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.06,
-            "right": 0.988,
-            "top": 0.965,
-            "bottom": 0.12,
-            "wspace": 0.12,
-            "hspace": 0.12,
+            "left": 0.075,
+            "right": 0.975,
+            "top": 0.91,
+            "bottom": 0.16,
+            "wspace": 0.18,
+            "hspace": 0.20,
         }
         apply_axis_style(ax)
         if original_values != values:
@@ -113,12 +113,12 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.12,
-            "right": 0.982,
-            "top": 0.955,
-            "bottom": 0.14,
-            "wspace": 0.12,
-            "hspace": 0.12,
+            "left": 0.16,
+            "right": 0.97,
+            "top": 0.90,
+            "bottom": 0.20,
+            "wspace": 0.18,
+            "hspace": 0.20,
         }
         apply_axis_style(ax)
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
@@ -165,14 +165,15 @@ class MatplotlibEDARenderer(EDARenderer):
                 bottom_margin += 0.03
             if max_label_len >= 24:
                 bottom_margin += 0.03
-            bottom_margin = min(bottom_margin, 0.33)
+            bottom_margin = min(bottom_margin, 0.35)
+        bottom_margin = max(bottom_margin, 0.20)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.12,
-            "right": 0.982,
-            "top": 0.955,
+            "left": 0.14,
+            "right": 0.97,
+            "top": 0.90,
             "bottom": bottom_margin,
-            "wspace": 0.12,
-            "hspace": 0.12,
+            "wspace": 0.18,
+            "hspace": 0.20,
         }
         apply_axis_style(ax)
         if domain_enabled:
@@ -216,12 +217,12 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_iqr(self, grid, *, sorted_values: list[float], p50: float, p90: float, mean_val: float, context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.06,
-            "right": 0.99,
-            "top": 0.84,
-            "bottom": 0.33,
-            "wspace": 0.10,
-            "hspace": 0.10,
+            "left": 0.09,
+            "right": 0.98,
+            "top": 0.80,
+            "bottom": 0.38,
+            "wspace": 0.16,
+            "hspace": 0.16,
         }
         apply_axis_style(ax)
         n_values = len(sorted_values)

@@ -190,13 +190,13 @@ class CutoffService:
         if self.host.current_dataset is None:
             return False, "No hay dataset cargado."
         if self.host.variable_config is None:
-            return False, "Configura X/Y/Z/target antes de aplicar cutoffs."
+            return False, "Configura X/Y/Z/target antes de aplicar Control de Outliers."
 
         if not enabled:
             self.clear_cutoff_state()
             self.host.workflow_state.effective_target_column = self.host.variable_config.target_column
-            self.host.activity_log.log("cutoff_disabled", "info", "Cutoffs desactivados. Se usa target original.", {"target": self.host.variable_config.target_column})
-            return True, "Cutoffs desactivados. Se mantiene variable original."
+            self.host.activity_log.log("cutoff_disabled", "info", "Control de Outliers manual desactivado. Se usa target original.", {"target": self.host.variable_config.target_column})
+            return True, "Control de Outliers manual desactivado. Se mantiene variable original."
 
         if target_column not in self.host.current_dataset.columns:
             return False, "La variable seleccionada no existe en el dataset."
@@ -233,7 +233,7 @@ class CutoffService:
         self.host.activity_log.log(
             "cutoff_applied",
             "success",
-            "Cutoffs manuales aplicados.",
+            "Límites manuales de Control de Outliers aplicados.",
             {
                 "target": target_column,
                 "limits": limits,
@@ -241,4 +241,4 @@ class CutoffService:
                 "output_column": output_name,
             },
         )
-        return True, f"Cutoffs aplicados. Nueva variable categórica: {output_name}"
+        return True, f"Control de Outliers aplicado. Nueva variable categórica: {output_name}"
