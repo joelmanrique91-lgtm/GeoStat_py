@@ -243,26 +243,35 @@ class VariographyStageView:
         self._render_text_center(message)
 
     def _render_result_plot(self, result: dict[str, object], ok: bool) -> None:
+        import traceback
+
         if self._plot_host is None:
             return
+        print("DEBUG: render_result_plot called")
         DashboardGrid.clear(self._plot_host)
-        grid = DashboardGrid(self._plot_host, 2, 2, figsize=(16.2, 8.8), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
-        info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
-        self.renderer.render(
-            grid,
-            result,
-            VariographyRenderContext(
-                target_label=self.target_var.get() or "target",
-                info_text=info,
-                chart_text_color=CHART_TEXT,
-                chart_label_size=CHART_FONT_SIZE_LABEL,
-                chart_legend_size=CHART_FONT_SIZE_LEGEND,
-            ),
-        )
-        if ok:
-            self.status_var.set(f"{self.status_var.get()} · Estado: listo para análisis.")
-        else:
-            self.status_var.set(f"{self.status_var.get()} · Estado: revisar bloqueos antes de usar resultados.")
+        try:
+            if result is None:
+                raise ValueError("Resultado de variografía es None")
+            grid = DashboardGrid(self._plot_host, 2, 2, figsize=(16.2, 8.8), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
+            info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
+            self.renderer.render(
+                grid,
+                result,
+                VariographyRenderContext(
+                    target_label=self.target_var.get() or "target",
+                    info_text=info,
+                    chart_text_color=CHART_TEXT,
+                    chart_label_size=CHART_FONT_SIZE_LABEL,
+                    chart_legend_size=CHART_FONT_SIZE_LEGEND,
+                ),
+            )
+            if ok:
+                self.status_var.set(f"{self.status_var.get()} · Estado: listo para análisis.")
+            else:
+                self.status_var.set(f"{self.status_var.get()} · Estado: revisar bloqueos antes de usar resultados.")
+        except Exception as exc:
+            traceback.print_exc()
+            self._render_text_center(f"Error al renderizar variograma:\n{exc}")
 
     @staticmethod
     def _parse_float(value: str) -> float:
