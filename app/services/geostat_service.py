@@ -971,6 +971,31 @@ class GeostatService:
         domains_reasons: list[str] = []
         domain_warnings: list[str] = []
         variography_reasons: list[str] = []
+        variography_warnings: list[str] = []
+        if not has_dataset:
+            variography_reasons.append("missing_dataset")
+        if not has_variable_config:
+            variography_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config:
+            missing_xyz = [
+                col
+                for col in [self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column]
+                if col not in self.current_dataset.dataframe.columns
+            ]
+            if missing_xyz:
+                variography_reasons.append("missing_spatial_columns")
+        if has_dataset and has_variable_config and not resolved_target_exists:
+            variography_reasons.append("missing_target")
+        if has_dataset and has_variable_config and resolved_target_exists:
+            filtered_for_variography = self._get_filtered_dataframe(snapshot)
+            if filtered_for_variography is None:
+                variography_reasons.append("missing_dataset")
+            else:
+                active_rows = int(len(filtered_for_variography))
+                if active_rows < 30:
+                    variography_reasons.append("insufficient_data")
+                if str(snapshot.get("active_domain_filter", "")).strip() and active_rows < 50:
+                    variography_warnings.append("low_data_after_domain_filter")
 
         return {
             "current_step": self.workflow_state.current_step,
@@ -989,7 +1014,7 @@ class GeostatService:
                 "cutoffs": _stage(not cutoffs_reasons, cutoffs_reasons),
                 "spatial": _stage(not spatial_reasons, spatial_reasons),
                 "domains": _stage(not domains_reasons, domains_reasons, warnings=domain_warnings),
-                "variography": _stage(not variography_reasons, variography_reasons),
+                "variography": _stage(not variography_reasons, variography_reasons, warnings=variography_warnings),
             },
         }
 

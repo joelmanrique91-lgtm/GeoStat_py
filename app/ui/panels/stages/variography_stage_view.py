@@ -18,6 +18,7 @@ class VariographyStageView:
     def __init__(self, controller: VariographyController) -> None:
         self.controller = controller
         self.renderer = MatplotlibVariographyRenderer()
+        self._session = self.controller.service.get_variography_session()
         self.target_var = ctk.StringVar(value="")
         self.lag_distance_var = ctk.StringVar(value="10.0")
         self.n_lags_var = ctk.StringVar(value="16")
@@ -36,6 +37,7 @@ class VariographyStageView:
         self._plot_host: ctk.CTkFrame | None = None
         self._compute_button: ctk.CTkButton | None = None
         self._compute_in_progress = False
+        self._auto_compute_done = False
         self._bind_dirty_traces()
 
     def mount(self, parent: ctk.CTkFrame) -> None:
@@ -79,6 +81,29 @@ class VariographyStageView:
         alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
         ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+
+        cached = self._session.last_response
+        if cached is not None and cached.result is not None:
+            self.status_var.set(str(cached.message))
+            self.warning_var.set("\n".join([f"[{item.code}] {item.message}" for item in cached.warnings]) if cached.warnings else "")
+            self.blocker_var.set("\n".join([f"[{item.code}] {item.message}" for item in cached.blockers]) if cached.blockers else "")
+            result_payload = {
+                "lag_centers": cached.result.lag_centers,
+                "gamma_values": cached.result.gamma_values,
+                "pair_counts": cached.result.pair_counts,
+                "source_points": cached.result.source_points,
+                "used_points": cached.result.used_points,
+                "downsampled": cached.result.downsampled,
+                "metadata": cached.result.metadata,
+            }
+            self._render_result_plot(result_payload, bool(cached.ok))
+            return
+
+        if self._is_ready_for_compute() and not self._auto_compute_done:
+            self._auto_compute_done = True
+            parent.after(60, self._on_compute)
+            return
+        self._render_empty_plot("Sin cálculo aún. Presione 'Calcular'.")
 
     def _build_controls(self, parent: ctk.CTkFrame, target_options: list[str]) -> None:
         row = 0
@@ -212,8 +237,10 @@ class VariographyStageView:
     def _render_empty_plot(self, message: str = "Sin cálculo aún.") -> None:
         if self._plot_host is None:
             return
+        if not str(message or "").strip():
+            message = self._default_empty_message()
         DashboardGrid.clear(self._plot_host)
-        ctk.CTkLabel(self._plot_host, text=message, text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=8)
+        self._render_text_center(message)
 
     def _render_result_plot(self, result: dict[str, object], ok: bool) -> None:
         if self._plot_host is None:
@@ -245,3 +272,32 @@ class VariographyStageView:
     @staticmethod
     def _parse_int(value: str) -> int:
         return int(float(str(value).strip()))
+
+    def _is_ready_for_compute(self) -> bool:
+        snapshot = self.controller.service.get_analysis_context_snapshot()
+        if str(snapshot.get("readiness", "")) == "blocked":
+            return False
+        target = str(snapshot.get("resolved_target_column", "")).strip()
+        if not target:
+            return False
+        data = self.controller.service._get_filtered_dataframe(snapshot)
+        if data is None or len(data) < 30:
+            return False
+        return bool(target in data.columns)
+
+    def _default_empty_message(self) -> str:
+        snapshot = self.controller.service.get_analysis_context_snapshot()
+        if self.controller.service.current_dataset is None:
+            return "Debe cargar un dataset."
+        target = str(snapshot.get("resolved_target_column", "")).strip()
+        if not target:
+            return "Debe seleccionar variable objetivo."
+        data = self.controller.service._get_filtered_dataframe(snapshot)
+        if data is None or len(data) < 30:
+            return "Datos insuficientes para variografía (<30 muestras)."
+        return "Sin cálculo aún. Presione 'Calcular'."
+
+    def _render_text_center(self, message: str) -> None:
+        if self._plot_host is None:
+            return
+        ctk.CTkLabel(self._plot_host, text=message, text_color=TEXT_MUTED, justify="center").pack(fill="both", expand=True, padx=8, pady=8)
