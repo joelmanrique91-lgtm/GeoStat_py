@@ -93,6 +93,14 @@ PAD_CARD_X = 14
 PAD_STACK_Y = 4
 PAD_SECTION_Y = 8
 SIDEBAR_WIDTH = 308
+STEP_BUTTON_WIDTH = 112
+STEP_BUTTON_HEIGHT = 24
+ACTION_TOGGLE_WIDTH = 74
+LOG_TOGGLE_WIDTH = 130
+LOG_BOX_HEIGHT = 44
+WRAP_STAGE_BLOCKED = 1020
+WRAP_STAGE_SUMMARY = 1120
+WRAP_DYNAMIC_IMPACT = 350
 SPATIAL_GUARDRAIL_NOTE = "Uso: lectura exploratoria, no inferencia de continuidad."
 
 
@@ -367,11 +375,11 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkButton(
             self.log_panel,
             text="Ocultar/Mostrar log",
-            width=130,
+            width=LOG_TOGGLE_WIDTH,
             **self._button_style("aux"),
             command=self._toggle_log,
         ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
-        self.log_box = ctk.CTkTextbox(self.log_panel, height=44, fg_color=BG_SOFT, text_color=TXT_MAIN, font=ui_font(FONT_SMALL))
+        self.log_box = ctk.CTkTextbox(self.log_panel, height=LOG_BOX_HEIGHT, fg_color=BG_SOFT, text_color=TXT_MAIN, font=ui_font(FONT_SMALL))
         self.log_box.grid(row=0, column=1, sticky="ew", padx=6, pady=3)
         self.log_box.insert("1.0", "Actividad reciente\n")
         self.log_box.configure(state="disabled")
@@ -418,8 +426,8 @@ class HomePanel(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 frame,
                 text=labels[step],
-                width=112,
-                height=24,
+                width=STEP_BUTTON_WIDTH,
+                height=STEP_BUTTON_HEIGHT,
                 corner_radius=BTN_CORNER_RADIUS,
                 fg_color=C_TAB_IDLE,
                 hover_color=BTN_NEUTRAL_HOVER,
@@ -641,7 +649,7 @@ class HomePanel(ctk.CTkFrame):
         head.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(head, text="Controles etapa activa", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).grid(row=0, column=0, sticky="w")
         toggle_text = "Expandir" if self.stage_actions_collapsed else "Ocultar"
-        self.action_bar_toggle_button = ctk.CTkButton(head, text=toggle_text, width=74, command=self._toggle_stage_actions, **self._button_style("aux"))
+        self.action_bar_toggle_button = ctk.CTkButton(head, text=toggle_text, width=ACTION_TOGGLE_WIDTH, command=self._toggle_stage_actions, **self._button_style("aux"))
         self.action_bar_toggle_button.grid(row=0, column=1, sticky="e")
         self.action_bar_body = ctk.CTkFrame(block, fg_color="transparent")
         self.action_bar_body.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 2))
@@ -845,7 +853,7 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkLabel(parent, textvariable=self.dynamic_cutoff_label_var, text_color=TXT_MAIN).grid(row=4, column=1, sticky="e", padx=8)
 
         ctk.CTkFrame(parent, height=1, fg_color=DIVIDER_SOFT).grid(row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=4)
-        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ui_font(FONT_SMALL), wraplength=350, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
+        ctk.CTkLabel(parent, textvariable=self.dynamic_impact_label_var, text_color=TXT_MAIN, font=ui_font(FONT_SMALL), wraplength=WRAP_DYNAMIC_IMPACT, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8)
 
         ctk.CTkSwitch(parent, text="Capping dinámico", variable=self.dynamic_cutoff_enabled_var, text_color=TXT_MAIN, command=self._schedule_cutoff_preview).grid(row=7, column=0, sticky="w", padx=8, pady=(5, 6))
         ctk.CTkButton(parent, text="Confirmar capping", command=self._on_apply_dynamic_cutoff, **self._button_style("primary")).grid(row=7, column=1, sticky="ew", padx=8, pady=(5, 6))
@@ -961,13 +969,13 @@ class HomePanel(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(card, text=f"Etapa {stage} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
         hint = _build_active_step_hint(stage, self.service.get_workflow_readiness())
-        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=1020, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
+        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_BLOCKED, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
         ctk.CTkLabel(
             card,
             text="Usa la barra de acciones superior para completar la etapa requerida y desbloquear esta vista.",
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
-            wraplength=1020,
+            wraplength=WRAP_STAGE_BLOCKED,
             justify="left",
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
@@ -1033,7 +1041,7 @@ class HomePanel(ctk.CTkFrame):
             text=f"{snapshot.get('active_domain_column') or 'Sin dominio'} · {snapshot.get('active_domain_filter') or 'Todos'} · {capping_status}",
             text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
-            wraplength=1120,
+            wraplength=WRAP_STAGE_SUMMARY,
             justify="left",
         ).grid(row=1, column=0, sticky="w", padx=2, pady=(0, 0))
 
