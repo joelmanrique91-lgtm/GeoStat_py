@@ -37,6 +37,32 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("draw_idle()", source)
         self.assertIn("after(80, self._resize_to_parent)", source)
 
+    def test_eda_view_uses_typed_cutoff_state_access(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertNotIn("state[\"dynamic_enabled\"]", source)
+        self.assertNotIn("state[\"dynamic_cutoff_value\"]", source)
+        self.assertNotIn("state[\"enabled\"]", source)
+
+    def test_eda_view_shows_visible_fallback_and_logs_renderer_failures(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertIn("No se pudo renderizar el panel EDA", source)
+        self.assertIn("eda_render_failed", source)
+        self.assertIn("Render EDA falló", source)
+
+    def test_eda_view_uses_responsive_host_weights_and_aspect_guards(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertIn("plot_card.grid_rowconfigure(1, weight=0, minsize=58)", source)
+        self.assertIn("main_row.grid_columnconfigure(0, weight=11)", source)
+        self.assertIn("right_col.grid_rowconfigure(0, weight=13)", source)
+        self.assertIn("max_aspect_ratio=2.25", source)
+        self.assertIn("max_aspect_ratio=1.65", source)
+
+    def test_eda_renderer_adjusts_boxplot_bottom_margin_for_long_labels(self) -> None:
+        source = Path("app/ui/renderers/mpl_eda_renderer.py").read_text(encoding="utf-8")
+        self.assertIn("max_label_len", source)
+        self.assertIn("bottom_margin = min(bottom_margin, 0.33)", source)
+        self.assertIn("labelrotation=rotation", source)
+
     def test_variography_view_restores_busy_state_after_compute_callback(self) -> None:
         source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
         self.assertIn("finally:", source)

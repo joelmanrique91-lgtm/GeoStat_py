@@ -74,10 +74,10 @@ class MatplotlibEDARenderer(EDARenderer):
     ) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.05,
-            "right": 0.992,
-            "top": 0.985,
-            "bottom": 0.09,
+            "left": 0.06,
+            "right": 0.988,
+            "top": 0.965,
+            "bottom": 0.12,
             "wspace": 0.12,
             "hspace": 0.12,
         }
@@ -94,7 +94,7 @@ class MatplotlibEDARenderer(EDARenderer):
         ax.set_xlabel("Ley Cu (%)")
         ax.set_ylabel("Frecuencia (n)")
         ax.tick_params(axis="both", labelsize=context.chart_label_size + 1)
-        ax.legend(loc="upper right", fontsize=context.chart_legend_size, frameon=False)
+        ax.legend(loc="upper right", fontsize=context.chart_legend_size, frameon=False, borderaxespad=0.35, handlelength=1.4)
         ax.margins(x=0.02)
         tail_hint = "cola dominante alta" if mean_val >= p50 else "cola dominante baja"
         ax.text(
@@ -114,9 +114,9 @@ class MatplotlibEDARenderer(EDARenderer):
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.12,
-            "right": 0.985,
-            "top": 0.97,
-            "bottom": 0.12,
+            "right": 0.982,
+            "top": 0.955,
+            "bottom": 0.14,
             "wspace": 0.12,
             "hspace": 0.12,
         }
@@ -142,7 +142,7 @@ class MatplotlibEDARenderer(EDARenderer):
             ax.set_xlabel("Cuantiles normales")
             ax.set_ylabel("Ley Cu (%)")
             ax.tick_params(axis="both", labelsize=context.chart_label_size)
-            ax.legend(loc="upper left", fontsize=context.chart_legend_size, frameon=False)
+            ax.legend(loc="upper left", fontsize=context.chart_legend_size, frameon=False, borderaxespad=0.35, handlelength=1.4)
             ax.margins(x=0.03, y=0.05)
         else:
             ax.axis("off")
@@ -151,17 +151,31 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_boxplot(self, grid, *, data: dict[str, object], values: list[float], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        domain_data = data.get("domain_boxplot", {})
+        domain_enabled = bool(domain_data.get("enabled"))
+        label_count = len(domain_data.get("labels", [])) if domain_enabled else 0
+        label_lengths = [len(str(label)) for label in domain_data.get("labels", [])] if domain_enabled else []
+        max_label_len = max(label_lengths) if label_lengths else 0
+        bottom_margin = 0.14
+        if domain_enabled:
+            bottom_margin = 0.19
+            if label_count >= 4:
+                bottom_margin += 0.03
+            if max_label_len >= 16:
+                bottom_margin += 0.03
+            if max_label_len >= 24:
+                bottom_margin += 0.03
+            bottom_margin = min(bottom_margin, 0.33)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.12,
-            "right": 0.985,
-            "top": 0.97,
-            "bottom": 0.18 if data.get("domain_boxplot", {}).get("enabled") else 0.13,
+            "right": 0.982,
+            "top": 0.955,
+            "bottom": bottom_margin,
             "wspace": 0.12,
             "hspace": 0.12,
         }
         apply_axis_style(ax)
-        domain_data = data.get("domain_boxplot", {})
-        if domain_data.get("enabled"):
+        if domain_enabled:
             paired = list(zip(domain_data["labels"], domain_data["values"]))
             paired.sort(key=lambda item: (sum(item[1]) / len(item[1])) if item[1] else float("-inf"), reverse=True)
             ordered_labels = [f"{label} (n={len(vals)})" for label, vals in paired]
@@ -171,9 +185,11 @@ class MatplotlibEDARenderer(EDARenderer):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            ax.tick_params(axis="x", labelrotation=20, labelsize=context.chart_legend_size)
+            rotation = 25 if max_label_len < 18 else 33
+            ax.tick_params(axis="x", labelrotation=rotation, labelsize=max(context.chart_legend_size - 1, 8))
             for tick in ax.get_xticklabels():
                 tick.set_horizontalalignment("right")
+                tick.set_verticalalignment("top")
             ax.set_ylabel("Ley Cu (%)")
             ax.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
             ax.margins(x=0.10)
@@ -201,9 +217,9 @@ class MatplotlibEDARenderer(EDARenderer):
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.06,
-            "right": 0.992,
-            "top": 0.88,
-            "bottom": 0.38,
+            "right": 0.99,
+            "top": 0.84,
+            "bottom": 0.33,
             "wspace": 0.10,
             "hspace": 0.10,
         }
