@@ -11,6 +11,15 @@ import subprocess
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.models.dataset_model import DatasetModel
+from app.models.operational_state import (
+    AnalysisContextState,
+    CutoffState,
+    DomainState,
+    GeostatOperationalState,
+    StageReadiness,
+    VariableSelectionState,
+    WorkflowReadinessState,
+)
 from app.models.variable_config_model import VariableConfigModel
 from app.models.variography import VariographyComputeResponse, VariographySession
 from app.models.workflow_state_model import WorkflowStateModel
@@ -37,6 +46,18 @@ STEP_EVENT_MAP = {
     "Variografía": "workflow_step_variography_opened",
 }
 DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
+BLOCKING_REASON_HINTS = {
+    "missing_dataset": "Carga un CSV para continuar.",
+    "missing_variable_config": "Configura y confirma X/Y/Z/target.",
+    "missing_resolved_target_column": "Revisa target/cutoffs y confirma la variable activa.",
+    "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
+    "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
+    "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
+    "non_numeric_target_for_domain_stats": "Usa un target numérico para estadísticas de dominios.",
+    "invalid_active_domain_filter_column": "Limpia o corrige el filtro de dominio activo.",
+    "insufficient_data": "Datos insuficientes para variografía. Amplía muestra o ajusta filtros/dominio.",
+    "low_data_after_domain_filter": "El filtro de dominio deja pocos datos; revisa la selección activa.",
+}
 
 
 @dataclass
@@ -225,6 +246,7 @@ class GeostatService:
         self.workflow_state = WorkflowStateModel()
         self.autodetected_columns: dict[str, str] = {}
         self.variography_service = VariographyApplicationService(host_service=self)
+        self._domain_filter_context_enabled = True
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -274,6 +296,7 @@ class GeostatService:
         self._clear_cutoff_state()
         self._clear_dynamic_cutoff_state()
         self._clear_domain_state()
+        self._domain_filter_context_enabled = True
         self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
@@ -400,10 +423,12 @@ class GeostatService:
 
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         del ordered_layers, active_layers, min_samples, include_missing
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
         del domain_definition
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
@@ -413,7 +438,8 @@ class GeostatService:
         active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
         if not active_domain_column:
             self.workflow_state.active_domain_filter = ""
-            return CutoffResult(False, "No hay columna de dominio disponible.")
+            self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio ignorado: sin columna de dominio activa.", {})
+            return CutoffResult(True, "Filtro de dominio ignorado (módulo dominios deshabilitado).")
         selected = str(domain_name or "").strip()
         if not selected or selected.lower() == "todos":
             self.workflow_state.active_domain_filter = ""
@@ -444,24 +470,27 @@ class GeostatService:
         values = sorted({str(value).strip() for value in dataframe[active_domain_column].dropna().tolist() if str(value).strip()})
         return values
 
+    def get_domain_state_typed(self) -> DomainState:
+        snapshot_payload = self.get_analysis_context_snapshot()
+        return DomainState(
+            ordered_layers=(),
+            active_layers=(),
+            output_column="",
+            min_samples=1,
+            include_missing=False,
+            effective_target_column=str(snapshot_payload["resolved_target_column"]),
+            capping_confirmed=bool(self.has_confirmed_dynamic_capping()),
+            domain_definition={},
+            active_domain_filter="",
+            domain_estimation_values=(),
+            domains_ready=True,
+            ui_filters=_default_domain_ui_filters(),
+            filter_columns=_default_domain_ui_filters(),
+            assignment_history=(),
+        )
+
     def get_domain_state(self) -> dict[str, object]:
-        snapshot = self.get_analysis_context_snapshot()
-        return {
-            "ordered_layers": [],
-            "active_layers": [],
-            "output_column": "",
-            "min_samples": 1,
-            "include_missing": False,
-            "effective_target_column": str(snapshot["resolved_target_column"]),
-            "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
-            "domain_definition": {},
-            "active_domain_filter": "",
-            "domain_estimation_values": [],
-            "domains_ready": True,
-            "ui_filters": _default_domain_ui_filters(),
-            "filter_columns": _default_domain_ui_filters(),
-            "assignment_history": [],
-        }
+        return self.get_domain_state_typed().as_dict()
 
     def _get_domain_ui_filtered_dataframe(self):
         if self.current_dataset is None:
@@ -483,6 +512,7 @@ class GeostatService:
 
     def confirm_domain_assignment(self, domain_name: str) -> CutoffResult:
         del domain_name
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def prepare_domain_statistics(self) -> dict[str, object]:
@@ -566,6 +596,7 @@ class GeostatService:
             )
 
         self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
+        self._domain_filter_context_enabled = bool(domain_column)
         self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
         self.workflow_state.active_support = "Muestra original"
         self._clear_cutoff_state()
@@ -589,24 +620,27 @@ class GeostatService:
             return []
         return [column for column in self.current_dataset.columns if not _is_numeric_dtype(self.current_dataset.dataframe[column])]
 
-    def get_cutoff_state(self) -> dict[str, object]:
+    def get_cutoff_state_typed(self) -> CutoffState:
         snapshot = self.get_analysis_context_snapshot()
         default_target = str(snapshot["base_target_column"])
-        return {
-            "enabled": self.workflow_state.cutoffs_enabled,
-            "target_column": self.workflow_state.cutoff_target_column or default_target,
-            "limits": [float(v) for v in self.workflow_state.cutoff_limits],
-            "labels": list(self.workflow_state.cutoff_labels),
-            "output_column": self.workflow_state.cutoff_output_column,
-            "effective_target_column": str(snapshot["resolved_target_column"]),
-            "dynamic_enabled": self.workflow_state.dynamic_cutoff_enabled,
-            "dynamic_target_column": self.workflow_state.dynamic_cutoff_target_column or default_target,
-            "dynamic_mode": self.workflow_state.dynamic_cutoff_mode,
-            "dynamic_percent": float(self.workflow_state.dynamic_cutoff_percent),
-            "dynamic_cutoff_value": float(self.workflow_state.dynamic_cutoff_value),
-            "dynamic_output_column": self.workflow_state.dynamic_cutoff_output_column,
-            "dynamic_category_column": self.workflow_state.dynamic_cutoff_category_column,
-        }
+        return CutoffState(
+            enabled=bool(self.workflow_state.cutoffs_enabled),
+            target_column=self.workflow_state.cutoff_target_column or default_target,
+            limits=tuple(float(v) for v in self.workflow_state.cutoff_limits),
+            labels=tuple(self.workflow_state.cutoff_labels),
+            output_column=self.workflow_state.cutoff_output_column,
+            effective_target_column=str(snapshot["resolved_target_column"]),
+            dynamic_enabled=bool(self.workflow_state.dynamic_cutoff_enabled),
+            dynamic_target_column=self.workflow_state.dynamic_cutoff_target_column or default_target,
+            dynamic_mode=self.workflow_state.dynamic_cutoff_mode,
+            dynamic_percent=float(self.workflow_state.dynamic_cutoff_percent),
+            dynamic_cutoff_value=float(self.workflow_state.dynamic_cutoff_value),
+            dynamic_output_column=self.workflow_state.dynamic_cutoff_output_column,
+            dynamic_category_column=self.workflow_state.dynamic_cutoff_category_column,
+        )
+
+    def get_cutoff_state(self) -> dict[str, object]:
+        return self.get_cutoff_state_typed().as_dict()
 
     def has_confirmed_dynamic_capping(self) -> bool:
         return bool(self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column)
@@ -858,7 +892,7 @@ class GeostatService:
             return ""
         return self.variable_config.target_column
 
-    def get_analysis_context_snapshot(self) -> dict[str, object]:
+    def get_analysis_context_state(self) -> AnalysisContextState:
         """Return the official read-only analysis context contract.
 
         This is the preferred public source for active target/domain context.
@@ -869,11 +903,17 @@ class GeostatService:
         active_domain_column = ""
         active_domain_filter = ""
         if self.current_dataset is not None:
-            active_domain_column = _resolve_active_domain_column(
-                self.current_dataset.dataframe,
-                self.variable_config.domain_column if self.variable_config is not None else "",
-            )
+            if self._domain_filter_context_enabled:
+                active_domain_column = _resolve_active_domain_column(
+                    self.current_dataset.dataframe,
+                    self.variable_config.domain_column if self.variable_config is not None else "",
+                )
+            else:
+                active_domain_column = ""
             active_domain_filter = str(self.workflow_state.active_domain_filter or "").strip()
+            if active_domain_filter and not active_domain_column:
+                active_domain_filter = ""
+                self.workflow_state.active_domain_filter = ""
             if active_domain_filter and active_domain_column:
                 valid_values = {
                     str(value).strip()
@@ -904,33 +944,55 @@ class GeostatService:
         ):
             resolved_target_type = "numeric" if _is_numeric_dtype(self.current_dataset.dataframe[resolved_target_column]) else "categorical"
 
-        return {
-            "base_target_column": base_target_column,
-            "effective_target_column": effective_target_column,
-            "resolved_target_column": resolved_target_column,
-            "resolved_target_type": resolved_target_type,
-            "active_domain_column": active_domain_column,
-            "active_domain_filter": active_domain_filter,
-            "current_step": self.workflow_state.current_step,
-            "readiness": readiness,
-            "blocking_reason": blocking_reason,
-        }
+        dataset_name = self.current_dataset.file_name if self.current_dataset is not None else "No cargado"
+        return AnalysisContextState(
+            dataset_name=dataset_name,
+            base_target_column=base_target_column,
+            effective_target_column=effective_target_column,
+            resolved_target_column=resolved_target_column,
+            resolved_target_type=resolved_target_type,
+            active_domain_column=active_domain_column,
+            active_domain_filter=active_domain_filter,
+            current_step=self.workflow_state.current_step,
+            readiness=readiness,
+            blocking_reason=blocking_reason,
+        )
 
-    def get_workflow_readiness(self) -> dict[str, object]:
-        """Return the official workflow-level readiness/blocking contract."""
-        snapshot = self.get_analysis_context_snapshot()
+    def get_analysis_context_snapshot(self) -> dict[str, object]:
+        payload = self.get_analysis_context_state().as_dict()
+        payload.pop("dataset_name", None)
+        return payload
+
+    def _build_stage_hint(self, stage: StageReadiness) -> str:
+        if stage.ready:
+            if stage.warnings:
+                return "Advertencia: hay filtros activos que reducen resultados."
+            return "Etapa lista."
+        if not stage.blocking_reasons:
+            return "Etapa no lista."
+        return BLOCKING_REASON_HINTS.get(stage.blocking_reasons[0], "Completa la configuración requerida para desbloquear esta etapa.")
+
+    def get_workflow_readiness_state(self) -> WorkflowReadinessState:
+        """Return the official typed workflow-level readiness/blocking contract."""
+        snapshot = self.get_analysis_context_state()
         has_dataset = bool(self.current_dataset is not None)
         has_variable_config = bool(self.variable_config is not None)
         dataframe = self.current_dataset.dataframe if self.current_dataset is not None else None
-        resolved_target_column = str(snapshot["resolved_target_column"])
+        resolved_target_column = snapshot.resolved_target_column
         resolved_target_exists = bool(dataframe is not None and resolved_target_column and resolved_target_column in dataframe.columns)
 
-        def _stage(ready: bool, blocking_reasons: list[str], warnings: list[str] | None = None) -> dict[str, object]:
-            return {
-                "ready": bool(ready),
-                "blocking_reasons": list(blocking_reasons),
-                "warnings": list(warnings or []),
-            }
+        def _stage(ready: bool, blocking_reasons: list[str], warnings: list[str] | None = None) -> StageReadiness:
+            stage = StageReadiness(
+                ready=bool(ready),
+                blocking_reasons=tuple(blocking_reasons),
+                warnings=tuple(warnings or []),
+            )
+            return StageReadiness(
+                ready=stage.ready,
+                blocking_reasons=stage.blocking_reasons,
+                warnings=stage.warnings,
+                hint=self._build_stage_hint(stage),
+            )
 
         data_reasons: list[str] = []
         if not has_dataset:
@@ -987,28 +1049,22 @@ class GeostatService:
         if has_dataset and has_variable_config and not resolved_target_exists:
             variography_reasons.append("missing_target")
         if has_dataset and has_variable_config and resolved_target_exists:
-            filtered_for_variography = self._get_filtered_dataframe(snapshot)
+            filtered_for_variography = self._get_filtered_dataframe(snapshot.as_dict())
             if filtered_for_variography is None:
                 variography_reasons.append("missing_dataset")
             else:
                 active_rows = int(len(filtered_for_variography))
                 if active_rows < 30:
-                    variography_reasons.append("insufficient_data")
-                if str(snapshot.get("active_domain_filter", "")).strip() and active_rows < 50:
+                    variography_warnings.append("insufficient_data")
+                if snapshot.active_domain_filter.strip() and active_rows < 50:
                     variography_warnings.append("low_data_after_domain_filter")
 
-        return {
-            "current_step": self.workflow_state.current_step,
-            "analysis_context": snapshot,
-            "base_state": {
-                "has_dataset": has_dataset,
-                "has_variable_config": has_variable_config,
-                "resolved_target_column": resolved_target_column,
-                "resolved_target_type": str(snapshot["resolved_target_type"]),
-                "active_domain_column": str(snapshot["active_domain_column"]),
-                "active_domain_filter": str(snapshot["active_domain_filter"]),
-            },
-            "stages": {
+        return WorkflowReadinessState(
+            current_step=self.workflow_state.current_step,
+            analysis_context=snapshot,
+            has_dataset=has_dataset,
+            has_variable_config=has_variable_config,
+            stages={
                 "data": _stage(not data_reasons, data_reasons),
                 "eda": _stage(not eda_reasons, eda_reasons),
                 "cutoffs": _stage(not cutoffs_reasons, cutoffs_reasons),
@@ -1016,7 +1072,32 @@ class GeostatService:
                 "domains": _stage(not domains_reasons, domains_reasons, warnings=domain_warnings),
                 "variography": _stage(not variography_reasons, variography_reasons, warnings=variography_warnings),
             },
-        }
+        )
+
+    def get_workflow_readiness(self) -> dict[str, object]:
+        return self.get_workflow_readiness_state().as_dict()
+
+    def get_operational_state(self) -> GeostatOperationalState:
+        analysis = self.get_analysis_context_state()
+        readiness = self.get_workflow_readiness_state()
+        cutoff = self.get_cutoff_state_typed()
+        domain = self.get_domain_state_typed()
+        config = self.variable_config
+        selection = VariableSelectionState(
+            x_column=config.x_column if config is not None else "",
+            y_column=config.y_column if config is not None else "",
+            z_column=config.z_column if config is not None else "",
+            target_column=config.target_column if config is not None else "",
+            hole_id_column=config.hole_id_column if config is not None and config.hole_id_column else "",
+            domain_column=config.domain_column if config is not None and config.domain_column else "",
+        )
+        return GeostatOperationalState(
+            analysis=analysis,
+            readiness=readiness,
+            cutoff=cutoff,
+            domain=domain,
+            selection=selection,
+        )
 
     def _get_filtered_dataframe(self, context_snapshot: dict[str, object] | None = None):
         if self.current_dataset is None:
@@ -1230,6 +1311,9 @@ class GeostatService:
 
         domain_payload = _empty_domain_payload()
         domain_col = str(snapshot.get("active_domain_column") or "").strip()
+        configured_domain = self.variable_config.domain_column if self.variable_config is not None and self.variable_config.domain_column else ""
+        if configured_domain and not domain_col:
+            domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
         if domain_col and domain_col in df.columns:
             grouped: list[tuple[str, list[float]]] = []
             valid_rows = 0
