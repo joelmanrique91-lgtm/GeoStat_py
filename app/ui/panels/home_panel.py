@@ -1011,7 +1011,6 @@ class HomePanel(ctk.CTkFrame):
         stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
         cv_text = str(stats_table.get("cv", "-"))
         trunc_text = str(stats_table.get("% truncated", "-"))
-        cutoff_text = f"{state['dynamic_cutoff_value']:.5g}" if state["dynamic_enabled"] else ("Manual" if state["enabled"] else "No aplicado")
         skewness_text = str(stats_table.get("skewness", "-"))
         availability = data.get("availability", {})
         diagnostics = data.get("diagnostics", {})
@@ -1122,22 +1121,44 @@ class HomePanel(ctk.CTkFrame):
         qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.6, 3.1))
         box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.6, 3.1))
         iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(6.2, 0.85))
-        self.eda_renderer.render_dashboard(
-            histogram_grid=hist_grid,
-            qq_grid=qq_grid,
-            boxplot_grid=box_grid,
-            iqr_grid=iqr_grid,
-            data=data,
-            context=EDARenderContext(
-                active_variable=active_variable,
-                skewness_text=skewness_text,
-                chart_text_color=CHART_TEXT,
-                chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
-                chart_label_size=CHART_FONT_SIZE_LABEL + 1,
-            ),
-            original_values=original_values,
-            cutoff_value=cutoff_val,
-        )
+        try:
+            self.eda_renderer.render_dashboard(
+                histogram_grid=hist_grid,
+                qq_grid=qq_grid,
+                boxplot_grid=box_grid,
+                iqr_grid=iqr_grid,
+                data=data,
+                context=EDARenderContext(
+                    active_variable=active_variable,
+                    skewness_text=skewness_text,
+                    chart_text_color=CHART_TEXT,
+                    chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
+                    chart_label_size=CHART_FONT_SIZE_LABEL + 1,
+                ),
+                original_values=original_values,
+                cutoff_value=cutoff_val,
+            )
+        except Exception as exc:
+            for host in (hist_host, qq_host, box_host, iqr_host):
+                DashboardGrid.clear(host)
+            ctk.CTkLabel(
+                plot_card,
+                text=f"No se pudo renderizar el panel EDA ({type(exc).__name__}). Revisa el log técnico.",
+                text_color=SEM_ORANGE,
+                font=ui_font(FONT_SMALL),
+            ).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=8)
+            self.service.activity_log.log(
+                "eda_render_failed",
+                "error",
+                "Fallo en render Matplotlib de EDA.",
+                {
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "active_variable": active_variable,
+                    "domain_filter": str(snapshot.active_domain_filter or "Todos"),
+                },
+            )
+            self._append_activity(f"⚠️ Render EDA falló: {type(exc).__name__}: {exc}")
 
     def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         signature = (
