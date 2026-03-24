@@ -88,10 +88,10 @@ KPI_PRIMARY = KPI_PRIMARY_BG
 KPI_PRIMARY_FOCUS = WF_ACTIVE
 PLOT_TXT = TEXT_MAIN
 
-PAD_MAIN_X = 8
+PAD_MAIN_X = 7
 PAD_CARD_X = 12
-PAD_STACK_Y = 2
-PAD_SECTION_Y = 5
+PAD_STACK_Y = 1
+PAD_SECTION_Y = 4
 SIDEBAR_WIDTH = 308
 STEP_BUTTON_WIDTH = 106
 STEP_BUTTON_HEIGHT = 24
@@ -347,10 +347,10 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel = ctk.CTkFrame(workspace, fg_color=BG_PANEL, corner_radius=8)
         self.content_panel.grid(row=0, column=0, sticky="nsew")
         self.content_panel.grid_columnconfigure(0, weight=1)
-        self.content_panel.grid_rowconfigure(3, weight=1)
+        self.content_panel.grid_rowconfigure(3, weight=1, minsize=420)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(3, 1))
+        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 0))
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ui_font(FONT_SUBTITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
@@ -359,8 +359,8 @@ class HomePanel(ctk.CTkFrame):
         self._build_kpi_strip(self.content_panel)
         self._build_stage_action_bar(self.content_panel)
 
-        self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 2))
+        self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_SOFT, corner_radius=8, border_width=1, border_color=BORDER_SOFT)
+        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(1, 1))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
@@ -613,7 +613,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_kpi_strip(self, parent: ctk.CTkFrame) -> None:
         block = ctk.CTkFrame(parent, fg_color=BG_PANEL, corner_radius=0)
-        block.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
+        block.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 1))
         ctk.CTkLabel(block, text="KPIs clave", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=8, pady=(1, 0))
         cards = ctk.CTkFrame(block, fg_color="transparent")
         cards.pack(fill="x", padx=4, pady=2)
@@ -641,7 +641,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_stage_action_bar(self, parent: ctk.CTkFrame) -> None:
         block = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=7)
-        block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 1))
+        block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 0))
         block.grid_columnconfigure(0, weight=1)
         self.action_bar_block = block
         head = ctk.CTkFrame(block, fg_color="transparent")
@@ -873,7 +873,11 @@ class HomePanel(ctk.CTkFrame):
         if current_size == self._last_view_body_size:
             return
         self._last_view_body_size = current_size
-        self._show_stage_view(self.service.workflow_state.current_step, force_rebuild=True)
+        current_step = self.service.workflow_state.current_step
+        # Resize policy: avoid full stage rebuild on normal container resize.
+        # DashboardGrid and embedded canvases handle their own responsive fitting.
+        if current_step not in self._rendered_stage_signatures:
+            self._show_stage_view(current_step, force_rebuild=False)
 
     def _get_stage_host(self, stage: str) -> ctk.CTkFrame:
         host = self._stage_hosts.get(stage)
@@ -1034,13 +1038,13 @@ class HomePanel(ctk.CTkFrame):
             diagnostic = "Diagnóstico no disponible."
 
         evidence = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
-        evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 1))
+        evidence.grid(row=0, column=0, sticky="nsew", padx=1, pady=(0, 0))
         evidence.grid_columnconfigure(0, weight=1)
-        evidence.grid_rowconfigure(0, weight=4)
-        evidence.grid_rowconfigure(1, weight=1, minsize=40)
+        evidence.grid_rowconfigure(0, weight=0)
+        evidence.grid_rowconfigure(1, weight=1)
 
         summary = ctk.CTkFrame(evidence, fg_color=BG_PANEL)
-        summary.grid(row=0, column=0, sticky="ew", padx=3, pady=(0, 1))
+        summary.grid(row=0, column=0, sticky="ew", padx=1, pady=(0, 0))
         summary.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(summary, text=f"EDA · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=2, pady=(0, 0))
         ctk.CTkLabel(
@@ -1053,7 +1057,7 @@ class HomePanel(ctk.CTkFrame):
         ).grid(row=1, column=0, sticky="w", padx=2, pady=(0, 0))
 
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-        plot_card.grid(row=1, column=0, sticky="nsew", padx=1, pady=(0, 1))
+        plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
         plot_card.grid_rowconfigure(0, weight=1)
         plot_card.grid_columnconfigure(0, weight=1)
 
@@ -1064,8 +1068,8 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            width_ratios=[1.9, 1.2],
-            height_ratios=[2.25, 1.0],
+            width_ratios=[2.2, 1.0],
+            height_ratios=[3.0, 1.0],
         )
 
         values = [float(v) for v in data["target_values"]]
@@ -1086,8 +1090,8 @@ class HomePanel(ctk.CTkFrame):
                 active_variable=active_variable,
                 skewness_text=skewness_text,
                 chart_text_color=CHART_TEXT,
-                chart_legend_size=CHART_FONT_SIZE_LEGEND,
-                chart_label_size=CHART_FONT_SIZE_LABEL,
+                chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
+                chart_label_size=CHART_FONT_SIZE_LABEL + 1,
             ),
             original_values=original_values,
             cutoff_value=cutoff_val,
@@ -1104,7 +1108,7 @@ class HomePanel(ctk.CTkFrame):
             text=f"{insight_text} CV={cv_text} · n={diagnostics.get('target_valid_count', 0)} · no implica independencia espacial.",
             text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
             font=ui_font(FONT_MICRO),
-        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 1))
+        ).grid(row=1, column=0, sticky="w", padx=3, pady=(0, 0))
 
     def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         signature = (

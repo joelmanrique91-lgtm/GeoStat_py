@@ -18,10 +18,10 @@ TEXT_MAIN = "#E6EDF8"
 TEXT_MUTED = "#A7B6CB"
 TEXT_SOFT = "#8B9AB0"
 GRID_COLOR = "#334866"
-CHART_BG = "#F7FAFE"
-CHART_BORDER = "#CAD7E7"
-CHART_GRID = "#D4DEEB"
-CHART_TEXT = "#162638"
+CHART_BG = "#142033"
+CHART_BORDER = "#2F4666"
+CHART_GRID = "#355174"
+CHART_TEXT = "#DCE8F8"
 
 SEM_BLUE = "#4A8DFF"
 SEM_BLUE_SOFT = "#8EB8FF"
@@ -111,6 +111,19 @@ def apply_axis_style(ax) -> None:
 
 def apply_figure_theme(fig) -> None:
     fig.patch.set_facecolor(CHART_BG)
+    try:
+        fig.set_layout_engine("none")
+    except Exception:
+        pass
+
+
+def apply_dashboard_layout(fig, *, left: float = 0.04, right: float = 0.992, top: float = 0.965, bottom: float = 0.075, wspace: float = 0.18, hspace: float = 0.22) -> None:
+    """Unified layout policy for embedded dashboard figures.
+
+    This intentionally avoids mixing `tight_layout`/`constrained_layout` across
+    renderers to keep resize behavior stable in embedded Tk canvases.
+    """
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace, hspace=hspace)
 
 
 def add_reference_line(ax, value: float, *, label: str, color: str, y_pos: float = 0.95) -> None:

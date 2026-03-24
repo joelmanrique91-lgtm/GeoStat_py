@@ -23,14 +23,37 @@ from app.ui.theme import (
 
 class MatplotlibEDARenderer(EDARenderer):
     def render(self, grid, data: dict[str, object], context: EDARenderContext, *, original_values: list[float], cutoff_value: float | None) -> None:
-        ax_hist = grid.axis(0, 0)
-        ax_hist_bottom = grid.axis(1, 0)
-        ax_prob = grid.axis(0, 1)
-        ax_secondary = grid.axis(1, 1)
+        # Rebuild EDA composition with explicit visual hierarchy:
+        # left dominant histogram, right QQ/boxplot stack, bottom full-width IQR strip.
         fig = grid.figure
+        fig.clear()
+        # Renderer-level geometry intent is kept within the unified layout policy
+        # by passing explicit margins through dashboard layout override.
+        fig._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.02,
+            "right": 0.995,
+            "top": 0.992,
+            "bottom": 0.075,
+            "wspace": 0.16,
+            "hspace": 0.12,
+        }
+        main = fig.add_gridspec(2, 2, width_ratios=[1.75, 1.20], height_ratios=[3.5, 0.70])
+        right_stack = main[0, 1].subgridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.15)
 
-        for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
+        ax_hist = fig.add_subplot(main[0, 0])
+        ax_prob = fig.add_subplot(right_stack[0, 0])
+        ax_secondary = fig.add_subplot(right_stack[1, 0])
+        ax_hist_bottom = fig.add_subplot(main[1, 0])
+        ax_meta = fig.add_subplot(main[1, 1])
+        for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary, ax_meta):
             apply_axis_style(axis)
+        try:
+            ax_hist.set_box_aspect(0.76)
+            ax_hist_bottom.set_box_aspect(0.16)
+            ax_prob.set_box_aspect(0.72)
+            ax_secondary.set_box_aspect(0.72)
+        except Exception:
+            pass
 
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
@@ -89,6 +112,7 @@ class MatplotlibEDARenderer(EDARenderer):
             fontsize=max(context.chart_label_size - 1, 8),
             color=context.chart_text_color,
         )
+        ax_hist_bottom.tick_params(axis="both", labelsize=context.chart_label_size)
 
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             prob_x = [float(v) for v in data["probplot_x"]]
@@ -128,10 +152,13 @@ class MatplotlibEDARenderer(EDARenderer):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            ax_secondary.tick_params(axis="x", labelrotation=30, labelsize=context.chart_legend_size)
+            ax_secondary.tick_params(axis="x", labelrotation=24, labelsize=context.chart_legend_size)
             ax_secondary.set_ylabel("Ley Cu (%)")
             ax_secondary.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
             ax_secondary.margins(x=0.10)
+            for tick in ax_secondary.get_xticklabels():
+                tick.set_horizontalalignment("right")
+            ax_secondary.tick_params(axis="both", labelsize=context.chart_label_size)
         else:
             box = ax_secondary.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
             for patch in box["boxes"]:
@@ -149,6 +176,19 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.set_title("Boxplot · Rango y outliers", color=context.chart_text_color, pad=8)
             ax_secondary.set_xlabel("Ley Cu (%)")
             ax_secondary.margins(x=0.03)
+            ax_secondary.tick_params(axis="x", labelsize=context.chart_label_size)
 
-        fig.subplots_adjust(bottom=0.18, hspace=0.25, wspace=0.20)
+        # Replace previously wide empty lower-right area with compact diagnostics.
+        ax_meta.axis("off")
+        ax_meta.text(
+            0.02,
+            0.98,
+            "Lectura rápida\n• Histograma: evidencia principal\n• QQ/Box: consistencia y cola",
+            va="top",
+            ha="left",
+            color=context.chart_text_color,
+            fontsize=max(context.chart_label_size - 1, 8),
+            linespacing=1.35,
+        )
+
         grid.render()
