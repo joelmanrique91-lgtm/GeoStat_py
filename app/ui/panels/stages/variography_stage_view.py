@@ -10,8 +10,8 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
-VARIOGRAPHY_CONTROLS_WIDTH = 420
-VARIOGRAPHY_TEXT_WRAP = 1360
+VARIOGRAPHY_CONTROLS_WIDTH = 338
+VARIOGRAPHY_TEXT_WRAP = 980
 
 
 class VariographyStageView:
@@ -54,17 +54,17 @@ class VariographyStageView:
         self.estimator_var.set(str(init.get("estimator", "classical")))
 
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
-        wrapper.grid(row=0, column=0, sticky="nsew")
+        wrapper.grid(row=0, column=0, sticky="nsew", padx=2, pady=1)
         wrapper.grid_columnconfigure(1, weight=1)
         wrapper.grid_rowconfigure(0, weight=1)
 
-        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=300)
-        controls.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=0)
+        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=VARIOGRAPHY_CONTROLS_WIDTH)
+        controls.grid(row=0, column=0, sticky="nsw", padx=(0, 5), pady=0)
         controls.grid_propagate(False)
         self._build_controls(controls, [str(v) for v in init.get("target_options", [])])
 
         results = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
-        results.grid(row=0, column=1, sticky="nsew")
+        results.grid(row=0, column=1, sticky="nsew", padx=(1, 0))
         results.grid_columnconfigure(0, weight=1)
         results.grid_rowconfigure(2, weight=1)
 
