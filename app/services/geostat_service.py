@@ -11,10 +11,19 @@ import subprocess
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.models.dataset_model import DatasetModel
+from app.models.operational_state import (
+    AnalysisContextState,
+    CutoffState,
+    DomainState,
+    GeostatOperationalState,
+    WorkflowReadinessState,
+)
 from app.models.variable_config_model import VariableConfigModel
 from app.models.variography import VariographyComputeResponse, VariographySession
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
+from app.services.cutoff_service import CutoffService
+from app.services.operational_state_service import OperationalStateService
 from app.services.variography_application_service import VariographyApplicationService
 from app.services.visualization_service import (
     Spatial3DDataBundle,
@@ -225,6 +234,9 @@ class GeostatService:
         self.workflow_state = WorkflowStateModel()
         self.autodetected_columns: dict[str, str] = {}
         self.variography_service = VariographyApplicationService(host_service=self)
+        self.operational_state_service = OperationalStateService(host_service=self)
+        self.cutoff_service = CutoffService(host_service=self)
+        self._domain_filter_context_enabled = True
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -274,6 +286,7 @@ class GeostatService:
         self._clear_cutoff_state()
         self._clear_dynamic_cutoff_state()
         self._clear_domain_state()
+        self._domain_filter_context_enabled = True
         self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
         details = self._build_dataset_summary(dataset)
@@ -400,10 +413,12 @@ class GeostatService:
 
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         del ordered_layers, active_layers, min_samples, include_missing
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
         del domain_definition
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
@@ -413,7 +428,8 @@ class GeostatService:
         active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
         if not active_domain_column:
             self.workflow_state.active_domain_filter = ""
-            return CutoffResult(False, "No hay columna de dominio disponible.")
+            self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio ignorado: sin columna de dominio activa.", {})
+            return CutoffResult(True, "Filtro de dominio ignorado (módulo dominios deshabilitado).")
         selected = str(domain_name or "").strip()
         if not selected or selected.lower() == "todos":
             self.workflow_state.active_domain_filter = ""
@@ -444,24 +460,11 @@ class GeostatService:
         values = sorted({str(value).strip() for value in dataframe[active_domain_column].dropna().tolist() if str(value).strip()})
         return values
 
+    def get_domain_state_typed(self) -> DomainState:
+        return self.operational_state_service.build_domain_state()
+
     def get_domain_state(self) -> dict[str, object]:
-        snapshot = self.get_analysis_context_snapshot()
-        return {
-            "ordered_layers": [],
-            "active_layers": [],
-            "output_column": "",
-            "min_samples": 1,
-            "include_missing": False,
-            "effective_target_column": str(snapshot["resolved_target_column"]),
-            "capping_confirmed": bool(self.has_confirmed_dynamic_capping()),
-            "domain_definition": {},
-            "active_domain_filter": "",
-            "domain_estimation_values": [],
-            "domains_ready": True,
-            "ui_filters": _default_domain_ui_filters(),
-            "filter_columns": _default_domain_ui_filters(),
-            "assignment_history": [],
-        }
+        return self.get_domain_state_typed().as_dict()
 
     def _get_domain_ui_filtered_dataframe(self):
         if self.current_dataset is None:
@@ -483,6 +486,7 @@ class GeostatService:
 
     def confirm_domain_assignment(self, domain_name: str) -> CutoffResult:
         del domain_name
+        self._domain_filter_context_enabled = False
         return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
 
     def prepare_domain_statistics(self) -> dict[str, object]:
@@ -566,6 +570,7 @@ class GeostatService:
             )
 
         self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
+        self._domain_filter_context_enabled = bool(domain_column)
         self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
         self.workflow_state.active_support = "Muestra original"
         self._clear_cutoff_state()
@@ -589,74 +594,17 @@ class GeostatService:
             return []
         return [column for column in self.current_dataset.columns if not _is_numeric_dtype(self.current_dataset.dataframe[column])]
 
+    def get_cutoff_state_typed(self) -> CutoffState:
+        return self.operational_state_service.build_cutoff_state()
+
     def get_cutoff_state(self) -> dict[str, object]:
-        snapshot = self.get_analysis_context_snapshot()
-        default_target = str(snapshot["base_target_column"])
-        return {
-            "enabled": self.workflow_state.cutoffs_enabled,
-            "target_column": self.workflow_state.cutoff_target_column or default_target,
-            "limits": [float(v) for v in self.workflow_state.cutoff_limits],
-            "labels": list(self.workflow_state.cutoff_labels),
-            "output_column": self.workflow_state.cutoff_output_column,
-            "effective_target_column": str(snapshot["resolved_target_column"]),
-            "dynamic_enabled": self.workflow_state.dynamic_cutoff_enabled,
-            "dynamic_target_column": self.workflow_state.dynamic_cutoff_target_column or default_target,
-            "dynamic_mode": self.workflow_state.dynamic_cutoff_mode,
-            "dynamic_percent": float(self.workflow_state.dynamic_cutoff_percent),
-            "dynamic_cutoff_value": float(self.workflow_state.dynamic_cutoff_value),
-            "dynamic_output_column": self.workflow_state.dynamic_cutoff_output_column,
-            "dynamic_category_column": self.workflow_state.dynamic_cutoff_category_column,
-        }
+        return self.get_cutoff_state_typed().as_dict()
 
     def has_confirmed_dynamic_capping(self) -> bool:
-        return bool(self.workflow_state.dynamic_cutoff_enabled and self.workflow_state.dynamic_cutoff_output_column)
+        return self.cutoff_service.has_confirmed_dynamic_capping()
 
     def prepare_dynamic_cutoff_preview(self, target_column: str, mode: str, slider_percent: float) -> dict[str, object]:
-        if self.current_dataset is None:
-            raise ValueError("No hay dataset cargado.")
-        if target_column not in self.current_dataset.columns:
-            raise ValueError("La variable seleccionada no existe en el dataset.")
-
-        numeric = _to_numeric(self.current_dataset.dataframe[target_column]).dropna().astype(float)
-        if numeric.empty:
-            raise ValueError("La variable seleccionada no tiene valores numéricos válidos.")
-
-        values = numeric.tolist()
-        min_val = float(numeric.min())
-        max_val = float(numeric.max())
-        slider_clamped = max(0.0, min(100.0, float(slider_percent)))
-        if mode == "absolute":
-            cutoff = min_val + ((max_val - min_val) * (slider_clamped / 100.0))
-        else:
-            cutoff = float(numeric.quantile(slider_clamped / 100.0))
-
-        retained = numeric[numeric <= cutoff]
-        truncated = numeric[numeric > cutoff]
-        capped = numeric.clip(upper=cutoff)
-        capped_max = float(min(max_val, cutoff))
-        percentile_at_cutoff = float((numeric <= cutoff).sum() / len(numeric) * 100.0)
-
-        sorted_vals = sorted(values)
-        n = len(sorted_vals)
-        normal = statistics.NormalDist()
-        theoretical = [normal.inv_cdf((idx + 0.5) / n) for idx in range(n)] if n > 1 else [0.0]
-
-        return {
-            "values": values,
-            "sorted_values": sorted_vals,
-            "theoretical_quantiles": theoretical,
-            "cutoff_value": float(cutoff),
-            "min": min_val,
-            "max": max_val,
-            "affected_count": int(len(truncated)),
-            "affected_pct": float((len(truncated) / len(values)) * 100.0),
-            "retained_pct": percentile_at_cutoff,
-            "retained_values": retained.tolist(),
-            "truncated_values": truncated.tolist(),
-            "capped_values": capped.tolist(),
-            "max_original": max_val,
-            "max_truncated": capped_max,
-        }
+        return self.cutoff_service.prepare_dynamic_cutoff_preview(target_column, mode, slider_percent)
 
     def apply_dynamic_cutoff(
         self,
@@ -667,164 +615,39 @@ class GeostatService:
         output_column: str | None = None,
         keep_category_column: bool = True,
     ) -> DynamicCutoffResult:
-        if self.current_dataset is None:
-            return DynamicCutoffResult(False, "No hay dataset cargado.")
-        if self.variable_config is None:
-            return DynamicCutoffResult(False, "Configura X/Y/Z/target antes de aplicar capping.")
-        if not enabled:
-            self._clear_dynamic_cutoff_state()
-            return DynamicCutoffResult(True, "Capping dinámico desactivado.")
-
-        try:
-            preview = self.prepare_dynamic_cutoff_preview(target_column, mode, slider_percent)
-        except ValueError as exc:
-            return DynamicCutoffResult(False, str(exc))
-
-        cutoff = float(preview["cutoff_value"])
-        out_col = (output_column or f"{target_column}_capped").strip()
-        if out_col in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
-            return DynamicCutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
-
-        source = _to_numeric(self.current_dataset.dataframe[target_column])
-        self.current_dataset.dataframe[out_col] = source.clip(upper=cutoff)
-        if out_col not in self.current_dataset.columns:
-            self.current_dataset.columns.append(out_col)
-            self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        category_col = ""
-        if keep_category_column:
-            category_col = f"{out_col}_class"
-            labels = [f"<= {self._format_cutoff_number(cutoff)}", f"> {self._format_cutoff_number(cutoff)}"]
-            import pandas as pd
-
-            self.current_dataset.dataframe[category_col] = pd.cut(source, bins=[-math.inf, cutoff, math.inf], labels=labels, right=True, include_lowest=True)
-            if category_col not in self.current_dataset.columns:
-                self.current_dataset.columns.append(category_col)
-                self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        self.workflow_state.dynamic_cutoff_enabled = True
-        self.workflow_state.dynamic_cutoff_target_column = target_column
-        self.workflow_state.dynamic_cutoff_mode = "absolute" if mode == "absolute" else "percentile"
-        self.workflow_state.dynamic_cutoff_percent = float(max(0.0, min(100.0, slider_percent)))
-        self.workflow_state.dynamic_cutoff_value = cutoff
-        self.workflow_state.dynamic_cutoff_output_column = out_col
-        self.workflow_state.dynamic_cutoff_category_column = category_col
-        self.workflow_state.effective_target_column = out_col
-        self.activity_log.log(
-            "dynamic_cutoff_applied",
-            "success",
-            "Capping dinámico aplicado.",
-            {
-                "target": target_column,
-                "mode": self.workflow_state.dynamic_cutoff_mode,
-                "slider_percent": self.workflow_state.dynamic_cutoff_percent,
-                "cutoff_value": cutoff,
-                "output_column": out_col,
-                "category_column": category_col,
-            },
+        success, message, cutoff = self.cutoff_service.apply_dynamic_cutoff(
+            enabled=enabled,
+            target_column=target_column,
+            mode=mode,
+            slider_percent=slider_percent,
+            output_column=output_column,
+            keep_category_column=keep_category_column,
         )
-        return DynamicCutoffResult(True, f"Capping aplicado. Nueva variable: {out_col}", cutoff)
+        return DynamicCutoffResult(success, message, cutoff)
 
     def apply_cutoffs(self, enabled: bool, target_column: str, limits_text: str, output_column: str | None = None) -> CutoffResult:
-        if self.current_dataset is None:
-            return CutoffResult(False, "No hay dataset cargado.")
-        if self.variable_config is None:
-            return CutoffResult(False, "Configura X/Y/Z/target antes de aplicar cutoffs.")
-
-        if not enabled:
-            self._clear_cutoff_state()
-            self.workflow_state.effective_target_column = self.variable_config.target_column
-            self.activity_log.log("cutoff_disabled", "info", "Cutoffs desactivados. Se usa target original.", {"target": self.variable_config.target_column})
-            return CutoffResult(True, "Cutoffs desactivados. Se mantiene variable original.")
-
-        if target_column not in self.current_dataset.columns:
-            return CutoffResult(False, "La variable seleccionada no existe en el dataset.")
-        if not _is_numeric_dtype(self.current_dataset.dataframe[target_column]):
-            return CutoffResult(False, "La variable seleccionada debe ser numérica.")
-
-        limits, parse_error = self._parse_cutoff_limits(limits_text)
-        if parse_error:
-            return CutoffResult(False, parse_error)
-
-        labels = self._build_cutoff_labels(limits)
-        output_name = (output_column or f"{target_column}_cutoff").strip()
-        if output_name in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
-            return CutoffResult(False, "El nombre de salida no puede sobrescribir X/Y/Z.")
-
-        import pandas as pd
-
-        source = _to_numeric(self.current_dataset.dataframe[target_column])
-        bins = [-math.inf, *limits, math.inf]
-        categorized = pd.cut(source, bins=bins, labels=labels, right=False, include_lowest=True)
-        self.current_dataset.dataframe[output_name] = categorized
-        if output_name not in self.current_dataset.columns:
-            self.current_dataset.columns.append(output_name)
-            self.current_dataset.column_count = len(self.current_dataset.columns)
-
-        self.workflow_state.cutoffs_enabled = True
-        self.workflow_state.cutoff_target_column = target_column
-        self.workflow_state.cutoff_limits = [float(v) for v in limits]
-        self.workflow_state.cutoff_labels = labels
-        self.workflow_state.cutoff_output_column = output_name
-        self.workflow_state.effective_target_column = output_name
-        self.activity_log.log(
-            "cutoff_applied",
-            "success",
-            "Cutoffs aplicados y variable categorizada persistida.",
-            {"target": target_column, "output_column": output_name, "limits": limits, "labels": labels},
+        success, message = self.cutoff_service.apply_cutoffs(
+            enabled=enabled,
+            target_column=target_column,
+            limits_text=limits_text,
+            output_column=output_column,
         )
-        return CutoffResult(True, f"Cutoffs aplicados. Nueva variable: {output_name}")
+        return CutoffResult(success, message)
 
     def _parse_cutoff_limits(self, limits_text: str) -> tuple[list[float], str]:
-        raw = (limits_text or "").strip()
-        if not raw:
-            return [], "Debes ingresar al menos un cutoff."
-        tokens = [token for token in raw.replace(";", ",").split(",") if token.strip()]
-        if not tokens:
-            return [], "Debes ingresar al menos un cutoff válido."
-        values: list[float] = []
-        for token in tokens:
-            try:
-                values.append(float(token.strip()))
-            except ValueError:
-                return [], f"Cutoff inválido: '{token.strip()}'. Usa solo números."
-        unique_sorted = sorted(set(values))
-        if not unique_sorted:
-            return [], "No se detectaron cutoffs válidos."
-        if len(unique_sorted) < len(values):
-            self.activity_log.log("cutoff_duplicates_ignored", "warning", "Se ignoraron cutoffs repetidos.", {"input_count": len(values), "unique_count": len(unique_sorted)})
-        return unique_sorted, ""
+        return self.cutoff_service.parse_cutoff_limits(limits_text)
 
     def _build_cutoff_labels(self, limits: list[float]) -> list[str]:
-        if len(limits) == 1:
-            c0 = self._format_cutoff_number(limits[0])
-            return [f"< {c0}", f">= {c0}"]
-
-        labels: list[str] = [f"< {self._format_cutoff_number(limits[0])}"]
-        for left, right in zip(limits[:-1], limits[1:]):
-            labels.append(f"[{self._format_cutoff_number(left)}, {self._format_cutoff_number(right)})")
-        labels.append(f">= {self._format_cutoff_number(limits[-1])}")
-        return labels
+        return self.cutoff_service.build_cutoff_labels(limits)
 
     def _format_cutoff_number(self, value: float) -> str:
-        return f"{value:.6g}"
+        return self.cutoff_service.format_cutoff_number(value)
 
     def _clear_cutoff_state(self) -> None:
-        self.workflow_state.cutoffs_enabled = False
-        self.workflow_state.cutoff_target_column = ""
-        self.workflow_state.cutoff_limits = []
-        self.workflow_state.cutoff_labels = []
-        self.workflow_state.cutoff_output_column = ""
-        self.workflow_state.effective_target_column = ""
+        self.cutoff_service.clear_cutoff_state()
 
     def _clear_dynamic_cutoff_state(self) -> None:
-        self.workflow_state.dynamic_cutoff_enabled = False
-        self.workflow_state.dynamic_cutoff_target_column = ""
-        self.workflow_state.dynamic_cutoff_mode = "percentile"
-        self.workflow_state.dynamic_cutoff_percent = 95.0
-        self.workflow_state.dynamic_cutoff_value = 0.0
-        self.workflow_state.dynamic_cutoff_output_column = ""
-        self.workflow_state.dynamic_cutoff_category_column = ""
+        self.cutoff_service.clear_dynamic_cutoff_state()
 
     def _clear_domain_state(self) -> None:
         self.workflow_state.domain_layers_order = []
@@ -858,165 +681,22 @@ class GeostatService:
             return ""
         return self.variable_config.target_column
 
+    def get_analysis_context_state(self) -> AnalysisContextState:
+        return self.operational_state_service.build_analysis_context_state()
+
     def get_analysis_context_snapshot(self) -> dict[str, object]:
-        """Return the official read-only analysis context contract.
+        payload = self.get_analysis_context_state().as_dict()
+        payload.pop("dataset_name", None)
+        return payload
 
-        This is the preferred public source for active target/domain context.
-        """
-        base_target_column = self.variable_config.target_column if self.variable_config else ""
-        effective_target_column = self._get_effective_target_column()
-        resolved_target_column = effective_target_column or base_target_column
-        active_domain_column = ""
-        active_domain_filter = ""
-        if self.current_dataset is not None:
-            active_domain_column = _resolve_active_domain_column(
-                self.current_dataset.dataframe,
-                self.variable_config.domain_column if self.variable_config is not None else "",
-            )
-            active_domain_filter = str(self.workflow_state.active_domain_filter or "").strip()
-            if active_domain_filter and active_domain_column:
-                valid_values = {
-                    str(value).strip()
-                    for value in self.current_dataset.dataframe[active_domain_column].dropna().tolist()
-                    if str(value).strip()
-                }
-                if active_domain_filter not in valid_values:
-                    active_domain_filter = ""
-                    self.workflow_state.active_domain_filter = ""
-
-        readiness = "ready"
-        blocking_reason = ""
-        if self.current_dataset is None:
-            readiness = "blocked"
-            blocking_reason = "missing_dataset"
-        elif self.variable_config is None:
-            readiness = "blocked"
-            blocking_reason = "missing_variable_config"
-        elif not resolved_target_column or resolved_target_column not in self.current_dataset.dataframe.columns:
-            readiness = "blocked"
-            blocking_reason = "missing_resolved_target_column"
-
-        resolved_target_type = "unknown"
-        if (
-            readiness == "ready"
-            and self.current_dataset is not None
-            and resolved_target_column in self.current_dataset.dataframe.columns
-        ):
-            resolved_target_type = "numeric" if _is_numeric_dtype(self.current_dataset.dataframe[resolved_target_column]) else "categorical"
-
-        return {
-            "base_target_column": base_target_column,
-            "effective_target_column": effective_target_column,
-            "resolved_target_column": resolved_target_column,
-            "resolved_target_type": resolved_target_type,
-            "active_domain_column": active_domain_column,
-            "active_domain_filter": active_domain_filter,
-            "current_step": self.workflow_state.current_step,
-            "readiness": readiness,
-            "blocking_reason": blocking_reason,
-        }
+    def get_workflow_readiness_state(self) -> WorkflowReadinessState:
+        return self.operational_state_service.build_workflow_readiness_state()
 
     def get_workflow_readiness(self) -> dict[str, object]:
-        """Return the official workflow-level readiness/blocking contract."""
-        snapshot = self.get_analysis_context_snapshot()
-        has_dataset = bool(self.current_dataset is not None)
-        has_variable_config = bool(self.variable_config is not None)
-        dataframe = self.current_dataset.dataframe if self.current_dataset is not None else None
-        resolved_target_column = str(snapshot["resolved_target_column"])
-        resolved_target_exists = bool(dataframe is not None and resolved_target_column and resolved_target_column in dataframe.columns)
+        return self.get_workflow_readiness_state().as_dict()
 
-        def _stage(ready: bool, blocking_reasons: list[str], warnings: list[str] | None = None) -> dict[str, object]:
-            return {
-                "ready": bool(ready),
-                "blocking_reasons": list(blocking_reasons),
-                "warnings": list(warnings or []),
-            }
-
-        data_reasons: list[str] = []
-        if not has_dataset:
-            data_reasons.append("missing_dataset")
-
-        eda_reasons: list[str] = []
-        if not has_dataset:
-            eda_reasons.append("missing_dataset")
-        if not has_variable_config:
-            eda_reasons.append("missing_variable_config")
-        if has_dataset and has_variable_config and not resolved_target_exists:
-            eda_reasons.append("missing_resolved_target_column")
-
-        cutoffs_reasons: list[str] = []
-        if not has_dataset:
-            cutoffs_reasons.append("missing_dataset")
-        if not has_variable_config:
-            cutoffs_reasons.append("missing_variable_config")
-        if has_dataset and has_variable_config and self.variable_config.target_column not in self.current_dataset.dataframe.columns:
-            cutoffs_reasons.append("missing_base_target_column")
-
-        spatial_reasons: list[str] = []
-        if not has_dataset:
-            spatial_reasons.append("missing_dataset")
-        if not has_variable_config:
-            spatial_reasons.append("missing_variable_config")
-        if has_dataset and has_variable_config:
-            missing_xyz = [
-                col
-                for col in [self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column]
-                if col not in self.current_dataset.dataframe.columns
-            ]
-            if missing_xyz:
-                spatial_reasons.append("missing_spatial_columns")
-        if has_dataset and has_variable_config and not resolved_target_exists:
-            spatial_reasons.append("missing_resolved_target_column")
-
-        domains_reasons: list[str] = []
-        domain_warnings: list[str] = []
-        variography_reasons: list[str] = []
-        variography_warnings: list[str] = []
-        if not has_dataset:
-            variography_reasons.append("missing_dataset")
-        if not has_variable_config:
-            variography_reasons.append("missing_variable_config")
-        if has_dataset and has_variable_config:
-            missing_xyz = [
-                col
-                for col in [self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column]
-                if col not in self.current_dataset.dataframe.columns
-            ]
-            if missing_xyz:
-                variography_reasons.append("missing_spatial_columns")
-        if has_dataset and has_variable_config and not resolved_target_exists:
-            variography_reasons.append("missing_target")
-        if has_dataset and has_variable_config and resolved_target_exists:
-            filtered_for_variography = self._get_filtered_dataframe(snapshot)
-            if filtered_for_variography is None:
-                variography_reasons.append("missing_dataset")
-            else:
-                active_rows = int(len(filtered_for_variography))
-                if active_rows < 30:
-                    variography_reasons.append("insufficient_data")
-                if str(snapshot.get("active_domain_filter", "")).strip() and active_rows < 50:
-                    variography_warnings.append("low_data_after_domain_filter")
-
-        return {
-            "current_step": self.workflow_state.current_step,
-            "analysis_context": snapshot,
-            "base_state": {
-                "has_dataset": has_dataset,
-                "has_variable_config": has_variable_config,
-                "resolved_target_column": resolved_target_column,
-                "resolved_target_type": str(snapshot["resolved_target_type"]),
-                "active_domain_column": str(snapshot["active_domain_column"]),
-                "active_domain_filter": str(snapshot["active_domain_filter"]),
-            },
-            "stages": {
-                "data": _stage(not data_reasons, data_reasons),
-                "eda": _stage(not eda_reasons, eda_reasons),
-                "cutoffs": _stage(not cutoffs_reasons, cutoffs_reasons),
-                "spatial": _stage(not spatial_reasons, spatial_reasons),
-                "domains": _stage(not domains_reasons, domains_reasons, warnings=domain_warnings),
-                "variography": _stage(not variography_reasons, variography_reasons, warnings=variography_warnings),
-            },
-        }
+    def get_operational_state(self) -> GeostatOperationalState:
+        return self.operational_state_service.build_operational_state()
 
     def _get_filtered_dataframe(self, context_snapshot: dict[str, object] | None = None):
         if self.current_dataset is None:
@@ -1230,6 +910,9 @@ class GeostatService:
 
         domain_payload = _empty_domain_payload()
         domain_col = str(snapshot.get("active_domain_column") or "").strip()
+        configured_domain = self.variable_config.domain_column if self.variable_config is not None and self.variable_config.domain_column else ""
+        if configured_domain and not domain_col:
+            domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
         if domain_col and domain_col in df.columns:
             grouped: list[tuple[str, list[float]]] = []
             valid_rows = 0

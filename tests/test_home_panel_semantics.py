@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from app.models.operational_state import AnalysisContextState, CutoffState, DomainState, GeostatOperationalState, StageReadiness, VariableSelectionState, WorkflowReadinessState
 from app.ui.panels.home_panel import (
     _build_active_step_hint,
     _build_context_chip_texts,
@@ -16,13 +17,46 @@ from app.ui.panels.spatial_3d_view import is_3d_backend_available
 
 
 class HomePanelSemanticsTests(unittest.TestCase):
+    def _build_state(self, stages: dict[str, StageReadiness]) -> GeostatOperationalState:
+        analysis = AnalysisContextState(
+            dataset_name="demo.csv",
+            base_target_column="target",
+            effective_target_column="target",
+            resolved_target_column="target",
+            resolved_target_type="numeric",
+            active_domain_column="domain_estimation",
+            active_domain_filter="A",
+            current_step="Datos",
+            readiness="ready",
+            blocking_reason="",
+        )
+        readiness = WorkflowReadinessState(
+            current_step="Datos",
+            analysis_context=analysis,
+            has_dataset=True,
+            has_variable_config=True,
+            stages=stages,
+        )
+        cutoff = CutoffState(False, "", (), (), "", "target", False, "", "percentile", 95.0, 0.0, "", "")
+        domain = DomainState(effective_target_column="target")
+        selection = VariableSelectionState(target_column="target")
+        return GeostatOperationalState(analysis=analysis, readiness=readiness, cutoff=cutoff, domain=domain, selection=selection)
+
     def test_workflow_stage_label_reflects_readiness_state(self) -> None:
-        readiness = {
-            "stages": {
-                "data": {"ready": True, "warnings": []},
-                "eda": {"ready": False, "warnings": []},
-            }
-        }
+        readiness = WorkflowReadinessState(
+            current_step="Datos",
+            analysis_context=self._build_state({}).analysis,
+            has_dataset=True,
+            has_variable_config=True,
+            stages={
+                "data": StageReadiness(ready=True),
+                "eda": StageReadiness(ready=False),
+                "cutoffs": StageReadiness(ready=False),
+                "spatial": StageReadiness(ready=False),
+                "domains": StageReadiness(ready=False),
+                "variography": StageReadiness(ready=False),
+            },
+        )
         label_data = _build_workflow_stage_label("Datos", "Datos", readiness)
         label_eda = _build_workflow_stage_label("EDA", "Datos", readiness)
         self.assertIn("✓", label_data)
@@ -31,41 +65,47 @@ class HomePanelSemanticsTests(unittest.TestCase):
         self.assertTrue(label_eda.startswith("○"))
 
     def test_active_step_hint_uses_blocking_reason_mapping(self) -> None:
-        readiness = {
-            "stages": {
-                "spatial": {
-                    "ready": False,
-                    "blocking_reasons": ["missing_spatial_columns"],
-                    "warnings": [],
-                }
+        state = self._build_state(
+            {
+                "data": StageReadiness(True),
+                "eda": StageReadiness(True),
+                "cutoffs": StageReadiness(True),
+                "spatial": StageReadiness(False, ("missing_spatial_columns",), (), "Reconfigura columnas espaciales X/Y/Z."),
+                "domains": StageReadiness(False),
+                "variography": StageReadiness(False),
             }
-        }
-        hint = _build_active_step_hint("Espacial", readiness)
+        )
+        hint = _build_active_step_hint("Espacial", state)
         self.assertIn("Reconfigura columnas espaciales", hint)
 
     def test_active_step_hint_uses_warning_message_when_ready_with_warnings(self) -> None:
-        readiness = {
-            "stages": {
-                "domains": {
-                    "ready": True,
-                    "blocking_reasons": [],
-                    "warnings": ["active_domain_filter_empty_result"],
-                }
+        state = self._build_state(
+            {
+                "data": StageReadiness(True),
+                "eda": StageReadiness(True),
+                "cutoffs": StageReadiness(True),
+                "spatial": StageReadiness(True),
+                "domains": StageReadiness(True, (), ("active_domain_filter_empty_result",), "Advertencia: hay filtros activos que reducen resultados."),
+                "variography": StageReadiness(True),
             }
-        }
-        hint = _build_active_step_hint("Dominios", readiness)
+        )
+        hint = _build_active_step_hint("Dominios", state)
         self.assertIn("Advertencia", hint)
 
     def test_context_chip_texts_prioritize_global_context_microcopy(self) -> None:
-        snapshot = {
-            "resolved_target_column": "target_capped",
-            "active_domain_column": "domain_estimation",
-            "active_domain_filter": "A",
-        }
-        readiness = {"stages": {"data": {"ready": True}, "eda": {"ready": False}}}
-        texts = _build_context_chip_texts(snapshot, readiness, "demo.csv")
+        state = self._build_state(
+            {
+                "data": StageReadiness(True),
+                "eda": StageReadiness(False),
+                "cutoffs": StageReadiness(True),
+                "spatial": StageReadiness(True),
+                "domains": StageReadiness(True),
+                "variography": StageReadiness(True),
+            }
+        )
+        texts = _build_context_chip_texts(state)
         self.assertEqual(texts["dataset"], "Dataset: demo.csv")
-        self.assertIn("Target activo: target_capped", texts["target"])
+        self.assertIn("Target activo: target", texts["target"])
         self.assertIn("Dominio/filtro: domain_estimation · A", texts["domain"])
         self.assertIn("Bloqueos: 1", texts["status"])
 
@@ -81,14 +121,20 @@ class HomePanelSemanticsTests(unittest.TestCase):
         self.assertIn("Dominio/filtro: domain_estimation · A", line)
 
     def test_stage_actions_expand_for_data_step_when_dataset_missing(self) -> None:
-        readiness = {
-            "stages": {
-                "data": {
-                    "ready": False,
-                    "blocking_reasons": ["missing_dataset"],
-                }
-            }
-        }
+        readiness = WorkflowReadinessState(
+            current_step="Datos",
+            analysis_context=self._build_state({}).analysis,
+            has_dataset=False,
+            has_variable_config=False,
+            stages={
+                "data": StageReadiness(False, ("missing_dataset",)),
+                "eda": StageReadiness(False),
+                "cutoffs": StageReadiness(False),
+                "spatial": StageReadiness(False),
+                "domains": StageReadiness(False),
+                "variography": StageReadiness(False),
+            },
+        )
         self.assertTrue(_should_expand_stage_actions("Datos", readiness))
         self.assertFalse(_should_expand_stage_actions("EDA", readiness))
 
