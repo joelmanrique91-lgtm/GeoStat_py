@@ -23,6 +23,7 @@ from app.models.variography import VariographyComputeResponse, VariographySessio
 from app.models.workflow_state_model import WorkflowStateModel
 from app.services.activity_log_service import ActivityLogService
 from app.services.cutoff_service import CutoffService
+from app.services.dataset_context_service import DatasetContextService
 from app.services.operational_state_service import OperationalStateService
 from app.services.variography_application_service import VariographyApplicationService
 from app.services.visualization_service import (
@@ -248,6 +249,7 @@ class GeostatService:
         self.variography_service = VariographyApplicationService(host_service=self)
         self.operational_state_service = OperationalStateService(host_service=self)
         self.cutoff_service = CutoffService(host_service=self)
+        self.dataset_context_service = DatasetContextService(host_service=self)
         self._domain_filter_context_enabled = True
 
     def set_workflow_step(self, step_name: str) -> str:
@@ -263,79 +265,17 @@ class GeostatService:
         return [(step, FUNCTIONAL_STATUS[step]) for step in WORKFLOW_STEPS]
 
     def get_available_columns(self) -> list[str]:
-        return [] if self.current_dataset is None else self.current_dataset.columns
+        return self.dataset_context_service.get_available_columns()
 
     def load_csv(self, file_path: str) -> LoadCsvResult:
-        self.activity_log.log("csv_load_started", "info", "Iniciando carga de CSV.", {"file_path": file_path})
-        selected_path = Path(file_path)
-        if not selected_path.exists() or not selected_path.is_file():
-            message = "No se pudo cargar el archivo."
-            details = "La ruta seleccionada no existe o no es un archivo válido."
-            self.activity_log.log("csv_load_failed", "error", message, {"file_path": file_path, "reason": details})
-            return LoadCsvResult(False, message, details)
-
-        try:
-            dataframe = _read_csv(selected_path)
-        except _csv_errors()[0]:
-            return LoadCsvResult(False, "El archivo CSV está vacío.", "Selecciona un CSV con datos y vuelve a intentar.")
-        except UnicodeDecodeError:
-            try:
-                dataframe = _read_csv_with_encoding(selected_path, "latin-1")
-            except Exception as exc:
-                return LoadCsvResult(False, "No se pudo leer el encoding del CSV.", f"Detalle técnico: {exc}")
-        except _csv_errors()[1]:
-            return LoadCsvResult(False, "El CSV no tiene un formato legible.", "Revisa separadores y estructura de columnas.")
-        except Exception as exc:
-            self.activity_log.log("app_error", "error", "Error inesperado leyendo CSV.", {"error": str(exc)})
-            return LoadCsvResult(False, "Ocurrió un error inesperado al leer el CSV.", f"Detalle técnico: {exc}")
-
-        if dataframe.empty:
-            return LoadCsvResult(False, "El CSV no contiene filas de datos.", "Agrega al menos una fila y vuelve a cargar.")
-
-        dataset = DatasetModel.from_dataframe(file_path=selected_path, dataframe=dataframe)
-        self.current_dataset = dataset
-        self.variable_config = None
-        self._clear_cutoff_state()
-        self._clear_dynamic_cutoff_state()
-        self._clear_domain_state()
-        self._domain_filter_context_enabled = True
-        self.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
-        self.activity_log.log("columns_autodetected", "info", "Columnas sugeridas automáticamente.", self.autodetected_columns)
-        details = self._build_dataset_summary(dataset)
-        self.activity_log.log("csv_load_succeeded", "success", "CSV cargado correctamente.", {"file": dataset.file_name})
-        return LoadCsvResult(True, "CSV cargado correctamente.", details, dataset)
+        success, message, details, dataset = self.dataset_context_service.load_csv(file_path)
+        return LoadCsvResult(success, message, details, dataset)
 
     def autodetect_columns(self, columns: list[str], dataframe) -> dict[str, str]:
-        normalized = {_normalize_identifier(col): col for col in columns}
-
-        def pick(candidates: list[str]) -> str:
-            for candidate in candidates:
-                normalized_candidate = _normalize_identifier(candidate)
-                for key, original in normalized.items():
-                    if len(normalized_candidate) == 1:
-                        if key == normalized_candidate:
-                            return original
-                    elif key == normalized_candidate or key.startswith(normalized_candidate):
-                        return original
-            return ""
-
-        suggestions = {
-            "x": pick(["x", "easting", "east"]),
-            "y": pick(["y", "northing", "north"]),
-            "z": pick(["z", "elev", "elevation", "rl"]),
-            "hole_id": pick(["holeid", "hole_id", "dhid", "drillhole"]),
-            "domain": pick(["domain", "lito", "litho", "lithology", "zone"]),
-        }
-
-        numeric_candidates: list[str] = []
-        for col in columns:
-            if _is_numeric_dtype(dataframe[col]) and col not in {suggestions["x"], suggestions["y"], suggestions["z"]}:
-                numeric_candidates.append(col)
-        suggestions["target"] = numeric_candidates[0] if numeric_candidates else ""
-        return suggestions
+        return self.dataset_context_service.autodetect_columns(columns, dataframe)
 
     def get_autodetected_columns(self) -> dict[str, str]:
-        return self.autodetected_columns.copy()
+        return self.dataset_context_service.get_autodetected_columns()
 
     def get_domain_candidate_columns(self) -> list[str]:
         if self.current_dataset is None:
@@ -562,49 +502,24 @@ class GeostatService:
         hole_id_column: str | None = None,
         domain_column: str | None = None,
     ) -> ColumnSelectionResult:
-        if self.current_dataset is None:
-            return ColumnSelectionResult(False, "Primero debes cargar un CSV.", "No hay dataset cargado.")
-        selected = [x_column, y_column, z_column, target_column]
-        if any(not value for value in selected):
-            return ColumnSelectionResult(False, "Debes seleccionar X, Y, Z y variable objetivo.", "Configuración incompleta.")
-        invalid = [col for col in selected if col not in self.current_dataset.columns]
-        if invalid:
-            return ColumnSelectionResult(False, "La selección contiene columnas no válidas.", f"Columnas inválidas: {', '.join(invalid)}")
-        coordinate_columns = [x_column, y_column, z_column]
-        if len(set(coordinate_columns)) != len(coordinate_columns):
-            return ColumnSelectionResult(False, "X, Y, Z deben ser columnas diferentes.", "No se permiten coordenadas duplicadas.")
-        non_numeric_coordinates = [col for col in coordinate_columns if not _is_numeric_dtype(self.current_dataset.dataframe[col])]
-        if non_numeric_coordinates:
-            return ColumnSelectionResult(
-                False,
-                "X, Y, Z deben ser columnas numéricas.",
-                f"Columnas no numéricas: {', '.join(non_numeric_coordinates)}",
-            )
-
-        self.variable_config = VariableConfigModel(x_column, y_column, z_column, target_column, hole_id_column, domain_column)
-        self._domain_filter_context_enabled = bool(domain_column)
-        self.workflow_state.active_domain = f"Columna: {domain_column}" if domain_column else "No definido"
-        self.workflow_state.active_support = "Muestra original"
-        self._clear_cutoff_state()
-        self._clear_dynamic_cutoff_state()
-        self._clear_domain_state()
-        self.workflow_state.effective_target_column = target_column
-        self.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
-        return ColumnSelectionResult(True, "Configuración de variables guardada.", self.build_eda_summary())
+        success, message, details = self.dataset_context_service.set_variable_config(
+            x_column=x_column,
+            y_column=y_column,
+            z_column=z_column,
+            target_column=target_column,
+            hole_id_column=hole_id_column,
+            domain_column=domain_column,
+        )
+        return ColumnSelectionResult(success, message, details)
 
     def get_numeric_columns(self) -> list[str]:
-        if self.current_dataset is None:
-            return []
-        numeric_columns: list[str] = []
-        for column in self.current_dataset.columns:
-            if _is_numeric_dtype(self.current_dataset.dataframe[column]):
-                numeric_columns.append(column)
-        return numeric_columns
+        return self.dataset_context_service.get_numeric_columns()
 
     def get_categorical_columns(self) -> list[str]:
-        if self.current_dataset is None:
-            return []
-        return [column for column in self.current_dataset.columns if not _is_numeric_dtype(self.current_dataset.dataframe[column])]
+        return self.dataset_context_service.get_categorical_columns()
+
+    def get_cutoff_state_typed(self) -> CutoffState:
+        return self.operational_state_service.build_cutoff_state()
 
     def get_cutoff_state_typed(self) -> CutoffState:
         return self.operational_state_service.build_cutoff_state()

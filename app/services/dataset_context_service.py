@@ -88,13 +88,7 @@ class DatasetContextService:
         if dataframe.empty:
             return False, "El archivo CSV no contiene filas.", "Carga un CSV con al menos una fila de datos.", None
 
-        dataset = DatasetModel(
-            file_name=selected_path.name,
-            row_count=len(dataframe),
-            column_count=len(dataframe.columns),
-            columns=[str(col) for col in dataframe.columns],
-            dataframe=dataframe,
-        )
+        dataset = DatasetModel.from_dataframe(file_path=selected_path, dataframe=dataframe)
         self.host.current_dataset = dataset
         self.host.variable_config = None
         self.host.workflow_state.current_step = "Datos"
@@ -125,21 +119,31 @@ class DatasetContextService:
 
         def pick(candidates: list[str]) -> str:
             for candidate in candidates:
-                if candidate in normalized:
-                    return normalized[candidate]
+                normalized_candidate = _normalize_identifier(candidate)
+                for key, original in normalized.items():
+                    if len(normalized_candidate) == 1:
+                        if key == normalized_candidate:
+                            return original
+                    elif key == normalized_candidate or key.startswith(normalized_candidate):
+                        return original
             return ""
 
-        target_col = pick(["target", "ley", "grade", "au", "ag", "cu", "value", "val", "variable"]) \
-            or next((col for col in columns if _is_numeric_dtype(dataframe[col])), "")
-
-        return {
+        suggestions = {
             "x": pick(["x", "coordx", "east", "easting"]),
             "y": pick(["y", "coordy", "north", "northing"]),
-            "z": pick(["z", "coordz", "elev", "elevation", "bench"]),
-            "target": target_col,
-            "hole_id": pick(["holeid", "hole", "dhid", "id", "sampleid"]),
-            "domain": pick(["domain", "dom", "lith", "lithology", "zone", "facies"]),
+            "z": pick(["z", "coordz", "elev", "elevation", "bench", "rl"]),
+            "hole_id": pick(["holeid", "hole", "dhid", "id", "sampleid", "hole_id", "drillhole"]),
+            "domain": pick(["domain", "dom", "lith", "lithology", "zone", "facies", "lito", "litho"]),
         }
+        target_col = pick(["target", "ley", "grade", "au", "ag", "cu", "value", "val", "variable"])
+        if not target_col:
+            for col in columns:
+                if _is_numeric_dtype(dataframe[col]) and col not in {suggestions["x"], suggestions["y"], suggestions["z"]}:
+                    target_col = col
+                    break
+        suggestions["target"] = target_col
+
+        return suggestions
 
     def set_variable_config(
         self,
