@@ -1048,20 +1048,20 @@ class HomePanel(ctk.CTkFrame):
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
         plot_card.grid_rowconfigure(0, weight=1)
-        plot_card.grid_columnconfigure(0, weight=1)
-        plot_card.grid_columnconfigure(1, weight=1)
+        plot_card.grid_rowconfigure(1, weight=0, minsize=58)
+        plot_card.grid_columnconfigure(0, weight=11)
+        plot_card.grid_columnconfigure(1, weight=7)
 
         main_row = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        main_row.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        main_row.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
         main_row.grid_rowconfigure(0, weight=1)
-        main_row.grid_columnconfigure(0, weight=9)
+        main_row.grid_columnconfigure(0, weight=11)
         main_row.grid_columnconfigure(1, weight=7)
 
         left_col = ctk.CTkFrame(main_row, fg_color=CHART_BG)
         left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=0)
         left_col.grid_columnconfigure(0, weight=1)
         left_col.grid_rowconfigure(0, weight=1)
-        left_col.grid_rowconfigure(1, weight=0)
 
         hist_host = ctk.CTkFrame(left_col, fg_color=CHART_BG)
         hist_host.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -1070,8 +1070,8 @@ class HomePanel(ctk.CTkFrame):
 
         right_col = ctk.CTkFrame(main_row, fg_color=CHART_BG)
         right_col.grid(row=0, column=1, sticky="nsew", padx=(2, 0), pady=0)
-        right_col.grid_rowconfigure(0, weight=1)
-        right_col.grid_rowconfigure(1, weight=1)
+        right_col.grid_rowconfigure(0, weight=13)
+        right_col.grid_rowconfigure(1, weight=11)
         right_col.grid_columnconfigure(0, weight=1)
 
         qq_host = ctk.CTkFrame(right_col, fg_color=CHART_BG)
@@ -1084,9 +1084,9 @@ class HomePanel(ctk.CTkFrame):
         box_host.grid_rowconfigure(0, weight=1)
         box_host.grid_columnconfigure(0, weight=1)
 
-        iqr_host = ctk.CTkFrame(left_col, fg_color=CHART_BG)
-        iqr_host.grid(row=1, column=0, sticky="ew", padx=0, pady=(2, 0))
-        iqr_host.configure(height=68)
+        iqr_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
+        iqr_host.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(2, 0))
+        iqr_host.configure(height=58)
         iqr_host.grid_propagate(False)
         iqr_host.grid_rowconfigure(0, weight=1)
         iqr_host.grid_columnconfigure(0, weight=1)
@@ -1117,10 +1117,10 @@ class HomePanel(ctk.CTkFrame):
             anchor="w",
         ).grid(row=1, column=0, sticky="w", padx=4, pady=(1, 0))
 
-        hist_grid = DashboardGrid(hist_host, 1, 1, figsize=(8.6, 5.8))
-        qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.6, 3.1))
-        box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.6, 3.1))
-        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(6.2, 0.85))
+        hist_grid = DashboardGrid(hist_host, 1, 1, figsize=(8.6, 5.8), max_aspect_ratio=2.25)
+        qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.65)
+        box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.75)
+        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(8.0, 0.9), max_aspect_ratio=4.0)
         try:
             self.eda_renderer.render_dashboard(
                 histogram_grid=hist_grid,
