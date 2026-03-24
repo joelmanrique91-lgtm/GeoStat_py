@@ -51,6 +51,16 @@ class VariographyIntegrationSmokeTests(unittest.TestCase):
         self.assertTrue(session.compute_dirty)
         self.assertEqual(session.selected_target, "target")
 
+    def test_controller_initial_state_uses_dynamic_distance_defaults(self) -> None:
+        service = GeostatService(adapter=GeostatSpyAdapter())
+        csv_path = Path("tests/fixtures/variography/variography_small_numeric.csv")
+        self.assertTrue(service.load_csv(str(csv_path)).success)
+        self.assertTrue(service.set_variable_config("x", "y", "z", "target").success)
+        controller = VariographyController(service=service)
+        initial = controller.get_initial_state()
+        self.assertLess(float(initial["max_distance"]), 160.0)
+        self.assertGreater(float(initial["lag_distance"]), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

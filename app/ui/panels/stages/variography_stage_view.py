@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import customtkinter as ctk
 
@@ -12,6 +13,7 @@ from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SI
 
 VARIOGRAPHY_CONTROLS_WIDTH = 338
 VARIOGRAPHY_TEXT_WRAP = 980
+logger = logging.getLogger(__name__)
 
 
 class VariographyStageView:
@@ -38,9 +40,21 @@ class VariographyStageView:
         self._compute_button: ctk.CTkButton | None = None
         self._compute_in_progress = False
         self._auto_compute_done = False
+        self._auto_compute_context_signature: tuple[object, ...] | None = None
+        self._pending_async_error: str = ""
         self._bind_dirty_traces()
 
     def mount(self, parent: ctk.CTkFrame) -> None:
+        snapshot = self.controller.service.get_analysis_context_snapshot()
+        context_signature = (
+            self.controller.service.current_dataset.file_name if self.controller.service.current_dataset is not None else "",
+            str(snapshot.get("resolved_target_column", "")),
+            str(snapshot.get("active_domain_column", "")),
+            str(snapshot.get("active_domain_filter", "")),
+        )
+        if self._auto_compute_context_signature != context_signature:
+            self._auto_compute_done = False
+            self._auto_compute_context_signature = context_signature
         init = self.controller.get_initial_state()
         self.target_var.set(str(init.get("target_col", "")))
         self.lag_distance_var.set(f"{float(init.get('lag_distance', 10.0)):.6g}")
@@ -76,6 +90,14 @@ class VariographyStageView:
         self._plot_host = ctk.CTkFrame(results, fg_color=BG_CARD)
         self._plot_host.grid(row=2, column=0, sticky="nsew")
         self._render_empty_plot()
+        if self._pending_async_error:
+            self._render_plot_feedback(
+                title="Error de actualización UI",
+                message=self._pending_async_error,
+                suggestion="Vuelva a abrir la etapa Variografía o recalcule manualmente.",
+                severity="error",
+            )
+            self._pending_async_error = ""
 
         alerts = ctk.CTkFrame(results, fg_color="transparent")
         alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
@@ -194,6 +216,7 @@ class VariographyStageView:
             try:
                 response = self.controller.compute(ui_state)
             except Exception as exc:  # defensive fallback for background execution
+                logger.exception("Variography compute thread failure.")
                 response = {
                     "ok": False,
                     "message": f"No se pudo calcular variograma experimental: {exc}",
@@ -206,8 +229,9 @@ class VariographyStageView:
                 try:
                     host.after(0, lambda: self._on_compute_finished(response))
                     return
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.exception("Variography marshal thread->UI failed.")
+                    self._pending_async_error = f"No se pudo enviar el resultado al hilo UI: {exc}"
             if self._compute_in_progress:
                 self._compute_in_progress = False
 
@@ -222,9 +246,16 @@ class VariographyStageView:
             self.blocker_var.set("\n".join(blockers) if blockers else "")
             result = response.get("result")
             if not isinstance(result, dict):
-                self._render_empty_plot(message="Sin resultado para renderizar. Revisa bloqueos/advertencias.")
+                self._render_compute_failure_panel(response)
                 return
             self._render_result_plot(result, bool(response.get("ok", False)))
+            logger.info(
+                "Variography UI render success | ok=%s lag_len=%s gamma_len=%s pair_len=%s",
+                bool(response.get("ok", False)),
+                len(result.get("lag_centers", []) or []),
+                len(result.get("gamma_values", []) or []),
+                len(result.get("pair_counts", []) or []),
+            )
         finally:
             self._set_compute_busy(False)
 
@@ -243,15 +274,19 @@ class VariographyStageView:
         self._render_text_center(message)
 
     def _render_result_plot(self, result: dict[str, object], ok: bool) -> None:
-        import traceback
-
         if self._plot_host is None:
             return
-        print("DEBUG: render_result_plot called")
-        DashboardGrid.clear(self._plot_host)
         try:
             if result is None:
                 raise ValueError("Resultado de variografía es None")
+            lag_values = result.get("lag_centers", result.get("lags", []))
+            gamma_values = result.get("gamma_values", result.get("gamma", []))
+            pair_counts = result.get("pair_counts", result.get("npairs", []))
+            if not isinstance(lag_values, list) or not isinstance(gamma_values, list) or not isinstance(pair_counts, list):
+                raise ValueError("Contrato inválido de resultado variográfico (lags/gamma/npairs).")
+            if not lag_values or not gamma_values:
+                raise ValueError("Resultado variográfico sin datos de lags/gamma.")
+            DashboardGrid.clear(self._plot_host)
             grid = DashboardGrid(self._plot_host, 2, 2, figsize=(16.2, 8.8), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
             info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
             self.renderer.render(
@@ -270,8 +305,13 @@ class VariographyStageView:
             else:
                 self.status_var.set(f"{self.status_var.get()} · Estado: revisar bloqueos antes de usar resultados.")
         except Exception as exc:
-            traceback.print_exc()
-            self._render_text_center(f"Error al renderizar variograma:\n{exc}")
+            logger.exception("Variography renderer failure.")
+            self._render_plot_feedback(
+                title="Error al renderizar variograma",
+                message=str(exc),
+                suggestion="Recalcule ajustando max_distance o n_lags.",
+                severity="error",
+            )
 
     @staticmethod
     def _parse_float(value: str) -> float:
@@ -310,3 +350,41 @@ class VariographyStageView:
         if self._plot_host is None:
             return
         ctk.CTkLabel(self._plot_host, text=message, text_color=TEXT_MUTED, justify="center").pack(fill="both", expand=True, padx=8, pady=8)
+
+    def _render_compute_failure_panel(self, response: dict[str, object]) -> None:
+        blockers = response.get("blockers", []) if isinstance(response.get("blockers", []), list) else []
+        blocker_code = "NO_RENDERABLE_RESULT"
+        blocker_message = str(response.get("message", "Sin resultado renderizable."))
+        if blockers:
+            first = blockers[0] if isinstance(blockers[0], dict) else {}
+            blocker_code = str(first.get("code", blocker_code))
+            blocker_message = str(first.get("message", blocker_message))
+        metadata = response.get("metadata", {}) if isinstance(response.get("metadata", {}), dict) else {}
+        recommended_max_distance = metadata.get("recommended_max_distance", "-")
+        recommended_lag_distance = metadata.get("recommended_lag_distance", "-")
+        effective_rows = metadata.get("effective_rows", "-")
+        suggestion = "Ajuste max_distance y recalcule."
+        if blocker_code == "NO_PAIRS_IN_RANGE":
+            suggestion = f"Sin pares en rango. Sugerencia: max_distance≈{recommended_max_distance}, lag_distance≈{recommended_lag_distance}."
+        elif blocker_code in {"INVALID_LAG_DISTANCE", "INVALID_N_LAGS", "INVALID_MAX_DISTANCE", "MAX_DISTANCE_TOO_SMALL"}:
+            suggestion = "Revise parámetros de lag (distancia >0 y max_distance > lag_distance)."
+        elif blocker_code in {"INSUFFICIENT_LAG_COVERAGE", "NO_ACTIVE_ROWS"}:
+            suggestion = f"Datos activos insuficientes ({effective_rows} filas). Ajuste filtro de dominio o parámetros."
+        self._render_plot_feedback(
+            title=f"Variografía no renderizable [{blocker_code}]",
+            message=blocker_message,
+            suggestion=suggestion,
+            severity="warning",
+        )
+        logger.info("Variography UI fallback panel | blocker=%s message=%s", blocker_code, blocker_message)
+
+    def _render_plot_feedback(self, *, title: str, message: str, suggestion: str, severity: str = "warning") -> None:
+        if self._plot_host is None:
+            return
+        DashboardGrid.clear(self._plot_host)
+        container = ctk.CTkFrame(self._plot_host, fg_color=BG_CARD)
+        container.pack(fill="both", expand=True, padx=8, pady=8)
+        color = SEM_RED if severity == "error" else SEM_ORANGE
+        ctk.CTkLabel(container, text=title, text_color=color, font=ctk.CTkFont(size=14, weight="bold"), justify="left").pack(anchor="w", padx=12, pady=(12, 6))
+        ctk.CTkLabel(container, text=message, text_color=TEXT_MAIN, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w", padx=12, pady=(0, 6))
+        ctk.CTkLabel(container, text=suggestion, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w", padx=12, pady=(0, 12))
