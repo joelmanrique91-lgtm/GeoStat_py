@@ -1,4 +1,4 @@
-"""Tests for disabled domain module behavior."""
+"""Tests for domain context behavior."""
 
 from __future__ import annotations
 
@@ -50,8 +50,8 @@ class DomainEstimationTests(unittest.TestCase):
         self._load_dataset()
         payload = self.service.prepare_univariate_data()
         self.assertIn("domain_boxplot", payload)
-        self.assertFalse(payload["domain_boxplot"]["enabled"])
-        self.assertIn("deshabilitado", payload["domain_boxplot"]["message"].lower())
+        self.assertTrue(payload["domain_boxplot"]["enabled"])
+        self.assertGreaterEqual(len(payload["domain_boxplot"]["labels"]), 2)
 
 
 if __name__ == "__main__":
