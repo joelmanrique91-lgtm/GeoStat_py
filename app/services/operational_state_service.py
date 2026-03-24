@@ -18,7 +18,7 @@ DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
 BLOCKING_REASON_HINTS = {
     "missing_dataset": "Carga un CSV para continuar.",
     "missing_variable_config": "Configura y confirma X/Y/Z/target.",
-    "missing_resolved_target_column": "Revisa target/cutoffs y confirma la variable activa.",
+    "missing_resolved_target_column": "Revisa target/Control de Outliers y confirma la variable activa.",
     "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
     "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
     "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
