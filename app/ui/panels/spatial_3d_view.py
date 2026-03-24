@@ -154,7 +154,7 @@ class Spatial3DView(ctk.CTkFrame):
 
     def _ensure_plot(self) -> None:
         if self._figure is None:
-            self._figure = Figure(figsize=(8.8, 6.2), dpi=100)
+            self._figure = Figure(figsize=(12.8, 8.2), dpi=100)
         if self._canvas is None:
             self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
             self._canvas.get_tk_widget().pack(fill="both", expand=True)

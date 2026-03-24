@@ -80,13 +80,6 @@ class DashboardGrid:
         dpi = float(self.figure.get_dpi())
         new_w = max(width / dpi, 2.0)
         new_h = max(height / dpi, 1.6)
-        if self._configured_figsize:
-            ratio = self._configured_figsize[0] / max(self._configured_figsize[1], 1e-6)
-            max_h_by_ratio = new_w / max(ratio, 1e-6)
-            if max_h_by_ratio < new_h:
-                new_h = max_h_by_ratio
-            else:
-                new_w = new_h * ratio
         self.figure.set_size_inches(new_w, new_h, forward=True)
         self.figure.tight_layout(pad=0.85, w_pad=0.75, h_pad=0.75)
         self.canvas.draw_idle()

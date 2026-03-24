@@ -20,8 +20,17 @@ class MainWindow:
         self.root.title("GeoStat Py - Geostatistics Desktop")
         self.root.geometry("1360x860")
         self.root.minsize(1180, 760)
+        self._apply_desktop_open_policy()
 
         self._build_layout()
+
+    def _apply_desktop_open_policy(self) -> None:
+        """Prefer maximized desktop startup while keeping a safe geometry fallback."""
+        try:
+            self.root.state("zoomed")
+        except Exception:
+            # Fallback to the configured geometry/minsize on platforms that do not support zoomed.
+            pass
 
     def _build_layout(self) -> None:
         home_panel = HomePanel(parent=self.root, service=self.service)
