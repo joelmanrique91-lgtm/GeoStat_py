@@ -1059,18 +1059,44 @@ class HomePanel(ctk.CTkFrame):
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
         plot_card.grid_rowconfigure(0, weight=1)
+        plot_card.grid_rowconfigure(1, weight=0)
         plot_card.grid_columnconfigure(0, weight=1)
+        plot_card.grid_columnconfigure(1, weight=1)
 
-        grid_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        grid_host.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        main_row = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
+        main_row.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
+        main_row.grid_rowconfigure(0, weight=1)
+        main_row.grid_columnconfigure(0, weight=10)
+        main_row.grid_columnconfigure(1, weight=7)
 
-        grid = DashboardGrid(
-            grid_host,
-            2,
-            2,
-            width_ratios=[2.2, 1.0],
-            height_ratios=[3.0, 1.0],
-        )
+        hist_host = ctk.CTkFrame(main_row, fg_color=CHART_BG)
+        hist_host.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=0)
+        hist_host.grid_rowconfigure(0, weight=1)
+        hist_host.grid_columnconfigure(0, weight=1)
+
+        right_col = ctk.CTkFrame(main_row, fg_color=CHART_BG)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(2, 0), pady=0)
+        right_col.grid_rowconfigure(0, weight=1)
+        right_col.grid_rowconfigure(1, weight=1)
+        right_col.grid_columnconfigure(0, weight=1)
+
+        qq_host = ctk.CTkFrame(right_col, fg_color=CHART_BG)
+        qq_host.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 2))
+        qq_host.grid_rowconfigure(0, weight=1)
+        qq_host.grid_columnconfigure(0, weight=1)
+
+        box_host = ctk.CTkFrame(right_col, fg_color=CHART_BG)
+        box_host.grid(row=1, column=0, sticky="nsew", padx=0, pady=(2, 0))
+        box_host.grid_rowconfigure(0, weight=1)
+        box_host.grid_columnconfigure(0, weight=1)
+
+        iqr_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
+        iqr_host.grid(row=1, column=0, sticky="nsew", padx=(0, 2), pady=(2, 0))
+        iqr_host.grid_rowconfigure(0, weight=1)
+        iqr_host.grid_columnconfigure(0, weight=1)
+
+        insight_host = ctk.CTkFrame(plot_card, fg_color=BG_PANEL, corner_radius=6, border_width=1, border_color=CHART_BORDER)
+        insight_host.grid(row=1, column=1, sticky="nsew", padx=(2, 0), pady=(2, 0))
 
         values = [float(v) for v in data["target_values"]]
         original_values: list[float] = values
@@ -1083,10 +1109,33 @@ class HomePanel(ctk.CTkFrame):
         if state["dynamic_enabled"]:
             cutoff_val = float(state["dynamic_cutoff_value"])
 
-        self.eda_renderer.render(
-            grid,
-            data,
-            EDARenderContext(
+        stage_alert = bool(
+            not availability.get("probability", {}).get("available", True)
+            or not availability.get("boxplot", {}).get("available", True)
+            or "problemática" in diagnostic.lower()
+        )
+        insight_text = "Insight: mantener distribución actual." if not stage_alert else "Insight: revisar transformación/capping."
+        ctk.CTkLabel(
+            insight_host,
+            text=f"{insight_text}\nCV={cv_text}\nn={diagnostics.get('target_valid_count', 0)}\nno implica independencia espacial.",
+            text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
+            font=ui_font(FONT_MICRO),
+            justify="left",
+            anchor="nw",
+            wraplength=220,
+        ).pack(fill="both", expand=True, padx=8, pady=6)
+
+        hist_grid = DashboardGrid(hist_host, 1, 1)
+        qq_grid = DashboardGrid(qq_host, 1, 1)
+        box_grid = DashboardGrid(box_host, 1, 1)
+        iqr_grid = DashboardGrid(iqr_host, 1, 1)
+        self.eda_renderer.render_dashboard(
+            histogram_grid=hist_grid,
+            qq_grid=qq_grid,
+            boxplot_grid=box_grid,
+            iqr_grid=iqr_grid,
+            data=data,
+            context=EDARenderContext(
                 active_variable=active_variable,
                 skewness_text=skewness_text,
                 chart_text_color=CHART_TEXT,
@@ -1096,19 +1145,6 @@ class HomePanel(ctk.CTkFrame):
             original_values=original_values,
             cutoff_value=cutoff_val,
         )
-
-        stage_alert = bool(
-            not availability.get("probability", {}).get("available", True)
-            or not availability.get("boxplot", {}).get("available", True)
-            or "problemática" in diagnostic.lower()
-        )
-        insight_text = "Insight: mantener distribución actual." if not stage_alert else "Insight: revisar transformación/capping."
-        ctk.CTkLabel(
-            wrapper,
-            text=f"{insight_text} CV={cv_text} · n={diagnostics.get('target_valid_count', 0)} · no implica independencia espacial.",
-            text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
-            font=ui_font(FONT_MICRO),
-        ).grid(row=1, column=0, sticky="w", padx=3, pady=(0, 0))
 
     def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         signature = (
