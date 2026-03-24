@@ -58,6 +58,7 @@ class DashboardGrid:
             widget.pack(fill="both", expand=True, padx=0, pady=0)
         if not self._configure_bound:
             widget.bind("<Configure>", self._on_parent_configure, add="+")
+            self.parent.bind("<Configure>", self._on_parent_configure, add="+")
             self._configure_bound = True
         self._resize_to_parent(force=True)
 
@@ -71,8 +72,9 @@ class DashboardGrid:
 
     def _resize_to_parent(self, *, force: bool = False) -> None:
         self._resize_after_id = None
-        width = int(self.parent.winfo_width())
-        height = int(self.parent.winfo_height())
+        widget = self.canvas.get_tk_widget()
+        width = int(widget.winfo_width() or self.parent.winfo_width())
+        height = int(widget.winfo_height() or self.parent.winfo_height())
         if width <= 16 or height <= 16:
             self.parent.after(50, self._resize_to_parent)
             return

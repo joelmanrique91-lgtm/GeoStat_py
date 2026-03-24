@@ -30,7 +30,6 @@ class MatplotlibEDARenderer(EDARenderer):
 
         for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
             apply_axis_style(axis)
-        ax_hist_bottom.axis("off")
 
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
@@ -66,6 +65,30 @@ class MatplotlibEDARenderer(EDARenderer):
             bbox={"facecolor": CHART_BG, "edgecolor": CHART_BORDER, "boxstyle": "round,pad=0.22"},
         )
 
+        # Banda inferior compacta: evita espacio muerto y aporta lectura rápida.
+        q10 = sorted_values[int(0.10 * (n_values - 1))]
+        q25 = sorted_values[int(0.25 * (n_values - 1))]
+        q75 = sorted_values[int(0.75 * (n_values - 1))]
+        ax_hist_bottom.set_title("Rango intercuartil y percentiles", color=context.chart_text_color, pad=6)
+        ax_hist_bottom.hlines(1.0, q10, p90, color=CHART_BORDER, linewidth=4.2, alpha=0.75)
+        ax_hist_bottom.hlines(1.0, q25, q75, color=SEM_BLUE, linewidth=6.8, alpha=0.78)
+        ax_hist_bottom.scatter([mean_val, p50, p90], [1.0, 1.0, 1.0], color=[SEM_BLUE_SOFT, SEM_GREEN, SEM_ORANGE], s=[26, 24, 26], zorder=3)
+        ax_hist_bottom.set_yticks([])
+        ax_hist_bottom.set_xlabel("Ley Cu (%)")
+        ax_hist_bottom.set_xlim(min(sorted_values), max(sorted_values))
+        ax_hist_bottom.margins(x=0.02, y=0.25)
+        ax_hist_bottom.grid(axis="y", alpha=0.0)
+        ax_hist_bottom.text(
+            0.012,
+            0.91,
+            "P10–P90 / IQR",
+            transform=ax_hist_bottom.transAxes,
+            ha="left",
+            va="top",
+            fontsize=max(context.chart_label_size - 1, 8),
+            color=context.chart_text_color,
+        )
+
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             prob_x = [float(v) for v in data["probplot_x"]]
             prob_y = [float(v) for v in data["probplot_y"]]
@@ -86,6 +109,7 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_prob.set_title("QQ plot · Normalidad", color=context.chart_text_color, pad=8)
             ax_prob.set_xlabel("Cuantiles normales")
             ax_prob.set_ylabel("Ley Cu (%)")
+            ax_prob.tick_params(axis="both", labelsize=context.chart_label_size)
             ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=context.chart_legend_size, frameon=False)
             ax_prob.margins(x=0.03, y=0.05)
         else:
@@ -103,7 +127,7 @@ class MatplotlibEDARenderer(EDARenderer):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            ax_secondary.tick_params(axis="x", rotation=10, labelsize=context.chart_legend_size)
+            ax_secondary.tick_params(axis="x", rotation=18, labelsize=context.chart_legend_size)
             ax_secondary.set_ylabel("Ley Cu (%)")
             ax_secondary.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
             ax_secondary.margins(x=0.02)
