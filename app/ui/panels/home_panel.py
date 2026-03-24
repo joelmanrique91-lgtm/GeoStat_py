@@ -90,17 +90,17 @@ PLOT_TXT = TEXT_MAIN
 
 PAD_MAIN_X = 10
 PAD_CARD_X = 14
-PAD_STACK_Y = 4
+PAD_STACK_Y = 3
 PAD_SECTION_Y = 8
 SIDEBAR_WIDTH = 308
 STEP_BUTTON_WIDTH = 112
 STEP_BUTTON_HEIGHT = 24
 ACTION_TOGGLE_WIDTH = 74
 LOG_TOGGLE_WIDTH = 130
-LOG_BOX_HEIGHT = 44
+LOG_BOX_HEIGHT = 40
 WRAP_STAGE_BLOCKED = 1020
 WRAP_STAGE_SUMMARY = 1120
-WRAP_DYNAMIC_IMPACT = 350
+WRAP_DYNAMIC_IMPACT = 340
 SPATIAL_GUARDRAIL_NOTE = "Uso: lectura exploratoria, no inferencia de continuidad."
 
 
@@ -360,17 +360,17 @@ class HomePanel(ctk.CTkFrame):
         self._build_stage_action_bar(self.content_panel)
 
         self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 6))
+        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 3))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
-        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 3))
         self.aux_controls_host.grid_remove()
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
