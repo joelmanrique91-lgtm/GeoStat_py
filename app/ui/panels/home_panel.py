@@ -9,6 +9,7 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
+from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
 from app.ui.controllers.variography_controller import VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.panels.stages import VariographyStageView
@@ -116,21 +117,7 @@ STEP_TO_READINESS_KEY = {
     "Variografía": "variography",
 }
 
-BLOCKING_REASON_HINTS = {
-    "missing_dataset": "Carga un CSV para continuar.",
-    "missing_variable_config": "Configura y confirma X/Y/Z/target.",
-    "missing_resolved_target_column": "Revisa target/cutoffs y confirma la variable activa.",
-    "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
-    "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
-    "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
-    "non_numeric_target_for_domain_stats": "Usa un target numérico para estadísticas de dominios.",
-    "invalid_active_domain_filter_column": "Limpia o corrige el filtro de dominio activo.",
-    "insufficient_data": "Datos insuficientes para variografía. Amplía muestra o ajusta filtros/dominio.",
-    "low_data_after_domain_filter": "El filtro de dominio deja pocos datos; revisa la selección activa.",
-}
-
-
-def _build_workflow_stage_label(step_name: str, active_step: str, readiness: dict[str, object]) -> str:
+def _build_workflow_stage_label(step_name: str, active_step: str, readiness: WorkflowReadinessState) -> str:
     labels = {
         "Datos": "01 Datos",
         "EDA": "02 EDA",
@@ -140,52 +127,51 @@ def _build_workflow_stage_label(step_name: str, active_step: str, readiness: dic
         "Variografía": "06 Variografía",
     }
     stage_key = STEP_TO_READINESS_KEY.get(step_name, "")
-    stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
-    is_ready = bool(stage_state.get("ready"))
-    has_warning = bool(stage_state.get("warnings"))
+    stage_state = readiness.stages.get(stage_key, None)
+    is_ready = bool(stage_state.ready) if stage_state is not None else False
+    has_warning = bool(stage_state.warnings) if stage_state is not None else False
     readiness_marker = "✓ LISTO" if is_ready else ("⚠ ALERTA" if has_warning else "! BLOQ")
     nav_marker = "●" if step_name == active_step else "○"
     return f"{nav_marker} {labels.get(step_name, step_name)} · {readiness_marker}"
 
 
-def _build_active_step_hint(step_name: str, readiness: dict[str, object]) -> str:
+def _build_active_step_hint(step_name: str, state: GeostatOperationalState) -> str:
     stage_key = STEP_TO_READINESS_KEY.get(step_name, "")
-    stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
-    if bool(stage_state.get("ready")):
-        warnings = [str(item) for item in stage_state.get("warnings", []) if str(item)]
-        if warnings:
-            return "Advertencia: hay filtros activos que reducen resultados."
-        return "Etapa lista."
-    blocking = [str(item) for item in stage_state.get("blocking_reasons", []) if str(item)]
-    if not blocking:
+    stage_state = state.readiness.stages.get(stage_key, None)
+    if stage_state is None:
         return "Etapa no lista."
-    return BLOCKING_REASON_HINTS.get(blocking[0], "Completa la configuración requerida para desbloquear esta etapa.")
+    return stage_state.hint or "Etapa no lista."
 
 
-def _build_context_chip_texts(snapshot: dict[str, object], readiness: dict[str, object], dataset_name: str) -> dict[str, str]:
-    resolved_target = str(snapshot.get("resolved_target_column") or "No definido")
-    domain_col = str(snapshot.get("active_domain_column") or "No definido")
-    domain_filter = str(snapshot.get("active_domain_filter") or "Todos")
-    stages = readiness.get("stages", {}) if isinstance(readiness, dict) else {}
-    blocked = [name for name, state in stages.items() if not bool(state.get("ready"))] if isinstance(stages, dict) else []
+def _build_context_chip_texts(state: GeostatOperationalState) -> dict[str, str]:
+    resolved_target = str(state.analysis.resolved_target_column or "No definido")
+    domain_col = str(state.analysis.active_domain_column or "No definido")
+    domain_filter = str(state.analysis.active_domain_filter or "Todos")
+    blocked = [name for name, stage in state.readiness.stages.items() if not bool(stage.ready)]
     status = "Listo" if not blocked else f"Bloqueos: {len(blocked)}"
     return {
-        "dataset": f"Dataset: {dataset_name}",
+        "dataset": f"Dataset: {state.analysis.dataset_name}",
         "target": f"Target activo: {resolved_target}",
         "domain": f"Dominio/filtro: {domain_col} · {domain_filter}",
         "status": f"Workflow: {status}",
     }
 
 
-def _build_unified_context_text(snapshot: dict[str, object], readiness: dict[str, object], dataset_name: str, capping_label: str) -> str:
-    base = _build_context_chip_texts(snapshot, readiness, dataset_name)
+def _build_unified_context_text(state: GeostatOperationalState, capping_label: str) -> str:
+    base = _build_context_chip_texts(state)
     return " · ".join([base["dataset"], base["target"], base["domain"], base["status"], capping_label])
 
 
-def _build_visual_context_line(snapshot: dict[str, object], *, local_override: str | None = None) -> str:
-    resolved_target = str(snapshot.get("resolved_target_column") or "No definido")
-    domain_col = str(snapshot.get("active_domain_column") or "No definido")
-    domain_filter = str(snapshot.get("active_domain_filter") or "Todos")
+def _build_visual_context_line(snapshot: object, *, local_override: str | None = None) -> str:
+    if hasattr(snapshot, "resolved_target_column"):
+        resolved_target = str(getattr(snapshot, "resolved_target_column") or "No definido")
+        domain_col = str(getattr(snapshot, "active_domain_column") or "No definido")
+        domain_filter = str(getattr(snapshot, "active_domain_filter") or "Todos")
+    else:
+        payload = snapshot if isinstance(snapshot, dict) else {}
+        resolved_target = str(payload.get("resolved_target_column") or "No definido")
+        domain_col = str(payload.get("active_domain_column") or "No definido")
+        domain_filter = str(payload.get("active_domain_filter") or "Todos")
     parts = [f"Target global: {resolved_target}"]
     if local_override and local_override != resolved_target:
         parts.append(f"Override local: {local_override}")
@@ -193,11 +179,11 @@ def _build_visual_context_line(snapshot: dict[str, object], *, local_override: s
     return " | ".join(parts)
 
 
-def _should_expand_stage_actions(step_name: str, readiness: dict[str, object]) -> bool:
-    if step_name != "Datos" or not isinstance(readiness, dict):
+def _should_expand_stage_actions(step_name: str, readiness: WorkflowReadinessState) -> bool:
+    if step_name != "Datos":
         return False
-    stage_state = readiness.get("stages", {}).get("data", {})
-    blocking = [str(item) for item in stage_state.get("blocking_reasons", []) if str(item)]
+    stage_state = readiness.stages.get("data")
+    blocking = list(stage_state.blocking_reasons) if stage_state is not None else []
     return "missing_dataset" in blocking
 
 
@@ -263,7 +249,7 @@ class HomePanel(ctk.CTkFrame):
         self.action_bar_body: ctk.CTkFrame | None = None
         self.action_bar_block: ctk.CTkFrame | None = None
         self.action_bar_toggle_button: ctk.CTkButton | None = None
-        initial_readiness = self.service.get_workflow_readiness()
+        initial_readiness = self.service.get_workflow_readiness_state()
         self.stage_actions_collapsed = not _should_expand_stage_actions("Datos", initial_readiness)
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
@@ -680,10 +666,10 @@ class HomePanel(ctk.CTkFrame):
             return
         self.action_bar_body.grid()
         self.action_bar_body.grid_columnconfigure(0, weight=1)
-        readiness = self.service.get_workflow_readiness()
+        readiness = self.service.get_workflow_readiness_state()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
-        stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
-        if not bool(stage_state.get("ready")):
+        stage_state = readiness.stages.get(stage_key, None)
+        if not bool(stage_state.ready) if stage_state is not None else True:
             self._build_blocked_message_card(self.action_bar_body, stage)
 
         if stage == "Datos":
@@ -700,8 +686,8 @@ class HomePanel(ctk.CTkFrame):
             self._build_variography_actions_inline(self.action_bar_body)
 
     def _build_blocked_message_card(self, parent: ctk.CTkFrame, stage: str) -> None:
-        readiness = self.service.get_workflow_readiness()
-        message = _build_active_step_hint(stage, readiness)
+        state = self.service.get_operational_state()
+        message = _build_active_step_hint(stage, state)
         card = ctk.CTkFrame(parent, fg_color=WF_BLOCKED, corner_radius=8)
         card.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         ctk.CTkLabel(
@@ -912,10 +898,10 @@ class HomePanel(ctk.CTkFrame):
         stage_host = self._show_only_stage_host(stage)
         stage_host.grid_columnconfigure(0, weight=1)
         stage_host.grid_rowconfigure(0, weight=1)
-        readiness = self.service.get_workflow_readiness()
+        readiness = self.service.get_workflow_readiness_state()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
-        stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
-        if stage != "Datos" and not bool(stage_state.get("ready")):
+        stage_state = readiness.stages.get(stage_key, None)
+        if stage != "Datos" and not bool(stage_state.ready) if stage_state is not None else False:
             self.workspace_title_var.set(f"{stage} – etapa bloqueada")
             self.workspace_subtitle_var.set("Completa la configuración indicada para habilitar esta vista.")
             DashboardGrid.clear(stage_host)
@@ -975,7 +961,7 @@ class HomePanel(ctk.CTkFrame):
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(card, text=f"Etapa {stage} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
-        hint = _build_active_step_hint(stage, self.service.get_workflow_readiness())
+        hint = _build_active_step_hint(stage, self.service.get_operational_state())
         ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_BLOCKED, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
         ctk.CTkLabel(
             card,
@@ -987,15 +973,16 @@ class HomePanel(ctk.CTkFrame):
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
     def _render_eda_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
-        state = self.service.get_cutoff_state()
-        snapshot = self.service.get_analysis_context_snapshot()
+        operational = self.service.get_operational_state()
+        state = operational.cutoff
+        snapshot = operational.analysis
         signature = (
-            snapshot.get("resolved_target_column"),
-            snapshot.get("active_domain_column"),
-            snapshot.get("active_domain_filter"),
+            snapshot.resolved_target_column,
+            snapshot.active_domain_column,
+            snapshot.active_domain_filter,
             bool(self.eda_use_capping_var.get()),
-            bool(state.get("dynamic_enabled")),
-            float(state.get("dynamic_cutoff_value") or 0.0),
+            bool(state.dynamic_enabled),
+            float(state.dynamic_cutoff_value or 0.0),
         )
         if not force_rebuild and self._rendered_stage_signatures.get("EDA") == signature:
             return
@@ -1007,8 +994,8 @@ class HomePanel(ctk.CTkFrame):
         wrapper.grid_rowconfigure(0, weight=1)
         wrapper.grid_rowconfigure(1, weight=0)
 
-        active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
-        capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
+        active_variable = str(state.effective_target_column if self.eda_use_capping_var.get() else self.target_var.get() or state.effective_target_column)
+        capping_status = "capping confirmado" if state.dynamic_enabled else "sin capping confirmado"
 
         try:
             selected_domain_filter = self.domain_filter_var.get().strip()
@@ -1052,7 +1039,7 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkLabel(summary, text=f"EDA · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=2, pady=(0, 0))
         ctk.CTkLabel(
             summary,
-            text=f"{snapshot.get('active_domain_column') or 'Sin dominio'} · {snapshot.get('active_domain_filter') or 'Todos'} · {capping_status}",
+            text=f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}",
             text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
             wraplength=WRAP_STAGE_SUMMARY,
@@ -1113,8 +1100,8 @@ class HomePanel(ctk.CTkFrame):
             if base_target in self.service.current_dataset.dataframe.columns:
                 raw_base = self.service.current_dataset.dataframe[base_target].dropna().tolist()
                 original_values = [float(v) for v in raw_base if str(v).strip() != ""]
-        if state["dynamic_enabled"]:
-            cutoff_val = float(state["dynamic_cutoff_value"])
+        if state.dynamic_enabled:
+            cutoff_val = float(state.dynamic_cutoff_value)
 
         stage_alert = bool(
             not availability.get("probability", {}).get("available", True)
@@ -1167,7 +1154,7 @@ class HomePanel(ctk.CTkFrame):
         self._rendered_stage_signatures["Cutoffs"] = signature
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
-        snapshot = self.service.get_analysis_context_snapshot()
+        snapshot = self.service.get_analysis_context_state()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot)} · Ajustes de capping locales en esta vista.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
         ctk.CTkLabel(wrapper, text="Microlectura: identifica cuánto porcentaje de muestras y máximos cambia por cutoff.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 4))
@@ -1194,7 +1181,7 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_view_mode_var.get(),
             self.spatial_color_var.get(),
             self.domain_filter_var.get(),
-            self.service.get_analysis_context_snapshot().get("active_domain_filter"),
+            self.service.get_analysis_context_state().active_domain_filter,
         )
         if not force_rebuild and self._rendered_stage_signatures.get("Espacial") == signature:
             return
@@ -1353,7 +1340,7 @@ class HomePanel(ctk.CTkFrame):
         self._render_step(step_name)
 
     def _render_step(self, step_name: str) -> None:
-        readiness = self.service.get_workflow_readiness()
+        readiness = self.service.get_workflow_readiness_state()
         if _should_expand_stage_actions(step_name, readiness):
             self.stage_actions_collapsed = False
             if self.action_bar_toggle_button is not None:
@@ -1366,14 +1353,14 @@ class HomePanel(ctk.CTkFrame):
 
     def _paint_workflow_state(self, active_step: str) -> None:
         ordered = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]
-        readiness = self.service.get_workflow_readiness()
+        readiness = self.service.get_workflow_readiness_state()
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
             button_text = _build_workflow_stage_label(step, active_step, readiness)
             stage_key = STEP_TO_READINESS_KEY.get(step, "")
-            stage_state = readiness.get("stages", {}).get(stage_key, {}) if isinstance(readiness, dict) else {}
-            is_ready = bool(stage_state.get("ready"))
-            has_warning = bool(stage_state.get("warnings"))
+            stage_state = readiness.stages.get(stage_key, None)
+            is_ready = bool(stage_state.ready) if stage_state is not None else False
+            has_warning = bool(stage_state.warnings) if stage_state is not None else False
             if idx == active_idx:
                 fg_color = WF_WARNING if has_warning else WF_ACTIVE
                 border_color = SEM_ORANGE if has_warning else SEM_BLUE_SOFT
@@ -1396,7 +1383,7 @@ class HomePanel(ctk.CTkFrame):
                 border_color=border_color,
                 text_color=text_color,
             )
-        self.workflow_hint_var.set(_build_active_step_hint(active_step, readiness))
+        self.workflow_hint_var.set(_build_active_step_hint(active_step, self.service.get_operational_state()))
 
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
         self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
@@ -1425,17 +1412,14 @@ class HomePanel(ctk.CTkFrame):
         return f"{numeric:,.2f}"
 
     def _refresh_context_chips(self) -> None:
-        snapshot = self.service.get_analysis_context_snapshot()
-        readiness = self.service.get_workflow_readiness()
-        state = self.service.get_cutoff_state()
-        dataset_name = self.service.current_dataset.file_name if self.service.current_dataset is not None else "No cargado"
-        if state["dynamic_enabled"]:
-            capping_text = f"Capping activo P{state['dynamic_percent']:.0f}"
-        elif state["enabled"]:
+        state = self.service.get_operational_state()
+        if state.cutoff.dynamic_enabled:
+            capping_text = f"Capping activo P{state.cutoff.dynamic_percent:.0f}"
+        elif state.cutoff.enabled:
             capping_text = "Cutoff manual activo"
         else:
             capping_text = "Capping inactivo"
-        self.unified_context_var.set(_build_unified_context_text(snapshot, readiness, dataset_name, capping_text))
+        self.unified_context_var.set(_build_unified_context_text(state, capping_text))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, key: str | None = None) -> None:
         ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=col, sticky="w", padx=4)
@@ -1463,7 +1447,7 @@ class HomePanel(ctk.CTkFrame):
         return (usable_w, usable_h)
 
     def _get_spatial_color_options(self) -> list[str]:
-        target = self.service.get_cutoff_state().get("effective_target_column", "") or self.target_var.get()
+        target = self.service.get_cutoff_state_typed().effective_target_column or self.target_var.get()
         categorical = self.service.get_categorical_columns()
         options = [value for value in [target, "domain_estimation", *categorical] if value]
         unique: list[str] = []
@@ -1878,21 +1862,21 @@ class HomePanel(ctk.CTkFrame):
             self.kpi_value_vars["cv"].set(f"{float(str(cv_raw).replace('%', '')) * 100:.2f}%")
         except Exception:
             self.kpi_value_vars["cv"].set(cv_raw)
-        state = self.service.get_cutoff_state()
+        state = self.service.get_cutoff_state_typed()
         cutoff_actual = "-"
         trunc_pct = "-"
-        if state["dynamic_enabled"]:
-            cutoff_actual = f"{state['dynamic_cutoff_value']:.6g}"
-            target = str(state["dynamic_target_column"] or self.target_var.get())
-            mode = str(state["dynamic_mode"])
-            slider = float(state["dynamic_percent"])
+        if state.dynamic_enabled:
+            cutoff_actual = f"{state.dynamic_cutoff_value:.6g}"
+            target = str(state.dynamic_target_column or self.target_var.get())
+            mode = str(state.dynamic_mode)
+            slider = float(state.dynamic_percent)
             try:
                 preview = self.service.prepare_dynamic_cutoff_preview(target, mode, slider)
                 trunc_pct = f"{preview['affected_pct']:.2f}%"
             except Exception:
                 trunc_pct = "-"
-        elif state["enabled"] and state["limits"]:
-            cutoff_actual = ", ".join(f"{float(v):.4g}" for v in state["limits"])
+        elif state.enabled and state.limits:
+            cutoff_actual = ", ".join(f"{float(v):.4g}" for v in state.limits)
         self.kpi_value_vars["cutoff actual"].set(self._format_kpi_value(cutoff_actual) if cutoff_actual != "-" and "," not in cutoff_actual else cutoff_actual)
 
     def _on_update_repo(self) -> None:
@@ -1937,11 +1921,11 @@ class HomePanel(ctk.CTkFrame):
             self.log_box.grid_remove()
 
     def _trace_ui_action(self, action: str, *, refresh_type: str, extra: dict[str, object] | None = None) -> None:
-        state = self.service.get_cutoff_state()
+        state = self.service.get_cutoff_state_typed()
         details: dict[str, object] = {
             "action": action,
             "view": self.service.workflow_state.current_step,
-            "target_active": str(state.get("effective_target_column") or self.target_var.get() or ""),
+            "target_active": str(state.effective_target_column or self.target_var.get() or ""),
             "capping_confirmed": bool(self.service.has_confirmed_dynamic_capping()),
             "refresh_type": refresh_type,
         }
