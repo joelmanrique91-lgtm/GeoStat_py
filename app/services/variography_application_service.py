@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import hashlib
 import json
+import logging
 
 from pandas.api.types import is_numeric_dtype
 
@@ -20,6 +21,8 @@ from app.models.variography import (
     VariographySession,
 )
 from app.services.visualization_service import compute_experimental_variogram
+
+logger = logging.getLogger(__name__)
 
 
 class VariographyApplicationService:
@@ -142,6 +145,11 @@ class VariographyApplicationService:
             self.session.mark_computed(response)
             return response
 
+        logger.info(
+            "Variography compute start | rows=%s target=%s",
+            len(dataframe),
+            request.target_col,
+        )
         try:
             raw = compute_experimental_variogram(
                 dataframe,
@@ -222,6 +230,11 @@ class VariographyApplicationService:
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),
             },
+        )
+        logger.info(
+            "Variography compute done | lags=%s pairs=%s",
+            len(result.lag_centers),
+            sum(result.pair_counts),
         )
         return response
 
