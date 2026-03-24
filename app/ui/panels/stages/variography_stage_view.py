@@ -11,7 +11,7 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
-VARIOGRAPHY_CONTROLS_WIDTH = 338
+VARIOGRAPHY_CONTROLS_WIDTH = 312
 VARIOGRAPHY_TEXT_WRAP = 980
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,8 @@ class VariographyStageView:
 
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew", padx=2, pady=1)
-        wrapper.grid_columnconfigure(1, weight=1)
+        wrapper.grid_columnconfigure(0, weight=0, minsize=VARIOGRAPHY_CONTROLS_WIDTH)
+        wrapper.grid_columnconfigure(1, weight=3)
         wrapper.grid_rowconfigure(0, weight=1)
 
         controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=VARIOGRAPHY_CONTROLS_WIDTH)
@@ -128,12 +129,53 @@ class VariographyStageView:
         self._render_empty_plot("Sin cálculo aún. Presione 'Calcular'.")
 
     def _build_controls(self, parent: ctk.CTkFrame, target_options: list[str]) -> None:
+        parent.grid_columnconfigure(0, weight=1)
         row = 0
-        entries: list[tuple[str, ctk.StringVar]] = [
+        ctk.CTkLabel(parent, text="Parámetros de variografía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(8, 2))
+        row += 1
+        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED).grid(row=row, column=0, sticky="w", padx=8, pady=(0, 4))
+        row += 1
+
+        ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
+        row += 1
+        ctk.CTkOptionMenu(parent, variable=self.target_var, values=target_options or [""], state="normal" if target_options else "disabled").grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
+        row += 1
+
+        ctk.CTkLabel(parent, text="Estimator", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
+        row += 1
+        ctk.CTkOptionMenu(parent, variable=self.estimator_var, values=["classical", "cressie_hawkins"]).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
+        row += 1
+
+        core_grid = ctk.CTkFrame(parent, fg_color="transparent")
+        core_grid.grid(row=row, column=0, sticky="ew", padx=8, pady=(2, 4))
+        core_grid.grid_columnconfigure((0, 1), weight=1)
+        core_fields: list[tuple[str, ctk.StringVar]] = [
             ("lag_distance", self.lag_distance_var),
             ("n_lags", self.n_lags_var),
             ("lag_tolerance", self.lag_tolerance_var),
             ("max_distance", self.max_distance_var),
+        ]
+        for idx, (label, var) in enumerate(core_fields):
+            self._build_compact_field(core_grid, row=idx // 2, col=idx % 2, label=label, var=var)
+        row += 1
+
+        directional_card = ctk.CTkFrame(parent, fg_color=BG_PANEL)
+        directional_card.grid(row=row, column=0, sticky="ew", padx=8, pady=(2, 4))
+        directional_card.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkLabel(
+            directional_card,
+            text="Direccional (pendiente backend)",
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(5, 1))
+        ctk.CTkLabel(
+            directional_card,
+            text="Se muestran como referencia; aún no alteran el cálculo.",
+            text_color=TEXT_MUTED,
+            wraplength=280,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
+        directional_fields: list[tuple[str, ctk.StringVar]] = [
             ("azimuth", self.azimuth_var),
             ("dip", self.dip_var),
             ("ang_tol_h", self.ang_tol_h_var),
@@ -141,24 +183,18 @@ class VariographyStageView:
             ("band_width", self.band_width_var),
             ("band_height", self.band_height_var),
         ]
-        ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(8, 2))
-        row += 1
-        ctk.CTkOptionMenu(parent, variable=self.target_var, values=target_options or [""], state="normal" if target_options else "disabled").grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 6))
-        row += 1
-        ctk.CTkLabel(parent, text="Estimator", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 2))
-        row += 1
-        ctk.CTkOptionMenu(parent, variable=self.estimator_var, values=["classical", "cressie_hawkins"]).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 6))
+        for idx, (label, var) in enumerate(directional_fields):
+            self._build_compact_field(directional_card, row=2 + (idx // 2), col=idx % 2, label=label, var=var, state="disabled")
         row += 1
 
-        for label, var in entries:
-            ctk.CTkLabel(parent, text=label, text_color=TEXT_MUTED).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
-            row += 1
-            ctk.CTkEntry(parent, textvariable=var).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
-            row += 1
-
-        self._compute_button = ctk.CTkButton(parent, text="Compute experimental variogram", command=self._on_compute)
+        self._compute_button = ctk.CTkButton(parent, text="Ejecutar variografía", command=self._on_compute)
         self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
-        parent.grid_columnconfigure(0, weight=1)
+
+    def _build_compact_field(self, parent: ctk.CTkFrame, *, row: int, col: int, label: str, var: ctk.StringVar, state: str = "normal") -> None:
+        base_col = col * 2
+        parent.grid_columnconfigure(base_col + 1, weight=1)
+        ctk.CTkLabel(parent, text=label, text_color=TEXT_MUTED).grid(row=row, column=base_col, sticky="w", padx=(0, 4), pady=(1, 1))
+        ctk.CTkEntry(parent, textvariable=var, state=state, width=96).grid(row=row, column=base_col + 1, sticky="ew", padx=(0, 8), pady=(1, 1))
 
     def _bind_dirty_traces(self) -> None:
         observed = [

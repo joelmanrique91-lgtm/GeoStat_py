@@ -52,6 +52,9 @@ class UIRenderHardeningTests(unittest.TestCase):
         source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
         self.assertIn("def _render_compute_failure_panel", source)
         self.assertIn("Variografía no renderizable", source)
+        self.assertIn("Ejecutar variografía", source)
+        self.assertIn("Direccional (pendiente backend)", source)
+        self.assertIn('state="disabled"', source)
 
 
 if __name__ == "__main__":
