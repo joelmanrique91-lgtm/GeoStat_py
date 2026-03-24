@@ -62,6 +62,7 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("tick_labels=[\"Base\", \"Cap\"]", source)
         self.assertIn("cutoff_preview_render_failed", source)
         self.assertIn("No se pudo renderizar el panel de outliers", source)
+        self.assertIn("add_reference_line,", source)
 
     def test_eda_renderer_adjusts_boxplot_bottom_margin_for_long_labels(self) -> None:
         source = Path("app/ui/renderers/mpl_eda_renderer.py").read_text(encoding="utf-8")
