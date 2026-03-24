@@ -9,6 +9,9 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
+VARIOGRAPHY_CONTROLS_WIDTH = 420
+VARIOGRAPHY_TEXT_WRAP = 1360
+
 
 class VariographyStageView:
     def __init__(self, controller: VariographyController) -> None:
@@ -52,7 +55,7 @@ class VariographyStageView:
         wrapper.grid_columnconfigure(1, weight=1)
         wrapper.grid_rowconfigure(0, weight=1)
 
-        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=320)
+        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=VARIOGRAPHY_CONTROLS_WIDTH)
         controls.grid(row=0, column=0, sticky="nsw", padx=(0, 8), pady=0)
         controls.grid_propagate(False)
         self._build_controls(controls, [str(v) for v in init.get("target_options", [])])
@@ -63,7 +66,7 @@ class VariographyStageView:
         results.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(results, text="Variografía experimental", text_color=TEXT_MAIN, font=ctk.CTkFont(size=15, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 2))
-        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=900).grid(row=1, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=1, column=0, sticky="w", pady=(0, 4))
 
         self._plot_host = ctk.CTkFrame(results, fg_color=BG_CARD)
         self._plot_host.grid(row=2, column=0, sticky="nsew")
@@ -71,8 +74,8 @@ class VariographyStageView:
 
         alerts = ctk.CTkFrame(results, fg_color="transparent")
         alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
-        ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=900).pack(anchor="w")
-        ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=900).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
 
     def _build_controls(self, parent: ctk.CTkFrame, target_options: list[str]) -> None:
         row = 0
@@ -175,7 +178,7 @@ class VariographyStageView:
         if self._plot_host is None:
             return
         DashboardGrid.clear(self._plot_host)
-        grid = DashboardGrid(self._plot_host, 2, 2, figsize=(12.5, 7.0), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
+        grid = DashboardGrid(self._plot_host, 2, 2, figsize=(16.2, 8.8), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
         info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
         self.renderer.render(
             grid,

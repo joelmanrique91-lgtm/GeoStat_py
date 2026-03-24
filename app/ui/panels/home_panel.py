@@ -336,8 +336,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 1))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
@@ -350,7 +350,7 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel.grid_rowconfigure(3, weight=1)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 1))
+        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ui_font(FONT_SUBTITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
@@ -360,17 +360,17 @@ class HomePanel(ctk.CTkFrame):
         self._build_stage_action_bar(self.content_panel)
 
         self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 4))
+        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 6))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
-        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 6))
         self.aux_controls_host.grid_remove()
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 4))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
@@ -1057,7 +1057,7 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            figsize=self._responsive_figsize(17.4, 9.6),
+            figsize=self._responsive_figsize(19.2, 10.8),
             width_ratios=[2.55, 1.0],
             height_ratios=[1.0, 1.0],
         )
@@ -1123,7 +1123,7 @@ class HomePanel(ctk.CTkFrame):
 
         container = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
         container.pack(fill="both", expand=True)
-        container.grid_columnconfigure(0, weight=0, minsize=360)
+        container.grid_columnconfigure(0, weight=0, minsize=440)
         container.grid_columnconfigure(1, weight=1)
         container.grid_rowconfigure((0, 1), weight=1)
 
@@ -1177,7 +1177,7 @@ class HomePanel(ctk.CTkFrame):
             wrapper,
             2,
             2,
-            figsize=self._responsive_figsize(14.2, 8.0),
+            figsize=self._responsive_figsize(16.8, 9.6),
             width_ratios=[1.45, 1.0],
             height_ratios=[1.2, 1.0],
         )
@@ -1384,13 +1384,13 @@ class HomePanel(ctk.CTkFrame):
             self.column_menus[key] = menu
 
     def _responsive_figsize(self, base_width: float, base_height: float) -> tuple[float, float]:
-        width = max(int(self.view_body.winfo_width()), int(self.content_panel.winfo_width()), 640)
-        height = max(int(self.view_body.winfo_height()), 420)
+        width = max(int(self.view_body.winfo_width()), int(self.content_panel.winfo_width()), 1280)
+        height = max(int(self.view_body.winfo_height()), 760)
         if width <= 20 or height <= 20:
             return (base_width, base_height)
         dpi = 100.0
-        usable_w = max((width - 24) / dpi, 4.0)
-        usable_h = max((height - 20) / dpi, 3.0)
+        usable_w = max((width - 42) / dpi, 8.0)
+        usable_h = max((height - 34) / dpi, 5.2)
         base_ratio = base_width / max(base_height, 1e-6)
         if usable_w / usable_h > base_ratio:
             usable_w = usable_h * base_ratio
@@ -1592,7 +1592,7 @@ class HomePanel(ctk.CTkFrame):
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
 
-        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(9.4, 7.4))
+        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(11.8, 8.6))
         ax_hist = chart.axis(0, 0)
         ax_cdf = chart.axis(1, 0)
         ax_before_after = chart.axis(1, 1)
