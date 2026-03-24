@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import customtkinter as ctk
 
 from app.ui.controllers.variography_controller import VariographyController
@@ -33,6 +34,7 @@ class VariographyStageView:
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
         self._plot_host: ctk.CTkFrame | None = None
+        self._compute_in_progress = False
         self._bind_dirty_traces()
 
     def mount(self, parent: ctk.CTkFrame) -> None:
@@ -133,6 +135,9 @@ class VariographyStageView:
             self.status_var.set("Parámetros modificados. Recalcula para validar estado.")
 
     def _on_compute(self) -> None:
+        if self._compute_in_progress:
+            self.status_var.set("Ya hay un cálculo en progreso. Espera a que termine.")
+            return
         self.status_var.set("Calculando variograma experimental...")
         try:
             ui_state = {
@@ -156,7 +161,29 @@ class VariographyStageView:
             self._render_empty_plot(message="Sin cálculo: formato inválido en parámetros.")
             return
 
-        response = self.controller.compute(ui_state)
+        self._compute_in_progress = True
+
+        def _worker() -> None:
+            try:
+                response = self.controller.compute(ui_state)
+            except Exception as exc:  # defensive fallback for background execution
+                response = {
+                    "ok": False,
+                    "message": f"No se pudo calcular variograma experimental: {exc}",
+                    "warnings": [],
+                    "blockers": [{"code": "COMPUTE_THREAD_ERROR", "message": str(exc)}],
+                    "result": None,
+                }
+            host = self._plot_host
+            if host is not None:
+                host.after(0, lambda: self._on_compute_finished(response))
+            else:
+                self._compute_in_progress = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_compute_finished(self, response: dict[str, object]) -> None:
+        self._compute_in_progress = False
         self.status_var.set(str(response.get("message", "")))
         warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
         blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]

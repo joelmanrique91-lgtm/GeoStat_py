@@ -373,8 +373,12 @@ class GeostatService:
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
-        del filters
-        self.workflow_state.domain_ui_filters = _default_domain_ui_filters()
+        normalized = _default_domain_ui_filters()
+        incoming = filters or {}
+        for key in normalized:
+            value = str(incoming.get(key, "")).strip()
+            normalized[key] = value
+        self.workflow_state.domain_ui_filters = normalized
         return dict(self.workflow_state.domain_ui_filters)
 
     def get_domain_ui_filters(self) -> dict[str, str]:

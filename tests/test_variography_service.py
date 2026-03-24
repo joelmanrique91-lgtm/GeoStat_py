@@ -117,6 +117,40 @@ class VariographyServiceTests(unittest.TestCase):
         blocker_codes = {item.code for item in response.blockers}
         self.assertIn("NO_ACTIVE_ROWS", blocker_codes)
 
+    def test_compute_without_variable_config_returns_blockers_instead_of_crashing(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+            }
+        )
+        self.assertFalse(response.ok)
+        blocker_codes = {item.code for item in response.blockers}
+        self.assertIn("MISSING_VARIABLE_CONFIG", blocker_codes)
+        self.assertIn("INVALID_CONTEXT_COLUMNS", blocker_codes)
+
+    def test_compute_blocks_non_numeric_context_columns(self) -> None:
+        csv_path = FIXTURES / "variography_invalid_context.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+            }
+        )
+        self.assertFalse(response.ok)
+        blocker_codes = {item.code for item in response.blockers}
+        self.assertIn("NON_NUMERIC_CONTEXT_COLUMN", blocker_codes)
+
 
 if __name__ == "__main__":
     unittest.main()
