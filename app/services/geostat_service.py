@@ -1403,6 +1403,65 @@ class GeostatService:
     def compute_experimental_variography(self, params: dict[str, object]) -> VariographyComputeResponse:
         return self.variography_service.compute(params)
 
+    def estimate_variography_defaults(
+        self,
+        *,
+        n_lags: int = 16,
+        context_snapshot: dict[str, object] | None = None,
+        dataframe=None,
+    ) -> dict[str, float | int]:
+        """Estimate conservative, data-driven variography defaults.
+
+        Keeps a safe fallback contract when context/data are not ready.
+        """
+        safe_n_lags = max(int(n_lags or 16), 4)
+        fallback = {
+            "lag_distance": 10.0,
+            "max_distance": 160.0,
+            "lag_tolerance": 5.0,
+            "n_lags": safe_n_lags,
+            "effective_rows": 0,
+            "spatial_extent": 0.0,
+        }
+        snapshot = context_snapshot or self.get_analysis_context_snapshot()
+        df = dataframe if dataframe is not None else self._get_filtered_dataframe(snapshot)
+        if df is None or self.variable_config is None or df.empty:
+            return fallback
+        columns = [self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column]
+        if any((not col) or (col not in df.columns) for col in columns):
+            return fallback
+        try:
+            clean = df[columns].dropna()
+            if clean.empty:
+                return fallback
+            ranges: list[float] = []
+            for col in columns:
+                series = _to_numeric(clean[col])
+                col_min = float(series.min())
+                col_max = float(series.max())
+                if not math.isfinite(col_min) or not math.isfinite(col_max):
+                    return fallback
+                ranges.append(max(col_max - col_min, 0.0))
+            spatial_extent = math.sqrt(sum(value**2 for value in ranges))
+            if not math.isfinite(spatial_extent) or spatial_extent <= 0:
+                return fallback
+            # Conservative, reproducible defaults:
+            # - max_distance at half spatial extent
+            # - lag_distance distributed across n_lags
+            max_distance = max(spatial_extent * 0.5, spatial_extent / safe_n_lags, 1e-6)
+            lag_distance = max(max_distance / safe_n_lags, 1e-6)
+            lag_tolerance = max(lag_distance * 0.5, 1e-6)
+            return {
+                "lag_distance": float(lag_distance),
+                "max_distance": float(max_distance),
+                "lag_tolerance": float(lag_tolerance),
+                "n_lags": safe_n_lags,
+                "effective_rows": int(len(clean)),
+                "spatial_extent": float(spatial_extent),
+            }
+        except Exception:
+            return fallback
+
     def update_repository(self) -> RepoUpdateResult:
         if getattr(self, "_repo_update_running", False):
             return RepoUpdateResult(False, "Ya hay una actualización en curso.", "Espera a que finalice el proceso actual.", False)
