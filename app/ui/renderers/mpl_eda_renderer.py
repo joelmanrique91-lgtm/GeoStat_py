@@ -22,16 +22,20 @@ from app.ui.theme import (
 
 
 class MatplotlibEDARenderer(EDARenderer):
-    def render(self, grid, data: dict[str, object], context: EDARenderContext, *, original_values: list[float], cutoff_value: float | None) -> None:
-        ax_hist = grid.axis(0, 0)
-        ax_hist_bottom = grid.axis(1, 0)
-        ax_prob = grid.axis(0, 1)
-        ax_secondary = grid.axis(1, 1)
-        fig = grid.figure
+    """Renderer split into sibling chart panels (one figure per panel)."""
 
-        for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
-            apply_axis_style(axis)
-
+    def render_dashboard(
+        self,
+        *,
+        histogram_grid,
+        qq_grid,
+        boxplot_grid,
+        iqr_grid,
+        data: dict[str, object],
+        context: EDARenderContext,
+        original_values: list[float],
+        cutoff_value: float | None,
+    ) -> None:
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
         n_values = len(sorted_values)
@@ -40,56 +44,83 @@ class MatplotlibEDARenderer(EDARenderer):
         p90 = sorted_values[int(0.90 * (n_values - 1))]
         mean_val = sum(sorted_values) / n_values
 
+        self._render_histogram(
+            histogram_grid,
+            values=values,
+            original_values=original_values,
+            bins=bins,
+            p50=p50,
+            p90=p90,
+            mean_val=mean_val,
+            cutoff_value=cutoff_value,
+            context=context,
+        )
+        self._render_qq(qq_grid, data=data, context=context)
+        self._render_boxplot(boxplot_grid, data=data, values=values, context=context)
+        self._render_iqr(iqr_grid, sorted_values=sorted_values, p50=p50, p90=p90, mean_val=mean_val, context=context)
+
+    def _render_histogram(
+        self,
+        grid,
+        *,
+        values: list[float],
+        original_values: list[float],
+        bins: int,
+        p50: float,
+        p90: float,
+        mean_val: float,
+        cutoff_value: float | None,
+        context: EDARenderContext,
+    ) -> None:
+        ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.05,
+            "right": 0.992,
+            "top": 0.985,
+            "bottom": 0.09,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
+        apply_axis_style(ax)
         if original_values != values:
-            ax_hist.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="white", linewidth=0.25, alpha=0.18, label="Base")
-        ax_hist.hist(values, bins=bins, color=SEM_BLUE, edgecolor="white", linewidth=0.30, alpha=0.80, label="Activa")
-        add_reference_line(ax_hist, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.95)
-        add_reference_line(ax_hist, p50, label="P50", color=SEM_GREEN, y_pos=0.88)
-        add_reference_line(ax_hist, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
+            ax.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="white", linewidth=0.25, alpha=0.20, label="Base")
+        ax.hist(values, bins=bins, color=SEM_BLUE, edgecolor="white", linewidth=0.30, alpha=0.84, label="Activa")
+        add_reference_line(ax, mean_val, label="Media", color=SEM_BLUE_SOFT, y_pos=0.95)
+        add_reference_line(ax, p50, label="P50", color=SEM_GREEN, y_pos=0.88)
+        add_reference_line(ax, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
         if cutoff_value is not None:
-            add_reference_line(ax_hist, cutoff_value, label=f"Cutoff {cutoff_value:.3g}", color=SEM_RED, y_pos=0.74)
-        ax_hist.set_title(f"Evidencia principal · Histograma ({context.active_variable})", color=context.chart_text_color, pad=8)
-        ax_hist.set_xlabel("Ley Cu (%)")
-        ax_hist.set_ylabel("Frecuencia (n)")
-        ax_hist.legend(loc="upper right", bbox_to_anchor=(0.995, 0.995), fontsize=context.chart_legend_size, frameon=False)
-        ax_hist.margins(x=0.02)
+            add_reference_line(ax, cutoff_value, label=f"Cutoff {cutoff_value:.3g}", color=SEM_RED, y_pos=0.74)
+        ax.set_title(f"Evidencia principal · Histograma ({context.active_variable})", color=context.chart_text_color, pad=8)
+        ax.set_xlabel("Ley Cu (%)")
+        ax.set_ylabel("Frecuencia (n)")
+        ax.tick_params(axis="both", labelsize=context.chart_label_size + 1)
+        ax.legend(loc="upper right", fontsize=context.chart_legend_size, frameon=False)
+        ax.margins(x=0.02)
         tail_hint = "cola dominante alta" if mean_val >= p50 else "cola dominante baja"
-        ax_hist.text(
+        ax.text(
             0.015,
-            0.96,
+            0.965,
             f"Skew={context.skewness_text} · {tail_hint}",
-            transform=ax_hist.transAxes,
+            transform=ax.transAxes,
             ha="left",
             va="top",
             fontsize=context.chart_label_size,
             color=context.chart_text_color,
             bbox={"facecolor": CHART_BG, "edgecolor": CHART_BORDER, "boxstyle": "round,pad=0.22"},
         )
+        grid.render()
 
-        # Banda inferior compacta: evita espacio muerto y aporta lectura rápida.
-        q10 = sorted_values[int(0.10 * (n_values - 1))]
-        q25 = sorted_values[int(0.25 * (n_values - 1))]
-        q75 = sorted_values[int(0.75 * (n_values - 1))]
-        ax_hist_bottom.set_title("Rango intercuartil y percentiles", color=context.chart_text_color, pad=6)
-        ax_hist_bottom.hlines(1.0, q10, p90, color=CHART_BORDER, linewidth=4.2, alpha=0.75)
-        ax_hist_bottom.hlines(1.0, q25, q75, color=SEM_BLUE, linewidth=6.8, alpha=0.78)
-        ax_hist_bottom.scatter([mean_val, p50, p90], [1.0, 1.0, 1.0], color=[SEM_BLUE_SOFT, SEM_GREEN, SEM_ORANGE], s=[26, 24, 26], zorder=3)
-        ax_hist_bottom.set_yticks([])
-        ax_hist_bottom.set_xlabel("Ley Cu (%)")
-        ax_hist_bottom.set_xlim(min(sorted_values), max(sorted_values))
-        ax_hist_bottom.margins(x=0.02, y=0.25)
-        ax_hist_bottom.grid(axis="y", alpha=0.0)
-        ax_hist_bottom.text(
-            0.012,
-            0.91,
-            "P10–P90 / IQR",
-            transform=ax_hist_bottom.transAxes,
-            ha="left",
-            va="top",
-            fontsize=max(context.chart_label_size - 1, 8),
-            color=context.chart_text_color,
-        )
-
+    def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
+        ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.12,
+            "right": 0.985,
+            "top": 0.97,
+            "bottom": 0.12,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
+        apply_axis_style(ax)
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             prob_x = [float(v) for v in data["probplot_x"]]
             prob_y = [float(v) for v in data["probplot_y"]]
@@ -103,37 +134,51 @@ class MatplotlibEDARenderer(EDARenderer):
             core_y = [y for y in prob_y if y <= high_cut]
             tail_x = [x for x, y in zip(prob_x, prob_y) if y > high_cut]
             tail_y = [y for y in prob_y if y > high_cut]
-            ax_prob.scatter(core_x, core_y, s=13, color=SEM_BLUE, alpha=0.74, label="Cuerpo")
+            ax.scatter(core_x, core_y, s=14, color=SEM_BLUE, alpha=0.76, label="Cuerpo")
             if tail_x:
-                ax_prob.scatter(tail_x, tail_y, s=18, color=SEM_ORANGE, alpha=0.86, label="Cola")
-            ax_prob.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.0, label="Referencia")
-            ax_prob.set_title("QQ plot · Normalidad", color=context.chart_text_color, pad=8)
-            ax_prob.set_xlabel("Cuantiles normales")
-            ax_prob.set_ylabel("Ley Cu (%)")
-            ax_prob.tick_params(axis="both", labelsize=context.chart_label_size)
-            ax_prob.legend(loc="upper left", bbox_to_anchor=(0.01, 0.99), fontsize=context.chart_legend_size, frameon=False)
-            ax_prob.margins(x=0.03, y=0.05)
+                ax.scatter(tail_x, tail_y, s=20, color=SEM_ORANGE, alpha=0.88, label="Cola")
+            ax.plot(prob_x, ref_line, color=SEM_GRAY, linestyle="--", linewidth=1.1, label="Referencia")
+            ax.set_title("QQ plot · Normalidad", color=context.chart_text_color, pad=8)
+            ax.set_xlabel("Cuantiles normales")
+            ax.set_ylabel("Ley Cu (%)")
+            ax.tick_params(axis="both", labelsize=context.chart_label_size)
+            ax.legend(loc="upper left", fontsize=context.chart_legend_size, frameon=False)
+            ax.margins(x=0.03, y=0.05)
         else:
-            ax_prob.axis("off")
-            ax_prob.text(0.5, 0.5, "QQ no disponible", ha="center", va="center", color=context.chart_text_color)
+            ax.axis("off")
+            ax.text(0.5, 0.5, "QQ no disponible", ha="center", va="center", color=context.chart_text_color)
+        grid.render()
 
+    def _render_boxplot(self, grid, *, data: dict[str, object], values: list[float], context: EDARenderContext) -> None:
+        ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.12,
+            "right": 0.985,
+            "top": 0.97,
+            "bottom": 0.18 if data.get("domain_boxplot", {}).get("enabled") else 0.13,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
+        apply_axis_style(ax)
         domain_data = data.get("domain_boxplot", {})
         if domain_data.get("enabled"):
             paired = list(zip(domain_data["labels"], domain_data["values"]))
             paired.sort(key=lambda item: (sum(item[1]) / len(item[1])) if item[1] else float("-inf"), reverse=True)
             ordered_labels = [f"{label} (n={len(vals)})" for label, vals in paired]
             ordered_values = [vals for _label, vals in paired]
-            box = ax_secondary.boxplot(ordered_values, labels=ordered_labels, patch_artist=True)
+            box = ax.boxplot(ordered_values, labels=ordered_labels, patch_artist=True)
             for patch, (label, _vals) in zip(box["boxes"], paired):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            ax_secondary.tick_params(axis="x", labelrotation=30, labelsize=context.chart_legend_size)
-            ax_secondary.set_ylabel("Ley Cu (%)")
-            ax_secondary.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
-            ax_secondary.margins(x=0.10)
+            ax.tick_params(axis="x", labelrotation=20, labelsize=context.chart_legend_size)
+            for tick in ax.get_xticklabels():
+                tick.set_horizontalalignment("right")
+            ax.set_ylabel("Ley Cu (%)")
+            ax.set_title("Comparación por dominio", color=context.chart_text_color, pad=8)
+            ax.margins(x=0.10)
         else:
-            box = ax_secondary.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
+            box = ax.boxplot(values, vert=False, patch_artist=True, widths=0.50, showfliers=True)
             for patch in box["boxes"]:
                 patch.set_facecolor(KPI_PRIMARY_BG)
                 patch.set_alpha(0.58)
@@ -145,10 +190,60 @@ class MatplotlibEDARenderer(EDARenderer):
             for median in box["medians"]:
                 median.set_color(SEM_GREEN)
                 median.set_linewidth(1.8)
-            ax_secondary.set_yticks([])
-            ax_secondary.set_title("Boxplot · Rango y outliers", color=context.chart_text_color, pad=8)
-            ax_secondary.set_xlabel("Ley Cu (%)")
-            ax_secondary.margins(x=0.03)
-
-        fig.subplots_adjust(bottom=0.18, hspace=0.25, wspace=0.20)
+            ax.set_yticks([])
+            ax.set_title("Boxplot · Rango y outliers", color=context.chart_text_color, pad=8)
+            ax.set_xlabel("Ley Cu (%)")
+            ax.margins(x=0.03)
+            ax.tick_params(axis="x", labelsize=context.chart_label_size)
         grid.render()
+
+    def _render_iqr(self, grid, *, sorted_values: list[float], p50: float, p90: float, mean_val: float, context: EDARenderContext) -> None:
+        ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.06,
+            "right": 0.992,
+            "top": 0.88,
+            "bottom": 0.38,
+            "wspace": 0.10,
+            "hspace": 0.10,
+        }
+        apply_axis_style(ax)
+        n_values = len(sorted_values)
+        q10 = sorted_values[int(0.10 * (n_values - 1))]
+        q25 = sorted_values[int(0.25 * (n_values - 1))]
+        q75 = sorted_values[int(0.75 * (n_values - 1))]
+        ax.set_title("Rango intercuartil y percentiles", color=context.chart_text_color, pad=6)
+        ax.hlines(1.0, q10, p90, color=CHART_BORDER, linewidth=4.2, alpha=0.75)
+        ax.hlines(1.0, q25, q75, color=SEM_BLUE, linewidth=6.8, alpha=0.78)
+        ax.scatter([mean_val, p50, p90], [1.0, 1.0, 1.0], color=[SEM_BLUE_SOFT, SEM_GREEN, SEM_ORANGE], s=[26, 24, 26], zorder=3)
+        ax.set_yticks([])
+        ax.set_xlabel("Ley Cu (%)")
+        ax.set_xlim(min(sorted_values), max(sorted_values))
+        ax.margins(x=0.02, y=0.28)
+        ax.grid(axis="y", alpha=0.0)
+        ax.text(
+            0.012,
+            0.91,
+            "P10–P90 / IQR",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=max(context.chart_label_size - 1, 8),
+            color=context.chart_text_color,
+        )
+        ax.tick_params(axis="both", labelsize=context.chart_label_size)
+        grid.render()
+
+    def render(self, grid, data: dict[str, object], context: EDARenderContext, *, original_values: list[float], cutoff_value: float | None) -> None:
+        """Backward-compatible fallback: keeps single-grid contract if still used."""
+        self._render_histogram(
+            grid,
+            values=[float(v) for v in data["target_values"]],
+            original_values=original_values,
+            bins=min(55, max(18, int(math.sqrt(len(data["target_values"])) * 2))),
+            p50=sorted([float(v) for v in data["target_values"]])[int(0.50 * (len(data["target_values"]) - 1))],
+            p90=sorted([float(v) for v in data["target_values"]])[int(0.90 * (len(data["target_values"]) - 1))],
+            mean_val=sum(float(v) for v in data["target_values"]) / len(data["target_values"]),
+            cutoff_value=cutoff_value,
+            context=context,
+        )
