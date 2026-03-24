@@ -117,7 +117,7 @@ def apply_figure_theme(fig) -> None:
         pass
 
 
-def apply_dashboard_layout(fig, *, left: float = 0.055, right: float = 0.985, top: float = 0.94, bottom: float = 0.10, wspace: float = 0.22, hspace: float = 0.28) -> None:
+def apply_dashboard_layout(fig, *, left: float = 0.04, right: float = 0.992, top: float = 0.965, bottom: float = 0.075, wspace: float = 0.18, hspace: float = 0.22) -> None:
     """Unified layout policy for embedded dashboard figures.
 
     This intentionally avoids mixing `tight_layout`/`constrained_layout` across
