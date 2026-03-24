@@ -11,7 +11,7 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
-VARIOGRAPHY_CONTROLS_WIDTH = 312
+VARIOGRAPHY_CONTROLS_WIDTH = 356
 VARIOGRAPHY_TEXT_WRAP = 980
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class VariographyStageView:
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew", padx=2, pady=1)
         wrapper.grid_columnconfigure(0, weight=0, minsize=VARIOGRAPHY_CONTROLS_WIDTH)
-        wrapper.grid_columnconfigure(1, weight=3)
+        wrapper.grid_columnconfigure(1, weight=2)
         wrapper.grid_rowconfigure(0, weight=1)
 
         controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=VARIOGRAPHY_CONTROLS_WIDTH)
@@ -133,7 +133,7 @@ class VariographyStageView:
         row = 0
         ctk.CTkLabel(parent, text="Parámetros de variografía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(8, 2))
         row += 1
-        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED).grid(row=row, column=0, sticky="w", padx=8, pady=(0, 4))
+        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED, wraplength=332, justify="left").grid(row=row, column=0, sticky="w", padx=8, pady=(0, 4))
         row += 1
 
         ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
@@ -172,7 +172,7 @@ class VariographyStageView:
             directional_card,
             text="Se muestran como referencia; aún no alteran el cálculo.",
             text_color=TEXT_MUTED,
-            wraplength=280,
+            wraplength=332,
             justify="left",
         ).grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
         directional_fields: list[tuple[str, ctk.StringVar]] = [
@@ -191,10 +191,12 @@ class VariographyStageView:
         self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
 
     def _build_compact_field(self, parent: ctk.CTkFrame, *, row: int, col: int, label: str, var: ctk.StringVar, state: str = "normal") -> None:
-        base_col = col * 2
-        parent.grid_columnconfigure(base_col + 1, weight=1)
-        ctk.CTkLabel(parent, text=label, text_color=TEXT_MUTED).grid(row=row, column=base_col, sticky="w", padx=(0, 4), pady=(1, 1))
-        ctk.CTkEntry(parent, textvariable=var, state=state, width=96).grid(row=row, column=base_col + 1, sticky="ew", padx=(0, 8), pady=(1, 1))
+        parent.grid_columnconfigure(col, weight=1)
+        cell = ctk.CTkFrame(parent, fg_color="transparent")
+        cell.grid(row=row, column=col, sticky="ew", padx=4, pady=2)
+        cell.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(cell, text=label, text_color=TEXT_MUTED, anchor="w", justify="left").grid(row=0, column=0, sticky="w", pady=(0, 1))
+        ctk.CTkEntry(cell, textvariable=var, state=state, width=132).grid(row=1, column=0, sticky="ew")
 
     def _bind_dirty_traces(self) -> None:
         observed = [
