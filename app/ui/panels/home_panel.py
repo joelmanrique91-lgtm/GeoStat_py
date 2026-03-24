@@ -91,7 +91,7 @@ PLOT_TXT = TEXT_MAIN
 PAD_MAIN_X = 8
 PAD_CARD_X = 12
 PAD_STACK_Y = 2
-PAD_SECTION_Y = 7
+PAD_SECTION_Y = 5
 SIDEBAR_WIDTH = 308
 STEP_BUTTON_WIDTH = 106
 STEP_BUTTON_HEIGHT = 24
@@ -336,8 +336,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(3, 1))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 0))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 0))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
@@ -997,13 +997,19 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(1, weight=1)
+        wrapper.grid_rowconfigure(0, weight=1)
+        wrapper.grid_rowconfigure(1, weight=0)
 
         active_variable = str(state["effective_target_column"] if self.eda_use_capping_var.get() else self.target_var.get() or state["effective_target_column"])
         capping_status = "capping confirmado" if state["dynamic_enabled"] else "sin capping confirmado"
 
         try:
-            data = self.service.prepare_univariate_data(max_domain_categories=10, use_effective_target=bool(self.eda_use_capping_var.get()))
+            selected_domain_filter = self.domain_filter_var.get().strip()
+            data = self.service.prepare_univariate_data(
+                max_domain_categories=10,
+                use_effective_target=bool(self.eda_use_capping_var.get()),
+                domain_filter=selected_domain_filter if selected_domain_filter and selected_domain_filter != "Todos" else None,
+            )
         except Exception as exc:
             ctk.CTkLabel(wrapper, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             return
@@ -1028,12 +1034,13 @@ class HomePanel(ctk.CTkFrame):
             diagnostic = "Diagnóstico no disponible."
 
         evidence = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
-        evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 3))
+        evidence.grid(row=0, column=0, sticky="nsew", padx=2, pady=(0, 1))
         evidence.grid_columnconfigure(0, weight=1)
-        evidence.grid_rowconfigure(1, weight=1)
+        evidence.grid_rowconfigure(0, weight=4)
+        evidence.grid_rowconfigure(1, weight=1, minsize=40)
 
         summary = ctk.CTkFrame(evidence, fg_color=BG_PANEL)
-        summary.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 3))
+        summary.grid(row=0, column=0, sticky="ew", padx=3, pady=(0, 1))
         summary.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(summary, text=f"EDA · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=2, pady=(0, 0))
         ctk.CTkLabel(
@@ -1046,7 +1053,7 @@ class HomePanel(ctk.CTkFrame):
         ).grid(row=1, column=0, sticky="w", padx=2, pady=(0, 0))
 
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-        plot_card.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 4))
+        plot_card.grid(row=1, column=0, sticky="nsew", padx=1, pady=(0, 1))
         plot_card.grid_rowconfigure(0, weight=1)
         plot_card.grid_columnconfigure(0, weight=1)
 
@@ -1057,9 +1064,8 @@ class HomePanel(ctk.CTkFrame):
             grid_host,
             2,
             2,
-            figsize=self._responsive_figsize(19.2, 10.8),
-            width_ratios=[2.55, 1.0],
-            height_ratios=[1.0, 1.0],
+            width_ratios=[2.0, 1.4],
+            height_ratios=[3.0, 1.0],
         )
 
         values = [float(v) for v in data["target_values"]]
@@ -1098,7 +1104,7 @@ class HomePanel(ctk.CTkFrame):
             text=f"{insight_text} CV={cv_text} · n={diagnostics.get('target_valid_count', 0)} · no implica independencia espacial.",
             text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
             font=ui_font(FONT_MICRO),
-        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 0))
+        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 1))
 
     def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         signature = (
@@ -1177,7 +1183,6 @@ class HomePanel(ctk.CTkFrame):
             wrapper,
             2,
             2,
-            figsize=self._responsive_figsize(16.8, 9.6),
             width_ratios=[1.45, 1.0],
             height_ratios=[1.2, 1.0],
         )
@@ -1592,7 +1597,7 @@ class HomePanel(ctk.CTkFrame):
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
 
-        chart = DashboardGrid(parent, 2, 2, figsize=self._responsive_figsize(11.8, 8.6))
+        chart = DashboardGrid(parent, 2, 2)
         ax_hist = chart.axis(0, 0)
         ax_cdf = chart.axis(1, 0)
         ax_before_after = chart.axis(1, 1)
