@@ -37,6 +37,18 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("draw_idle()", source)
         self.assertIn("after(80, self._resize_to_parent)", source)
 
+    def test_eda_view_uses_typed_cutoff_state_access(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertNotIn("state[\"dynamic_enabled\"]", source)
+        self.assertNotIn("state[\"dynamic_cutoff_value\"]", source)
+        self.assertNotIn("state[\"enabled\"]", source)
+
+    def test_eda_view_shows_visible_fallback_and_logs_renderer_failures(self) -> None:
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertIn("No se pudo renderizar el panel EDA", source)
+        self.assertIn("eda_render_failed", source)
+        self.assertIn("Render EDA falló", source)
+
     def test_variography_view_restores_busy_state_after_compute_callback(self) -> None:
         source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
         self.assertIn("finally:", source)
