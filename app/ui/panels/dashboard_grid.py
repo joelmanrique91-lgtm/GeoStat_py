@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from app.ui.theme import CHART_BG, apply_axis_style, apply_figure_theme
+from app.ui.theme import CHART_BG, apply_axis_style, apply_dashboard_layout, apply_figure_theme
 
 
 class DashboardGrid:
@@ -31,7 +31,8 @@ class DashboardGrid:
         self._configure_bound = False
         self._configured_figsize = figsize
         self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
-        figure_kwargs: dict[str, object] = {"dpi": 100, "constrained_layout": True}
+        self._layout_applied_once = False
+        figure_kwargs: dict[str, object] = {"dpi": 100}
         if figsize is not None:
             figure_kwargs["figsize"] = figsize
         self.figure = Figure(**figure_kwargs)
@@ -94,6 +95,9 @@ class DashboardGrid:
             if ratio > self._max_aspect_ratio:
                 new_w = max(avail_h * self._max_aspect_ratio, 2.0)
         self.figure.set_size_inches(new_w, new_h, forward=True)
+        if not self._layout_applied_once or force:
+            apply_dashboard_layout(self.figure)
+            self._layout_applied_once = True
         self.canvas.draw_idle()
 
     def destroy(self) -> None:

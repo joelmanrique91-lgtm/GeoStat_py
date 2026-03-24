@@ -27,10 +27,15 @@ class MatplotlibEDARenderer(EDARenderer):
         ax_hist_bottom = grid.axis(1, 0)
         ax_prob = grid.axis(0, 1)
         ax_secondary = grid.axis(1, 1)
-        fig = grid.figure
-
         for axis in (ax_hist, ax_hist_bottom, ax_prob, ax_secondary):
             apply_axis_style(axis)
+        try:
+            ax_hist.set_box_aspect(0.68)
+            ax_hist_bottom.set_box_aspect(0.22)
+            ax_prob.set_box_aspect(0.92)
+            ax_secondary.set_box_aspect(0.74)
+        except Exception:
+            pass
 
         values = [float(v) for v in data["target_values"]]
         sorted_values = sorted(values)
@@ -150,5 +155,4 @@ class MatplotlibEDARenderer(EDARenderer):
             ax_secondary.set_xlabel("Ley Cu (%)")
             ax_secondary.margins(x=0.03)
 
-        fig.subplots_adjust(bottom=0.18, hspace=0.25, wspace=0.20)
         grid.render()

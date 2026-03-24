@@ -9,14 +9,17 @@ from matplotlib.figure import Figure
 from app.services.visualization_service import Spatial3DDataBundle
 from app.ui.theme import (
     BG_CARD,
-    BORDER_SOFT,
     CHART_FONT_SIZE_TICK,
     CHART_TEXT,
+    CHART_BG,
+    CHART_GRID,
+    CHART_BORDER,
     FONT_SMALL,
     FONT_SUBTITLE,
     TEXT_MAIN,
     TEXT_MUTED,
     apply_figure_theme,
+    apply_dashboard_layout,
     get_continuous_colormap,
 )
 
@@ -94,8 +97,8 @@ class Spatial3DView(ctk.CTkFrame):
         self._figure.clear()
         apply_figure_theme(self._figure)
         self._axis = self._figure.add_subplot(111, projection="3d")
-        self._axis.set_facecolor("#F7FAFE")
-        self._axis.grid(True, alpha=0.28, linewidth=0.7, color="#C8D7E9")
+        self._axis.set_facecolor(CHART_BG)
+        self._axis.grid(True, alpha=0.28, linewidth=0.7, color=CHART_GRID)
 
         marker_size = 9 if data.point_count_rendered < 7000 else 7
         marker_alpha = 0.78 if data.point_count_rendered < 22000 else 0.64
@@ -118,8 +121,8 @@ class Spatial3DView(ctk.CTkFrame):
         self._axis.set_zlabel("Z", color=CHART_TEXT)
         self._axis.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=CHART_TEXT)
         for pane in (self._axis.xaxis.pane, self._axis.yaxis.pane, self._axis.zaxis.pane):
-            pane.set_facecolor((0.97, 0.98, 1.0, 0.85))
-            pane.set_edgecolor((0.83, 0.88, 0.94, 1.0))
+            pane.set_facecolor((0.08, 0.13, 0.20, 0.88))
+            pane.set_edgecolor((0.22, 0.33, 0.47, 1.0))
 
         x_span = max(max(data.x) - min(data.x), 1e-6)
         y_span = max(max(data.y) - min(data.y), 1e-6)
@@ -134,9 +137,9 @@ class Spatial3DView(ctk.CTkFrame):
             self._colorbar.set_ticklabels(data.color_tick_labels)
         self._colorbar.ax.tick_params(labelsize=CHART_FONT_SIZE_TICK, colors=TEXT_MUTED)
         self._colorbar.ax.yaxis.label.set_color(TEXT_MUTED)
-        self._colorbar.outline.set_edgecolor(BORDER_SOFT)
+        self._colorbar.outline.set_edgecolor(CHART_BORDER)
 
-        self._figure.subplots_adjust(left=0.03, right=0.90, bottom=0.04, top=0.98)
+        apply_dashboard_layout(self._figure, left=0.04, right=0.90, bottom=0.06, top=0.96, wspace=0.10, hspace=0.10)
         if self._canvas is not None:
             self._canvas.draw_idle()
 
