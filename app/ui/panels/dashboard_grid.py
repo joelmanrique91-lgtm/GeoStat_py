@@ -23,12 +23,14 @@ class DashboardGrid:
         *,
         width_ratios: list[float] | None = None,
         height_ratios: list[float] | None = None,
+        max_aspect_ratio: float | None = None,
     ) -> None:
         self.parent = parent
         self._last_parent_size: tuple[int, int] | None = None
         self._resize_after_id: str | None = None
         self._configure_bound = False
         self._configured_figsize = figsize
+        self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
         figure_kwargs: dict[str, object] = {"dpi": 100}
         if figsize is not None:
             figure_kwargs["figsize"] = figsize
@@ -83,8 +85,14 @@ class DashboardGrid:
             return
         self._last_parent_size = size
         dpi = float(self.figure.get_dpi())
-        new_w = max(width / dpi, 2.0)
-        new_h = max(height / dpi, 1.6)
+        avail_w = max(width / dpi, 2.0)
+        avail_h = max(height / dpi, 1.6)
+        new_w = avail_w
+        new_h = avail_h
+        if self._max_aspect_ratio is not None:
+            ratio = avail_w / max(avail_h, 1e-6)
+            if ratio > self._max_aspect_ratio:
+                new_w = max(avail_h * self._max_aspect_ratio, 2.0)
         self.figure.set_size_inches(new_w, new_h, forward=True)
         try:
             self.figure.tight_layout(pad=1.0)
