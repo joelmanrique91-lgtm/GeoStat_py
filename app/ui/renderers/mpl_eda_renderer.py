@@ -73,6 +73,14 @@ class MatplotlibEDARenderer(EDARenderer):
         context: EDARenderContext,
     ) -> None:
         ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.055,
+            "right": 0.992,
+            "top": 0.975,
+            "bottom": 0.105,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
         apply_axis_style(ax)
         if original_values != values:
             ax.hist(original_values, bins=bins, color=SEM_GRAY, edgecolor="white", linewidth=0.25, alpha=0.20, label="Base")
@@ -104,6 +112,14 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.13,
+            "right": 0.985,
+            "top": 0.955,
+            "bottom": 0.17,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
         apply_axis_style(ax)
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
             prob_x = [float(v) for v in data["probplot_x"]]
@@ -135,6 +151,14 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_boxplot(self, grid, *, data: dict[str, object], values: list[float], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.13,
+            "right": 0.985,
+            "top": 0.955,
+            "bottom": 0.20 if data.get("domain_boxplot", {}).get("enabled") else 0.16,
+            "wspace": 0.12,
+            "hspace": 0.12,
+        }
         apply_axis_style(ax)
         domain_data = data.get("domain_boxplot", {})
         if domain_data.get("enabled"):
@@ -175,6 +199,14 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_iqr(self, grid, *, sorted_values: list[float], p50: float, p90: float, mean_val: float, context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.06,
+            "right": 0.992,
+            "top": 0.90,
+            "bottom": 0.30,
+            "wspace": 0.10,
+            "hspace": 0.10,
+        }
         apply_axis_style(ax)
         n_values = len(sorted_values)
         q10 = sorted_values[int(0.10 * (n_values - 1))]

@@ -1058,8 +1058,8 @@ class HomePanel(ctk.CTkFrame):
 
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
-        plot_card.grid_rowconfigure(0, weight=1)
-        plot_card.grid_rowconfigure(1, weight=0)
+        plot_card.grid_rowconfigure(0, weight=14)
+        plot_card.grid_rowconfigure(1, weight=2)
         plot_card.grid_columnconfigure(0, weight=1)
         plot_card.grid_columnconfigure(1, weight=1)
 
@@ -1092,11 +1092,15 @@ class HomePanel(ctk.CTkFrame):
 
         iqr_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
         iqr_host.grid(row=1, column=0, sticky="nsew", padx=(0, 2), pady=(2, 0))
+        iqr_host.configure(height=112)
+        iqr_host.grid_propagate(False)
         iqr_host.grid_rowconfigure(0, weight=1)
         iqr_host.grid_columnconfigure(0, weight=1)
 
         insight_host = ctk.CTkFrame(plot_card, fg_color=BG_PANEL, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         insight_host.grid(row=1, column=1, sticky="nsew", padx=(2, 0), pady=(2, 0))
+        insight_host.configure(height=112)
+        insight_host.grid_propagate(False)
 
         values = [float(v) for v in data["target_values"]]
         original_values: list[float] = values
@@ -1123,12 +1127,12 @@ class HomePanel(ctk.CTkFrame):
             justify="left",
             anchor="nw",
             wraplength=220,
-        ).pack(fill="both", expand=True, padx=8, pady=6)
+        ).pack(fill="x", expand=False, padx=8, pady=6)
 
-        hist_grid = DashboardGrid(hist_host, 1, 1)
-        qq_grid = DashboardGrid(qq_host, 1, 1)
-        box_grid = DashboardGrid(box_host, 1, 1)
-        iqr_grid = DashboardGrid(iqr_host, 1, 1)
+        hist_grid = DashboardGrid(hist_host, 1, 1, figsize=(8.2, 5.4))
+        qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.2, 2.8))
+        box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.2, 2.8))
+        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(6.4, 1.3))
         self.eda_renderer.render_dashboard(
             histogram_grid=hist_grid,
             qq_grid=qq_grid,
