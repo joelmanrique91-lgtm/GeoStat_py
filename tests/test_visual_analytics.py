@@ -45,8 +45,8 @@ class VisualAnalyticsTests(unittest.TestCase):
             service.load_csv(str(csv))
             service.set_variable_config("x", "y", "z", "target", domain_column="dom")
             payload = service.prepare_univariate_data(max_domain_categories=5)
-            self.assertEqual(len(payload["domain_boxplot"]["labels"]), 0)
-            self.assertIn("deshabilitado", payload["domain_boxplot"]["message"].lower())
+            self.assertEqual(len(payload["domain_boxplot"]["labels"]), 5)
+            self.assertIn("top 5", payload["domain_boxplot"]["message"].lower())
 
     def test_univariate_without_domain_selected(self) -> None:
         df = pd.DataFrame({"x": [1, 2], "y": [3, 4], "z": [5, 6], "target": [7.0, 8.0]})
@@ -58,7 +58,7 @@ class VisualAnalyticsTests(unittest.TestCase):
             service.set_variable_config("x", "y", "z", "target")
             payload = service.prepare_univariate_data()
             self.assertFalse(payload["domain_boxplot"]["enabled"])
-            self.assertIn("deshabilitado", payload["domain_boxplot"]["message"].lower())
+            self.assertEqual(payload["domain_boxplot"]["message"], "")
 
 
     def test_payload_empty_event_for_invalid_target(self) -> None:
@@ -88,7 +88,7 @@ class VisualAnalyticsTests(unittest.TestCase):
             self.assertTrue(payload["availability"]["boxplot"]["available"])
             self.assertTrue(payload["availability"]["probability"]["available"])
             self.assertFalse(payload["domain_boxplot"]["enabled"])
-            self.assertIn("deshabilitado", payload["domain_boxplot"]["message"].lower())
+            self.assertIn("solo hay un dominio", payload["domain_boxplot"]["message"].lower())
 
     def test_logging_events_for_new_rendering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
