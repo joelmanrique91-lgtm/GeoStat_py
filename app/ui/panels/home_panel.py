@@ -1044,7 +1044,7 @@ class HomePanel(ctk.CTkFrame):
         evidence.grid_rowconfigure(1, weight=1)
 
         summary = ctk.CTkFrame(evidence, fg_color=BG_PANEL)
-        summary.grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 1))
+        summary.grid(row=0, column=0, sticky="ew", padx=1, pady=(0, 0))
         summary.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(summary, text=f"EDA · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=2, pady=(0, 0))
         ctk.CTkLabel(
@@ -1108,7 +1108,7 @@ class HomePanel(ctk.CTkFrame):
             text=f"{insight_text} CV={cv_text} · n={diagnostics.get('target_valid_count', 0)} · no implica independencia espacial.",
             text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
             font=ui_font(FONT_MICRO),
-        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 1))
+        ).grid(row=1, column=0, sticky="w", padx=3, pady=(0, 0))
 
     def _render_cutoff_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         signature = (

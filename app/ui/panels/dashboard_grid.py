@@ -96,7 +96,11 @@ class DashboardGrid:
                 new_w = max(avail_h * self._max_aspect_ratio, 2.0)
         self.figure.set_size_inches(new_w, new_h, forward=True)
         if not self._layout_applied_once or force:
-            apply_dashboard_layout(self.figure)
+            override = getattr(self.figure, "_dashboard_layout_override", None)
+            if isinstance(override, dict):
+                apply_dashboard_layout(self.figure, **override)
+            else:
+                apply_dashboard_layout(self.figure)
             self._layout_applied_once = True
         self.canvas.draw_idle()
 
