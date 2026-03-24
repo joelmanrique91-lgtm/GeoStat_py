@@ -373,8 +373,12 @@ class GeostatService:
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
-        del filters
-        self.workflow_state.domain_ui_filters = _default_domain_ui_filters()
+        normalized = _default_domain_ui_filters()
+        incoming = filters or {}
+        for key in normalized:
+            value = str(incoming.get(key, "")).strip()
+            normalized[key] = value
+        self.workflow_state.domain_ui_filters = normalized
         return dict(self.workflow_state.domain_ui_filters)
 
     def get_domain_ui_filters(self) -> dict[str, str]:
@@ -395,6 +399,7 @@ class GeostatService:
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
         del domain_name
+        # Temporary neutral behavior while Dominios assignment workflow is disabled.
         self.workflow_state.active_domain_filter = ""
         return CutoffResult(True, "Módulo Dominios temporalmente deshabilitado.")
 
@@ -823,6 +828,9 @@ class GeostatService:
         base_target_column = self.variable_config.target_column if self.variable_config else ""
         effective_target_column = self._get_effective_target_column()
         resolved_target_column = effective_target_column or base_target_column
+        # Domain orchestration remains intentionally neutral while the Dominios module
+        # is disabled (`set_active_domain` is a no-op). Consumers should treat these
+        # fields as reserved contract keys with empty values for this release.
         active_domain_column = ""
 
         readiness = "ready"

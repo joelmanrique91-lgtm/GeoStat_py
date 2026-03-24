@@ -88,16 +88,16 @@ KPI_PRIMARY = KPI_PRIMARY_BG
 KPI_PRIMARY_FOCUS = WF_ACTIVE
 PLOT_TXT = TEXT_MAIN
 
-PAD_MAIN_X = 10
-PAD_CARD_X = 14
-PAD_STACK_Y = 3
-PAD_SECTION_Y = 8
+PAD_MAIN_X = 8
+PAD_CARD_X = 12
+PAD_STACK_Y = 2
+PAD_SECTION_Y = 7
 SIDEBAR_WIDTH = 308
-STEP_BUTTON_WIDTH = 112
+STEP_BUTTON_WIDTH = 106
 STEP_BUTTON_HEIGHT = 24
 ACTION_TOGGLE_WIDTH = 74
 LOG_TOGGLE_WIDTH = 130
-LOG_BOX_HEIGHT = 40
+LOG_BOX_HEIGHT = 36
 WRAP_STAGE_BLOCKED = 1020
 WRAP_STAGE_SUMMARY = 1120
 WRAP_DYNAMIC_IMPACT = 340
@@ -336,8 +336,8 @@ class HomePanel(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
-        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
+        self._build_header().grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(3, 1))
+        self._build_step_progress().grid(row=1, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
 
         workspace = ctk.CTkFrame(self, fg_color=BG_MAIN)
         workspace.grid(row=2, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, PAD_STACK_Y))
@@ -350,7 +350,7 @@ class HomePanel(ctk.CTkFrame):
         self.content_panel.grid_rowconfigure(3, weight=1)
 
         top = ctk.CTkFrame(self.content_panel, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(4, 2))
+        top.grid(row=0, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(3, 1))
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ui_font(FONT_SUBTITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
@@ -360,17 +360,17 @@ class HomePanel(ctk.CTkFrame):
         self._build_stage_action_bar(self.content_panel)
 
         self.view_body = ctk.CTkFrame(self.content_panel, fg_color=BG_PANEL)
-        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 3))
+        self.view_body.grid(row=3, column=0, sticky="nsew", padx=PAD_MAIN_X, pady=(0, 2))
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
-        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 3))
+        self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 2))
         self.aux_controls_host.grid_remove()
 
         self.log_panel = ctk.CTkFrame(self, fg_color=BG_PANEL)
-        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 1))
+        self.log_panel.grid(row=3, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(0, 0))
         self.log_panel.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             self.log_panel,
@@ -390,10 +390,10 @@ class HomePanel(ctk.CTkFrame):
         header.grid_columnconfigure(0, weight=1)
         header.grid_columnconfigure(1, weight=0)
         identity = ctk.CTkFrame(header, fg_color="transparent")
-        identity.grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(2, 1))
+        identity.grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(1, 1))
         ctk.CTkLabel(identity, text="GeoStat Py", font=ui_font(FONT_TITLE_COMPACT), text_color=TXT_MAIN).pack(anchor="w")
         context_chip = ctk.CTkFrame(header, fg_color=CHIP_BG, corner_radius=7)
-        context_chip.grid(row=1, column=0, sticky="ew", padx=PAD_CARD_X, pady=(0, 2))
+        context_chip.grid(row=1, column=0, sticky="ew", padx=PAD_CARD_X, pady=(0, 1))
         ctk.CTkLabel(
             context_chip,
             textvariable=self.unified_context_var,
@@ -404,9 +404,9 @@ class HomePanel(ctk.CTkFrame):
         ).pack(fill="x", padx=7, pady=3)
 
         actions = ctk.CTkFrame(header, fg_color=SURFACE_ELEVATED, corner_radius=8)
-        actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=8, pady=2)
+        actions.grid(row=0, column=1, rowspan=2, sticky="e", padx=7, pady=1)
         actions_row = ctk.CTkFrame(actions, fg_color="transparent")
-        actions_row.pack(fill="x", padx=5, pady=3)
+        actions_row.pack(fill="x", padx=5, pady=2)
         self.update_repo_button = ctk.CTkButton(actions_row, text="Actualizar", width=88, command=self._on_update_repo, **self._button_style("aux"))
         self.update_repo_button.pack(side="left", padx=3)
         ctk.CTkButton(actions_row, text="Log", width=64, command=self._on_export_log, **self._button_style("aux")).pack(side="left", padx=3)

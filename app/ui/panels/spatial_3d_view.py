@@ -48,23 +48,23 @@ class Spatial3DView(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
 
         self.header_label = ctk.CTkLabel(self, text="Nube 3D", text_color=TEXT_MAIN, font=_ui_font(FONT_SUBTITLE))
-        self.header_label.grid(row=0, column=0, sticky="w", padx=6, pady=(0, 2))
+        self.header_label.grid(row=0, column=0, sticky="w", padx=4, pady=(0, 1))
 
         self.meta_label = ctk.CTkLabel(self, text="", text_color=TEXT_MUTED, font=_ui_font(FONT_SMALL), justify="left")
-        self.meta_label.grid(row=1, column=0, sticky="w", padx=6, pady=(0, 4))
+        self.meta_label.grid(row=1, column=0, sticky="w", padx=4, pady=(0, 3))
 
         self.canvas_host = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=8)
-        self.canvas_host.grid(row=2, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        self.canvas_host.grid(row=2, column=0, sticky="nsew", padx=2, pady=(0, 3))
         self.canvas_host.grid_columnconfigure(0, weight=1)
         self.canvas_host.grid_rowconfigure(1, weight=1)
 
         self.toolbar_host = ctk.CTkFrame(self.canvas_host, fg_color="transparent")
-        self.toolbar_host.grid(row=0, column=0, sticky="ew", padx=4, pady=(3, 0))
+        self.toolbar_host.grid(row=0, column=0, sticky="ew", padx=3, pady=(2, 0))
         self.plot_host = ctk.CTkFrame(self.canvas_host, fg_color="transparent")
-        self.plot_host.grid(row=1, column=0, sticky="nsew", padx=4, pady=3)
+        self.plot_host.grid(row=1, column=0, sticky="nsew", padx=3, pady=2)
 
         self.footer = ctk.CTkFrame(self, fg_color="transparent")
-        self.footer.grid(row=3, column=0, sticky="ew", padx=4, pady=(0, 1))
+        self.footer.grid(row=3, column=0, sticky="ew", padx=2, pady=(0, 0))
         self.footer.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(self.footer, text="Reset view", command=self.reset_view, height=28).grid(row=0, column=0, sticky="e")
 
@@ -154,7 +154,7 @@ class Spatial3DView(ctk.CTkFrame):
 
     def _ensure_plot(self) -> None:
         if self._figure is None:
-            self._figure = Figure(figsize=(12.8, 8.2), dpi=100)
+            self._figure = Figure(figsize=(12.0, 7.6), dpi=100)
         if self._canvas is None:
             self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
             self._canvas.get_tk_widget().pack(fill="both", expand=True)

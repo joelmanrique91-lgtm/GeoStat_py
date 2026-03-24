@@ -37,6 +37,16 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("draw_idle()", source)
         self.assertIn("after(80, self._resize_to_parent)", source)
 
+    def test_variography_view_restores_busy_state_after_compute_callback(self) -> None:
+        source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
+        self.assertIn("finally:", source)
+        self.assertIn("self._set_compute_busy(False)", source)
+        self.assertIn('state="disabled" if busy else "normal"', source)
+
+    def test_variography_view_marshals_worker_result_back_to_ui_thread(self) -> None:
+        source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
+        self.assertIn("host.after(0, lambda: self._on_compute_finished(response))", source)
+
 
 if __name__ == "__main__":
     unittest.main()

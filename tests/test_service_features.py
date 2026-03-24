@@ -67,6 +67,13 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("numéricas", result.message.lower())
 
+    def test_set_domain_ui_filters_persists_valid_input_values(self) -> None:
+        self._load_sample_dataset()
+        filters = {"lithology": "A", "alteration": "Arg", "mine": "Pit-1", "extra": "ignored"}
+        updated = self.service.set_domain_ui_filters(filters)
+        self.assertEqual(updated, {"lithology": "A", "alteration": "Arg", "mine": "Pit-1"})
+        self.assertEqual(self.service.get_domain_ui_filters(), {"lithology": "A", "alteration": "Arg", "mine": "Pit-1"})
+
     @patch("app.services.geostat_service.subprocess.run")
     def test_update_repository_success_when_enabled(self, mock_run) -> None:
         mock_run.side_effect = [
