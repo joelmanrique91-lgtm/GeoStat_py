@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import math
 import statistics
-import subprocess
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.models.dataset_model import DatasetModel
@@ -25,7 +23,14 @@ from app.services.activity_log_service import ActivityLogService
 from app.services.cutoff_service import CutoffService
 from app.services.dataset_context_service import DatasetContextService
 from app.services.operational_state_service import OperationalStateService
+from app.services.repository_update_service import RepoUpdateResult, RepositoryUpdateService
 from app.services.variography_application_service import VariographyApplicationService
+from app.services.workflow_contracts import (
+    DOMAIN_ESTIMATION_COLUMN,
+    DOMAINS_MODULE_DISABLED_MESSAGE,
+    default_domain_ui_filters,
+    resolve_active_domain_column,
+)
 from app.services.visualization_service import (
     Spatial3DDataBundle,
     SpatialDataBundle,
@@ -34,7 +39,6 @@ from app.services.visualization_service import (
     prepare_spatial_3d_cloud,
     prepare_spatial_sections,
 )
-from app.utils.paths import PROJECT_ROOT
 
 WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]
 FUNCTIONAL_STATUS = {step: "funcional" for step in WORKFLOW_STEPS}
@@ -49,19 +53,6 @@ STEP_EVENT_MAP = {
 STEP_DISPLAY_NAMES = {
     "Cutoffs": "Control de Outliers",
 }
-DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
-BLOCKING_REASON_HINTS = {
-    "missing_dataset": "Carga un CSV para continuar.",
-    "missing_variable_config": "Configura y confirma X/Y/Z/target.",
-    "missing_resolved_target_column": "Revisa target/Control de Outliers y confirma la variable activa.",
-    "missing_target": "Configura y confirma una variable objetivo válida para variografía.",
-    "missing_spatial_columns": "Reconfigura columnas espaciales X/Y/Z.",
-    "missing_domain_column": "Aplica una definición de dominios para habilitar esta etapa.",
-    "non_numeric_target_for_domain_stats": "Usa un target numérico para estadísticas de dominios.",
-    "invalid_active_domain_filter_column": "Limpia o corrige el filtro de dominio activo.",
-    "insufficient_data": "Datos insuficientes para variografía. Amplía muestra o ajusta filtros/dominio.",
-    "low_data_after_domain_filter": "El filtro de dominio deja pocos datos; revisa la selección activa.",
-}
 
 
 @dataclass
@@ -70,14 +61,6 @@ class LoadCsvResult:
     message: str
     details: str
     dataset: DatasetModel | None = None
-
-
-@dataclass
-class RepoUpdateResult:
-    success: bool
-    message: str
-    details: str
-    restart_recommended: bool = False
 
 
 @dataclass
@@ -158,10 +141,6 @@ def _normalize_identifier(value: str) -> str:
     return value.lower().replace("_", "").replace(" ", "")
 
 
-def _default_domain_ui_filters() -> dict[str, str]:
-    return {"lithology": "", "alteration": "", "mine": ""}
-
-
 def _build_univariate_availability(target: str, valid_count: int, probability_min_samples: int = 3) -> dict[str, dict[str, object]]:
     histogram_available = valid_count > 0
     boxplot_available = valid_count > 0
@@ -190,15 +169,6 @@ def _build_univariate_availability(target: str, valid_count: int, probability_mi
 
 def _empty_domain_payload(message: str = "") -> dict[str, object]:
     return {"enabled": False, "labels": [], "values": [], "message": message, "valid_rows": 0, "valid_categories": 0}
-
-
-def _resolve_active_domain_column(dataframe, configured_domain_column: str) -> str:
-    candidate = str(configured_domain_column or "").strip()
-    if candidate and candidate in dataframe.columns:
-        return candidate
-    if DOMAIN_ESTIMATION_COLUMN in dataframe.columns:
-        return DOMAIN_ESTIMATION_COLUMN
-    return ""
 
 
 def _compute_target_statistics(clean, total: int) -> dict[str, float]:
@@ -253,7 +223,9 @@ class GeostatService:
         self.operational_state_service = OperationalStateService(host_service=self)
         self.cutoff_service = CutoffService(host_service=self)
         self.dataset_context_service = DatasetContextService(host_service=self)
+        self.repository_update_service = RepositoryUpdateService(host_service=self)
         self._domain_filter_context_enabled = True
+        self._domains_module_enabled = False
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -309,7 +281,7 @@ class GeostatService:
     def get_domain_filter_candidates(self) -> dict[str, str]:
         """Resolve best-effort columns for iterative domain filters."""
         if self.current_dataset is None:
-            return _default_domain_ui_filters()
+            return default_domain_ui_filters()
         available = set(self.current_dataset.columns)
         normalized = {_normalize_identifier(column): column for column in self.current_dataset.columns}
 
@@ -351,7 +323,7 @@ class GeostatService:
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
-        normalized = _default_domain_ui_filters()
+        normalized = default_domain_ui_filters()
         incoming = filters or {}
         for key in normalized:
             value = str(incoming.get(key, "")).strip()
@@ -361,21 +333,24 @@ class GeostatService:
 
     def get_domain_ui_filters(self) -> dict[str, str]:
         filters = dict(self.workflow_state.domain_ui_filters or {})
-        normalized = _default_domain_ui_filters()
+        normalized = default_domain_ui_filters()
         for key in normalized:
             value = str(filters.get(key, "")).strip()
             normalized[key] = value
         return normalized
 
+    def is_domains_module_enabled(self) -> bool:
+        return bool(self._domains_module_enabled)
+
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         del ordered_layers, active_layers, min_samples, include_missing
         self._domain_filter_context_enabled = False
-        return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
+        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
         del domain_definition
         self._domain_filter_context_enabled = False
-        return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
+        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
         if self.current_dataset is None:
@@ -407,7 +382,7 @@ class GeostatService:
         if self.current_dataset is None:
             return []
         dataframe = self.current_dataset.dataframe
-        active_domain_column = _resolve_active_domain_column(
+        active_domain_column = resolve_active_domain_column(
             dataframe,
             self.variable_config.domain_column if self.variable_config is not None else "",
         )
@@ -424,7 +399,7 @@ class GeostatService:
 
     def _get_domain_ui_filtered_dataframe(self):
         if self.current_dataset is None:
-            return None, _default_domain_ui_filters(), self.get_domain_filter_candidates()
+            return None, default_domain_ui_filters(), self.get_domain_filter_candidates()
         df = self.current_dataset.dataframe
         filters = self.get_domain_ui_filters()
         columns = self.get_domain_filter_candidates()
@@ -443,7 +418,7 @@ class GeostatService:
     def confirm_domain_assignment(self, domain_name: str) -> CutoffResult:
         del domain_name
         self._domain_filter_context_enabled = False
-        return CutoffResult(False, "Módulo Dominios temporalmente deshabilitado.")
+        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
 
     def prepare_domain_statistics(self) -> dict[str, object]:
         return {"items": [], "selection_column": "", "active_layers": []}
@@ -525,9 +500,6 @@ class GeostatService:
     def get_cutoff_state_typed(self) -> CutoffState:
         return self.operational_state_service.build_cutoff_state()
 
-    def get_cutoff_state_typed(self) -> CutoffState:
-        return self.operational_state_service.build_cutoff_state()
-
     def get_cutoff_state(self) -> dict[str, object]:
         return self.get_cutoff_state_typed().as_dict()
 
@@ -588,8 +560,8 @@ class GeostatService:
         self.workflow_state.domain_include_missing = False
         self.workflow_state.domain_definition = {}
         self.workflow_state.active_domain_filter = ""
-        self.workflow_state.domain_ui_filters = _default_domain_ui_filters()
-        self.workflow_state.domain_filter_columns = _default_domain_ui_filters()
+        self.workflow_state.domain_ui_filters = default_domain_ui_filters()
+        self.workflow_state.domain_filter_columns = default_domain_ui_filters()
         self.workflow_state.domain_assignment_history = []
         self.workflow_state.domain_assignment_sequence = 0
         if self.variable_config is not None and self.variable_config.domain_column == DOMAIN_ESTIMATION_COLUMN:
@@ -1077,51 +1049,7 @@ class GeostatService:
             return fallback
 
     def update_repository(self) -> RepoUpdateResult:
-        if getattr(self, "_repo_update_running", False):
-            return RepoUpdateResult(False, "Ya hay una actualización en curso.", "Espera a que finalice el proceso actual.", False)
-        if self.workflow_state.current_step == "Datos" and self.dataframe_write_in_progress():
-            return RepoUpdateResult(False, "Actualización no permitida durante escritura activa.", "Espera a que termine el proceso crítico y vuelve a intentar.", False)
-        if os.getenv("GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE", "0") != "1":
-            message = "Actualización de repositorio deshabilitada en runtime por seguridad."
-            details = "Cierra la app y ejecuta `python scripts/update_repo.py` desde terminal."
-            self.activity_log.log("repo_update_blocked", "warning", message, {"recommended_command": "python scripts/update_repo.py"})
-            return RepoUpdateResult(False, message, details, False)
-
-        self._repo_update_running = True
-        self.activity_log.log("repo_update_started", "info", "Iniciando actualización de repositorio.", {})
-        try:
-            pull_result = subprocess.run(["git", "pull"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False, timeout=120)
-            if pull_result.returncode != 0:
-                error_output = (pull_result.stderr or pull_result.stdout).strip()
-                return RepoUpdateResult(False, "Falló `git pull`.", error_output or "Error desconocido de git.")
-
-            submodule_result = subprocess.run(
-                ["git", "submodule", "update", "--init", "--recursive"],
-                cwd=PROJECT_ROOT,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=120,
-            )
-            output = (pull_result.stdout or pull_result.stderr).strip()
-            submodule_output = (submodule_result.stdout or submodule_result.stderr).strip()
-            if submodule_result.returncode != 0:
-                self.activity_log.log(
-                    "repo_update_failed",
-                    "error",
-                    "Falló actualización de submódulos.",
-                    {"command": "git submodule update --init --recursive", "details": submodule_output},
-                )
-                return RepoUpdateResult(False, "Falló actualización de submódulos.", submodule_output or "Error desconocido de submódulos.")
-            combined = f"git pull:\n{output or '(sin salida)'}\n\nsubmodules:\n{submodule_output or '(sin cambios)'}"
-            up_to_date = "Already up to date" in output or "Ya está actualizado" in output
-            message = "Repositorio ya estaba actualizado." if up_to_date else "Repositorio actualizado correctamente. Reinicia la app para aplicar cambios."
-            self.activity_log.log("repo_update_finished", "success", message, {"restart_recommended": not up_to_date})
-            return RepoUpdateResult(True, message, combined, not up_to_date)
-        except Exception as exc:
-            return RepoUpdateResult(False, "No se pudo ejecutar la actualización del repositorio.", f"Detalle técnico: {exc}")
-        finally:
-            self._repo_update_running = False
+        return self.repository_update_service.update_repository()
 
     def dataframe_write_in_progress(self) -> bool:
         return bool(getattr(self, "_dataframe_write_in_progress", False))

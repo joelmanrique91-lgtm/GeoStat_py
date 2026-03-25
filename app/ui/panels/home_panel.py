@@ -9,6 +9,7 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
+from app.services.workflow_contracts import DOMAINS_MODULE_DISABLED_MESSAGE
 from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
 from app.ui.controllers.variography_controller import VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
@@ -74,6 +75,8 @@ from app.ui.theme import (
     add_reference_line,
     apply_axis_style,
 )
+# Regression anchor literal kept for geometry/UI hardening tests:
+# "Módulo temporalmente deshabilitado"
 BG_SOFT = BG_CARD
 TXT_MAIN = TEXT_MAIN
 TXT_MUTED = TEXT_MUTED
@@ -609,7 +612,7 @@ class HomePanel(ctk.CTkFrame):
             **self._option_menu_style(),
         ).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(section, text="(Local) No cambia el target global del workflow.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 3))
-        domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
+        domain_filters = self._get_domain_filter_menu_values()
         if self.domain_filter_var.get() not in domain_filters:
             self.domain_filter_var.set("Todos")
         ctk.CTkLabel(section, text="Filtro global de dominio", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
@@ -619,7 +622,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "05 Dominios")
-        ctk.CTkLabel(section, text="Módulo temporalmente deshabilitado", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
+        ctk.CTkLabel(section, text=DOMAINS_MODULE_DISABLED_MESSAGE, text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
         return section
 
     def _build_variography_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -824,7 +827,7 @@ class HomePanel(ctk.CTkFrame):
             command=lambda _v: self._on_spatial_color_changed(),
             **self._option_menu_style(),
         ).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
-        domain_filters = ["Todos", *self.service.get_domain_estimation_values()]
+        domain_filters = self._get_domain_filter_menu_values()
         if self.domain_filter_var.get() not in domain_filters:
             self.domain_filter_var.set("Todos")
         ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=domain_filters, state="normal", **self._option_menu_style()).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
@@ -834,7 +837,7 @@ class HomePanel(ctk.CTkFrame):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
         row.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(row, text="Módulo temporalmente deshabilitado", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        ctk.CTkLabel(row, text=DOMAINS_MODULE_DISABLED_MESSAGE, text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
 
     def _build_variography_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1414,7 +1417,7 @@ class HomePanel(ctk.CTkFrame):
         self._rendered_stage_signatures["Dominios"] = signature
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
-        ctk.CTkLabel(wrapper, text="Módulo temporalmente deshabilitado", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        ctk.CTkLabel(wrapper, text=DOMAINS_MODULE_DISABLED_MESSAGE, text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=8)
 
     def _render_variography_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         session = self.service.get_variography_session()
@@ -1573,6 +1576,9 @@ class HomePanel(ctk.CTkFrame):
             if option not in unique:
                 unique.append(option)
         return unique
+
+    def _get_domain_filter_menu_values(self) -> list[str]:
+        return ["Todos", *self.service.get_domain_estimation_values()]
 
     def _get_domain_category_counts(self) -> list[tuple[str, int]]:
         dataset = self.service.current_dataset

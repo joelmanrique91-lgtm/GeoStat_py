@@ -8,23 +8,6 @@ from app.services.geostat_service import GeostatService
 from app.ui.main_window import MainWindow
 
 
-def _configure_windows_dpi_awareness() -> None:
-    """Configure a conservative Windows DPI-awareness mode before Tk init."""
-    if sys.platform != "win32":
-        return
-    try:
-        # Per-monitor DPI awareness v1 (supported on modern Windows).
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[attr-defined]
-        return
-    except Exception:
-        pass
-    try:
-        # Legacy fallback available on older Windows builds.
-        ctypes.windll.user32.SetProcessDPIAware()  # type: ignore[attr-defined]
-    except Exception:
-        return
-
-
 def main() -> None:
     """Build and launch the GeoStat desktop app."""
     ctk.deactivate_automatic_dpi_awareness()

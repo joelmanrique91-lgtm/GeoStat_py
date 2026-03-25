@@ -220,8 +220,8 @@ def compute_experimental_variogram(
     sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
     records = [
-        (float(row[x_col]), float(row[y_col]), float(row[z_col]), float(row[target_col]))
-        for _, row in sampled.iterrows()
+        (float(x), float(y), float(z), float(target))
+        for x, y, z, target in sampled[[x_col, y_col, z_col, target_col]].itertuples(index=False, name=None)
     ]
 
     dist_acc: list[list[float]] = [[] for _ in range(n_lags)]
