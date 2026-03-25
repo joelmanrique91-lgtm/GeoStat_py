@@ -51,6 +51,7 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("No se pudo renderizar el panel EDA", source)
         self.assertIn("eda_render_failed", source)
         self.assertIn("Render EDA falló", source)
+        self.assertIn("Estado render:", source)
 
     def test_eda_view_uses_responsive_host_weights_and_aspect_guards(self) -> None:
         source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
@@ -105,6 +106,9 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("def _on_mouse_wheel_zoom", source)
         self.assertIn("self._last_elev", source)
         self.assertIn("self._last_azim", source)
+        self.assertIn("def _sync_figure_to_host", source)
+        self.assertIn("self.plot_host.bind(\"<Configure>\"", source)
+        self.assertIn("def destroy(self)", source)
 
 
 if __name__ == "__main__":

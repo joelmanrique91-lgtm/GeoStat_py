@@ -46,6 +46,7 @@ class Spatial3DView(ctk.CTkFrame):
         self._colorbar = None
         self._scroll_cid: int | None = None
         self._draw_cid: int | None = None
+        self._resize_after_id: str | None = None
         self._last_elev = 26.0
         self._last_azim = -54.0
 
@@ -67,6 +68,7 @@ class Spatial3DView(ctk.CTkFrame):
         self.toolbar_host.grid(row=0, column=0, sticky="ew", padx=3, pady=(2, 0))
         self.plot_host = ctk.CTkFrame(self.canvas_host, fg_color="transparent")
         self.plot_host.grid(row=1, column=0, sticky="nsew", padx=3, pady=2)
+        self.plot_host.bind("<Configure>", self._on_plot_host_configure, add="+")
 
         self.footer = ctk.CTkFrame(self, fg_color="transparent")
         self.footer.grid(row=3, column=0, sticky="ew", padx=2, pady=(0, 0))
@@ -74,6 +76,12 @@ class Spatial3DView(ctk.CTkFrame):
         ctk.CTkButton(self.footer, text="Reset view", command=self.reset_view, height=28).grid(row=0, column=0, sticky="e")
 
     def destroy_plot(self) -> None:
+        if self._resize_after_id is not None:
+            try:
+                self.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+            self._resize_after_id = None
         if self._canvas is not None:
             if self._scroll_cid is not None:
                 self._canvas.mpl_disconnect(self._scroll_cid)
@@ -94,6 +102,10 @@ class Spatial3DView(ctk.CTkFrame):
             self._figure = None
             self._axis = None
             self._colorbar = None
+
+    def destroy(self) -> None:
+        self.destroy_plot()
+        super().destroy()
 
     def show_unavailable(self, reason: str) -> None:
         self.destroy_plot()
@@ -161,6 +173,7 @@ class Spatial3DView(ctk.CTkFrame):
         self._colorbar.outline.set_edgecolor(CHART_BORDER)
 
         apply_dashboard_layout(self._figure, left=0.03, right=0.88, bottom=0.07, top=0.95, wspace=0.10, hspace=0.10)
+        self._sync_figure_to_host(force=True)
         if self._canvas is not None:
             self._canvas.draw_idle()
 
@@ -188,6 +201,7 @@ class Spatial3DView(ctk.CTkFrame):
             self._toolbar = NavigationToolbar2Tk(self._canvas, self.toolbar_host, pack_toolbar=False)
             self._toolbar.update()
             self._toolbar.pack(fill="x")
+        self._sync_figure_to_host(force=True)
 
     def _on_mouse_wheel_zoom(self, event) -> None:
         if self._axis is None or self._canvas is None or event.inaxes != self._axis:
@@ -212,3 +226,22 @@ class Spatial3DView(ctk.CTkFrame):
             return
         self._last_elev = float(getattr(self._axis, "elev", self._last_elev))
         self._last_azim = float(getattr(self._axis, "azim", self._last_azim))
+
+    def _on_plot_host_configure(self, _event) -> None:
+        if self._resize_after_id is not None:
+            try:
+                self.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+        self._resize_after_id = self.after(80, self._sync_figure_to_host)
+
+    def _sync_figure_to_host(self, *, force: bool = False) -> None:
+        self._resize_after_id = None
+        if self._figure is None or self._canvas is None:
+            return
+        width = int(self.plot_host.winfo_width())
+        height = int(self.plot_host.winfo_height())
+        if width <= 24 or height <= 24:
+            return
+        dpi = float(self._figure.get_dpi())
+        self._figure.set_size_inches(max(width / dpi, 2.4), max(height / dpi, 2.0), forward=force)

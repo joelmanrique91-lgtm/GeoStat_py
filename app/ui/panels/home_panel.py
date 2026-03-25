@@ -1286,7 +1286,7 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(4, weight=1)
+        wrapper.grid_rowconfigure(5, weight=1)
         snapshot = self.service.get_analysis_context_snapshot()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(0, 2))
         ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
@@ -1301,9 +1301,18 @@ class HomePanel(ctk.CTkFrame):
         except Exception as exc:
             ctk.CTkLabel(wrapper, text=f"No se pudo renderizar Espacial: {exc}", text_color=TXT_MAIN).grid(row=4, column=0, sticky="w", padx=8, pady=8)
             return
+        ctk.CTkLabel(
+            wrapper,
+            text=(
+                f"Estado render: {spatial.plotted_points:,}/{spatial.source_points:,} muestras"
+                f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
+            ),
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=4, column=0, sticky="w", padx=8, pady=(0, 2))
 
         chart_host = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
-        chart_host.grid(row=4, column=0, sticky="nsew", padx=0, pady=(0, 2))
+        chart_host.grid(row=5, column=0, sticky="nsew", padx=0, pady=(0, 2))
         chart_host.grid_columnconfigure(0, weight=1)
         chart_host.grid_rowconfigure(0, weight=1)
         grid = DashboardGrid(
@@ -1375,6 +1384,15 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_view_mode_var.set("2D")
             self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
             return
+        ctk.CTkLabel(
+            wrapper,
+            text=(
+                f"Estado render: {result.spatial_3d_data.point_count_rendered:,}/{result.spatial_3d_data.point_count_original:,} muestras"
+                f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
+            ),
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=2, column=0, sticky="e", padx=6, pady=(0, 3))
 
         renderer.render(
             self.spatial_3d_widget,
