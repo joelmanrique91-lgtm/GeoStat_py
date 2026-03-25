@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 
 class MatplotlibVariographyRenderer(VariographyRenderer):
     def render(self, grid, response: dict[str, object], context: VariographyRenderContext) -> None:
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.07,
+            "right": 0.98,
+            "top": 0.92,
+            "bottom": 0.11,
+            "wspace": 0.24,
+            "hspace": 0.27,
+        }
         def _as_float_or_none(value):
             try:
                 if value is None:

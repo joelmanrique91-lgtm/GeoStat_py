@@ -74,12 +74,12 @@ class MatplotlibEDARenderer(EDARenderer):
     ) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.075,
+            "left": 0.085,
             "right": 0.975,
-            "top": 0.91,
-            "bottom": 0.16,
-            "wspace": 0.18,
-            "hspace": 0.20,
+            "top": 0.90,
+            "bottom": 0.15,
+            "wspace": 0.22,
+            "hspace": 0.24,
         }
         apply_axis_style(ax)
         if original_values != values:
@@ -113,12 +113,12 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.16,
+            "left": 0.15,
             "right": 0.97,
-            "top": 0.90,
-            "bottom": 0.20,
-            "wspace": 0.18,
-            "hspace": 0.20,
+            "top": 0.89,
+            "bottom": 0.19,
+            "wspace": 0.22,
+            "hspace": 0.24,
         }
         apply_axis_style(ax)
         if data.get("probplot_x") and data.get("probplot_y") and not data.get("probability_failed"):
@@ -160,12 +160,12 @@ class MatplotlibEDARenderer(EDARenderer):
         if domain_enabled:
             bottom_margin = 0.19
             if label_count >= 4:
-                bottom_margin += 0.03
+                bottom_margin += 0.04
             if max_label_len >= 16:
-                bottom_margin += 0.03
+                bottom_margin += 0.04
             if max_label_len >= 24:
-                bottom_margin += 0.03
-            bottom_margin = min(bottom_margin, 0.35)
+                bottom_margin += 0.04
+            bottom_margin = min(bottom_margin, 0.42)
         bottom_margin = max(bottom_margin, 0.20)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.14,
@@ -186,7 +186,9 @@ class MatplotlibEDARenderer(EDARenderer):
                 patch.set_facecolor(get_domain_color(label))
                 patch.set_alpha(0.72)
                 patch.set_edgecolor(CHART_BORDER)
-            rotation = 25 if max_label_len < 18 else 33
+            rotation = 30 if max_label_len < 18 else 38
+            if max_label_len >= 28:
+                rotation = 45
             ax.tick_params(axis="x", labelrotation=rotation, labelsize=max(context.chart_legend_size - 1, 8))
             for tick in ax.get_xticklabels():
                 tick.set_horizontalalignment("right")
@@ -217,12 +219,12 @@ class MatplotlibEDARenderer(EDARenderer):
     def _render_iqr(self, grid, *, sorted_values: list[float], p50: float, p90: float, mean_val: float, context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
-            "left": 0.09,
+            "left": 0.10,
             "right": 0.98,
-            "top": 0.80,
-            "bottom": 0.38,
-            "wspace": 0.16,
-            "hspace": 0.16,
+            "top": 0.84,
+            "bottom": 0.32,
+            "wspace": 0.20,
+            "hspace": 0.20,
         }
         apply_axis_style(ax)
         n_values = len(sorted_values)

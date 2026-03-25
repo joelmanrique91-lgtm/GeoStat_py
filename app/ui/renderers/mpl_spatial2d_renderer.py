@@ -15,6 +15,14 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         self.service = service
 
     def render(self, grid, spatial: SpatialDataBundle, context: Spatial2DRenderContext) -> None:
+        grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+            "left": 0.06,
+            "right": 0.955,
+            "top": 0.93,
+            "bottom": 0.10,
+            "wspace": 0.21,
+            "hspace": 0.24,
+        }
         ax_xy = grid.axis(0, 0)
         ax_xz = grid.axis(0, 1)
         ax_yz = grid.axis(1, 0)
@@ -48,7 +56,14 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         for axis in [ax_xy.xaxis, ax_xy.yaxis, ax_xz.xaxis, ax_xz.yaxis, ax_yz.xaxis, ax_yz.yaxis]:
             axis.set_major_formatter(plain_formatter)
 
-        colorbar = grid.figure.colorbar(sc_xy, ax=ax_xy, shrink=0.72, pad=0.015, fraction=0.045, label=spatial.target_label)
+        colorbar = grid.figure.colorbar(
+            sc_xy,
+            ax=[ax_xy, ax_xz, ax_yz],
+            shrink=0.86,
+            pad=0.02,
+            fraction=0.040,
+            label=spatial.target_label,
+        )
         if spatial.target_tick_positions and spatial.target_tick_labels:
             colorbar.set_ticks(spatial.target_tick_positions)
             colorbar.set_ticklabels(spatial.target_tick_labels)
@@ -91,4 +106,4 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         half = span * 0.5
         axis.set_xlim(x_mid - half, x_mid + half)
         axis.set_ylim(y_mid - half, y_mid + half)
-        axis.set_aspect("equal", adjustable="box")
+        axis.set_aspect("equal", adjustable="datalim")

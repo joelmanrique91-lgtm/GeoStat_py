@@ -331,7 +331,7 @@ class VariographyStageView:
             if not lag_values or not gamma_values:
                 raise ValueError("Resultado variográfico sin datos de lags/gamma.")
             DashboardGrid.clear(self._plot_host)
-            grid = DashboardGrid(self._plot_host, 2, 2, figsize=(16.2, 8.8), width_ratios=[1.9, 1.0], height_ratios=[1.0, 1.0])
+            grid = DashboardGrid(self._plot_host, 2, 2, figsize=(15.2, 8.2), width_ratios=[1.7, 1.0], height_ratios=[1.0, 1.0])
             info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
             self.renderer.render(
                 grid,

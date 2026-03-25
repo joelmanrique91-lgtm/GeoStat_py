@@ -29,9 +29,10 @@ class DashboardGrid:
         self._last_parent_size: tuple[int, int] | None = None
         self._resize_after_id: str | None = None
         self._configure_bound = False
+        self._destroyed = False
         self._configured_figsize = figsize
         self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
-        self._layout_applied_once = False
+        self._base_aspect_ratio = (figsize[0] / max(figsize[1], 1e-6)) if figsize is not None else None
         figure_kwargs: dict[str, object] = {"dpi": 100}
         if figsize is not None:
             figure_kwargs["figsize"] = figsize
@@ -56,6 +57,8 @@ class DashboardGrid:
         self.axes[row][col].axis("off")
 
     def render(self) -> None:
+        if self._destroyed:
+            return
         widget = self.canvas.get_tk_widget()
         if not widget.winfo_manager():
             widget.pack(fill="both", expand=True, padx=0, pady=0)
@@ -66,6 +69,8 @@ class DashboardGrid:
         self._resize_to_parent(force=True)
 
     def _on_parent_configure(self, _event) -> None:
+        if self._destroyed:
+            return
         if self._resize_after_id is not None:
             try:
                 self.parent.after_cancel(self._resize_after_id)
@@ -74,10 +79,14 @@ class DashboardGrid:
         self._resize_after_id = self.parent.after(80, self._resize_to_parent)
 
     def _resize_to_parent(self, *, force: bool = False) -> None:
+        if self._destroyed:
+            return
         self._resize_after_id = None
         widget = self.canvas.get_tk_widget()
-        width = int(widget.winfo_width() or self.parent.winfo_width())
-        height = int(widget.winfo_height() or self.parent.winfo_height())
+        parent_width = int(self.parent.winfo_width())
+        parent_height = int(self.parent.winfo_height())
+        width = int(max(widget.winfo_width(), parent_width))
+        height = int(max(widget.winfo_height(), parent_height))
         if width <= 16 or height <= 16:
             self.parent.after(50, self._resize_to_parent)
             return
@@ -94,17 +103,21 @@ class DashboardGrid:
             ratio = avail_w / max(avail_h, 1e-6)
             if ratio > self._max_aspect_ratio:
                 new_w = max(avail_h * self._max_aspect_ratio, 2.0)
+        if self._base_aspect_ratio is not None:
+            ratio = new_w / max(new_h, 1e-6)
+            min_ratio = max(self._base_aspect_ratio * 0.55, 0.60)
+            if ratio < min_ratio:
+                new_h = max(new_w / min_ratio, 1.6)
         self.figure.set_size_inches(new_w, new_h, forward=True)
-        if not self._layout_applied_once or force:
-            override = getattr(self.figure, "_dashboard_layout_override", None)
-            if isinstance(override, dict):
-                apply_dashboard_layout(self.figure, **override)
-            else:
-                apply_dashboard_layout(self.figure)
-            self._layout_applied_once = True
+        override = getattr(self.figure, "_dashboard_layout_override", None)
+        if isinstance(override, dict):
+            apply_dashboard_layout(self.figure, **override)
+        else:
+            apply_dashboard_layout(self.figure)
         self.canvas.draw_idle()
 
     def destroy(self) -> None:
+        self._destroyed = True
         if self._resize_after_id is not None:
             try:
                 self.parent.after_cancel(self._resize_after_id)
@@ -125,6 +138,14 @@ class DashboardGrid:
         DashboardGrid._instances_by_parent.pop(parent_key, None)
         for child in parent.winfo_children():
             child.destroy()
+
+    @staticmethod
+    def force_resize_under(root: ctk.CTkFrame) -> None:
+        for child in root.winfo_children():
+            child_id = id(child)
+            for grid in list(DashboardGrid._instances_by_parent.get(child_id, [])):
+                grid._resize_to_parent(force=True)
+            DashboardGrid.force_resize_under(child)
 
     def _register(self) -> None:
         parent_key = id(self.parent)

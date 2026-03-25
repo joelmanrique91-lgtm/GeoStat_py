@@ -873,6 +873,9 @@ class HomePanel(ctk.CTkFrame):
         current_step = self.service.workflow_state.current_step
         # Resize policy: avoid full stage rebuild on normal container resize.
         # DashboardGrid and embedded canvases handle their own responsive fitting.
+        active_host = self._stage_hosts.get(current_step)
+        if active_host is not None and active_host.winfo_exists():
+            DashboardGrid.force_resize_under(active_host)
         if current_step not in self._rendered_stage_signatures:
             self._show_stage_view(current_step, force_rebuild=False)
 
@@ -1056,7 +1059,7 @@ class HomePanel(ctk.CTkFrame):
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
         plot_card.grid_rowconfigure(0, weight=1)
-        plot_card.grid_rowconfigure(1, weight=0, minsize=58)
+        plot_card.grid_rowconfigure(1, weight=4, minsize=72)
         plot_card.grid_columnconfigure(0, weight=11)
         plot_card.grid_columnconfigure(1, weight=7)
 
@@ -1093,9 +1096,7 @@ class HomePanel(ctk.CTkFrame):
         box_host.grid_columnconfigure(0, weight=1)
 
         iqr_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        iqr_host.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(2, 0))
-        iqr_host.configure(height=58)
-        iqr_host.grid_propagate(False)
+        iqr_host.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(2, 0))
         iqr_host.grid_rowconfigure(0, weight=1)
         iqr_host.grid_columnconfigure(0, weight=1)
 
@@ -1128,7 +1129,7 @@ class HomePanel(ctk.CTkFrame):
         hist_grid = DashboardGrid(hist_host, 1, 1, figsize=(8.6, 5.8), max_aspect_ratio=2.25)
         qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.65)
         box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.75)
-        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(8.0, 0.9), max_aspect_ratio=4.0)
+        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(8.0, 1.4), max_aspect_ratio=5.0)
         try:
             self.eda_renderer.render_dashboard(
                 histogram_grid=hist_grid,
@@ -1671,6 +1672,14 @@ class HomePanel(ctk.CTkFrame):
 
         try:
             chart = DashboardGrid(parent, 2, 2)
+            chart.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
+                "left": 0.08,
+                "right": 0.97,
+                "top": 0.92,
+                "bottom": 0.12,
+                "wspace": 0.23,
+                "hspace": 0.26,
+            }
             ax_hist = chart.axis(0, 0)
             ax_cdf = chart.axis(1, 0)
             ax_before_after = chart.axis(1, 1)
