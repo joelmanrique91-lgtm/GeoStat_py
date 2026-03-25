@@ -28,6 +28,8 @@ def _configure_windows_dpi_awareness() -> None:
 def main() -> None:
     """Build and launch the GeoStat desktop app."""
     ctk.deactivate_automatic_dpi_awareness()
+    ctk.set_window_scaling(1.0)
+    ctk.set_widget_scaling(1.08)
     adapter = GeostatSpyAdapter()
     activity_log = ActivityLogService()
     service = GeostatService(adapter=adapter, activity_log=activity_log)
