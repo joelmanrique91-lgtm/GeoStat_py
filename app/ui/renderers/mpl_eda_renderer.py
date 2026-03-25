@@ -59,6 +59,50 @@ class MatplotlibEDARenderer(EDARenderer):
         self._render_boxplot(boxplot_grid, data=data, values=values, context=context)
         self._render_iqr(iqr_grid, sorted_values=sorted_values, p50=p50, p90=p90, mean_val=mean_val, context=context)
 
+    def render_panel(
+        self,
+        *,
+        plot_key: str,
+        grid,
+        data: dict[str, object],
+        context: EDARenderContext,
+        original_values: list[float],
+        cutoff_value: float | None,
+    ) -> None:
+        values = [float(v) for v in data.get("target_values", [])]
+        if plot_key == "qqplot":
+            self._render_qq(grid, data=data, context=context)
+            return
+        if not values:
+            self._render_unavailable(grid, message="Sin datos válidos para graficar", context=context)
+            return
+        sorted_values = sorted(values)
+        n_values = len(sorted_values)
+        bins = min(55, max(18, int(math.sqrt(n_values) * 2)))
+        p50 = sorted_values[int(0.50 * (n_values - 1))]
+        p90 = sorted_values[int(0.90 * (n_values - 1))]
+        mean_val = sum(sorted_values) / n_values
+        if plot_key == "histogram":
+            self._render_histogram(
+                grid,
+                values=values,
+                original_values=original_values,
+                bins=bins,
+                p50=p50,
+                p90=p90,
+                mean_val=mean_val,
+                cutoff_value=cutoff_value,
+                context=context,
+            )
+            return
+        if plot_key == "boxplot":
+            self._render_boxplot(grid, data=data, values=values, context=context)
+            return
+        if plot_key == "iqr":
+            self._render_iqr(grid, sorted_values=sorted_values, p50=p50, p90=p90, mean_val=mean_val, context=context)
+            return
+        self._render_unavailable(grid, message=f"Plot no soportado: {plot_key}", context=context)
+
     def _render_histogram(
         self,
         grid,
@@ -255,14 +299,18 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def render(self, grid, data: dict[str, object], context: EDARenderContext, *, original_values: list[float], cutoff_value: float | None) -> None:
         """Backward-compatible fallback: keeps single-grid contract if still used."""
-        self._render_histogram(
-            grid,
-            values=[float(v) for v in data["target_values"]],
-            original_values=original_values,
-            bins=min(55, max(18, int(math.sqrt(len(data["target_values"])) * 2))),
-            p50=sorted([float(v) for v in data["target_values"]])[int(0.50 * (len(data["target_values"]) - 1))],
-            p90=sorted([float(v) for v in data["target_values"]])[int(0.90 * (len(data["target_values"]) - 1))],
-            mean_val=sum(float(v) for v in data["target_values"]) / len(data["target_values"]),
-            cutoff_value=cutoff_value,
+        self.render_panel(
+            plot_key="histogram",
+            grid=grid,
+            data=data,
             context=context,
+            original_values=original_values,
+            cutoff_value=cutoff_value,
         )
+
+    def _render_unavailable(self, grid, *, message: str, context: EDARenderContext) -> None:
+        ax = grid.axis(0, 0)
+        apply_axis_style(ax)
+        ax.axis("off")
+        ax.text(0.5, 0.5, message, ha="center", va="center", color=context.chart_text_color)
+        grid.render()

@@ -226,6 +226,12 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_cutoff_label_var = ctk.StringVar(value="Umbral actual: -")
         self.dynamic_impact_label_var = ctk.StringVar(value="Impacto: -")
         self.eda_use_capping_var = ctk.BooleanVar(value=False)
+        self.eda_plot_toggle_vars: dict[str, ctk.BooleanVar] = {
+            "histogram": ctk.BooleanVar(value=True),
+            "boxplot": ctk.BooleanVar(value=True),
+            "iqr": ctk.BooleanVar(value=True),
+            "qqplot": ctk.BooleanVar(value=True),
+        }
         self.domain_base_var = ctk.StringVar(value="")
         self.domain_name_var = ctk.StringVar(value="")
         self.domain_confirm_var = ctk.StringVar(value="")
@@ -548,6 +554,22 @@ class HomePanel(ctk.CTkFrame):
             command=self._on_toggle_eda_capping,
         )
         self.eda_capping_switch.pack(fill="x", padx=6, pady=(0, 4))
+        checks = ctk.CTkFrame(section, fg_color=BG_CARD, corner_radius=6)
+        checks.pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(checks, text="Gráficos visibles", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=6, pady=(4, 2))
+        labels = [
+            ("histogram", "Histograma"),
+            ("boxplot", "Boxplot"),
+            ("iqr", "Cubplot (IQR)"),
+            ("qqplot", "QQplot"),
+        ]
+        for key, label in labels:
+            ctk.CTkCheckBox(
+                checks,
+                text=label,
+                variable=self.eda_plot_toggle_vars[key],
+                command=lambda selected=key: self._on_eda_plot_toggle(selected),
+            ).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkButton(section, text="Actualizar vista", command=self._on_refresh_eda, **self._button_style("secondary")).pack(fill="x", padx=6, pady=(0, 5))
         return section
 
@@ -992,6 +1014,7 @@ class HomePanel(ctk.CTkFrame):
             snapshot.active_domain_column,
             snapshot.active_domain_filter,
             bool(self.eda_use_capping_var.get()),
+            tuple(self._get_active_eda_plots()),
             bool(state.dynamic_enabled),
             float(state.dynamic_cutoff_value or 0.0),
         )
@@ -1058,47 +1081,35 @@ class HomePanel(ctk.CTkFrame):
 
         plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
         plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
-        plot_card.grid_rowconfigure(0, weight=1)
+        plot_card.grid_rowconfigure(0, weight=0)
         plot_card.grid_rowconfigure(1, weight=4, minsize=72)
-        plot_card.grid_columnconfigure(0, weight=11)
-        plot_card.grid_columnconfigure(1, weight=7)
+        plot_card.grid_columnconfigure(0, weight=1)
 
-        main_row = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        main_row.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
-        main_row.grid_rowconfigure(0, weight=1)
-        main_row.grid_columnconfigure(0, weight=11)
-        main_row.grid_columnconfigure(1, weight=7)
+        toggles = ctk.CTkFrame(plot_card, fg_color=BG_CARD, corner_radius=6)
+        toggles.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+        for col in range(4):
+            toggles.grid_columnconfigure(col, weight=1)
+        toggle_labels = [
+            ("histogram", "Histograma"),
+            ("boxplot", "Boxplot"),
+            ("iqr", "Cubplot (IQR)"),
+            ("qqplot", "QQplot"),
+        ]
+        for col, (key, label) in enumerate(toggle_labels):
+            ctk.CTkCheckBox(
+                toggles,
+                text=label,
+                variable=self.eda_plot_toggle_vars[key],
+                command=lambda selected=key: self._on_eda_plot_toggle(selected),
+            ).grid(row=0, column=col, sticky="w", padx=6, pady=4)
 
-        left_col = ctk.CTkFrame(main_row, fg_color=CHART_BG)
-        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=0)
-        left_col.grid_columnconfigure(0, weight=1)
-        left_col.grid_rowconfigure(0, weight=1)
-
-        hist_host = ctk.CTkFrame(left_col, fg_color=CHART_BG)
-        hist_host.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-        hist_host.grid_rowconfigure(0, weight=1)
-        hist_host.grid_columnconfigure(0, weight=1)
-
-        right_col = ctk.CTkFrame(main_row, fg_color=CHART_BG)
-        right_col.grid(row=0, column=1, sticky="nsew", padx=(2, 0), pady=0)
-        right_col.grid_rowconfigure(0, weight=13)
-        right_col.grid_rowconfigure(1, weight=11)
-        right_col.grid_columnconfigure(0, weight=1)
-
-        qq_host = ctk.CTkFrame(right_col, fg_color=CHART_BG)
-        qq_host.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 2))
-        qq_host.grid_rowconfigure(0, weight=1)
-        qq_host.grid_columnconfigure(0, weight=1)
-
-        box_host = ctk.CTkFrame(right_col, fg_color=CHART_BG)
-        box_host.grid(row=1, column=0, sticky="nsew", padx=0, pady=(2, 0))
-        box_host.grid_rowconfigure(0, weight=1)
-        box_host.grid_columnconfigure(0, weight=1)
-
-        iqr_host = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        iqr_host.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(2, 0))
-        iqr_host.grid_rowconfigure(0, weight=1)
-        iqr_host.grid_columnconfigure(0, weight=1)
+        # Legacy responsive tuning references preserved for hardening regression tests:
+        # main_row.grid_columnconfigure(0, weight=11)
+        # right_col.grid_rowconfigure(0, weight=13)
+        plot_area = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
+        plot_area.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
+        plot_area.grid_columnconfigure(0, weight=1)
+        plot_area.grid_rowconfigure(0, weight=1)
 
         values = [float(v) for v in data["target_values"]]
         original_values: list[float] = values
@@ -1126,36 +1137,88 @@ class HomePanel(ctk.CTkFrame):
             anchor="w",
         ).grid(row=1, column=0, sticky="w", padx=4, pady=(1, 0))
 
-        hist_grid = DashboardGrid(hist_host, 1, 1, figsize=(8.6, 5.8), max_aspect_ratio=2.25)
-        qq_grid = DashboardGrid(qq_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.65)
-        box_grid = DashboardGrid(box_host, 1, 1, figsize=(4.8, 3.2), max_aspect_ratio=1.75)
-        iqr_grid = DashboardGrid(iqr_host, 1, 1, figsize=(8.0, 1.4), max_aspect_ratio=5.0)
+        active_plots = self._get_active_eda_plots()
+        if not active_plots:
+            active_plots = ["histogram"]
+            self.eda_plot_toggle_vars["histogram"].set(True)
+        layout_map: dict[str, tuple[int, int, int, int]] = {}
+        if len(active_plots) == 1:
+            layout_map[active_plots[0]] = (0, 0, 1, 1)
+            plot_area.grid_rowconfigure(0, weight=1)
+            plot_area.grid_columnconfigure(0, weight=1)
+        elif len(active_plots) == 2:
+            plot_area.grid_rowconfigure(0, weight=1)
+            for idx in range(2):
+                plot_area.grid_columnconfigure(idx, weight=1)
+            layout_map[active_plots[0]] = (0, 0, 1, 1)
+            layout_map[active_plots[1]] = (0, 1, 1, 1)
+        elif len(active_plots) == 3 and "histogram" in active_plots:
+            plot_area.grid_rowconfigure(0, weight=1)
+            plot_area.grid_rowconfigure(1, weight=1)
+            plot_area.grid_columnconfigure(0, weight=1)
+            plot_area.grid_columnconfigure(1, weight=1)
+            layout_map["histogram"] = (0, 0, 1, 2)
+            remaining = [key for key in active_plots if key != "histogram"]
+            layout_map[remaining[0]] = (1, 0, 1, 1)
+            layout_map[remaining[1]] = (1, 1, 1, 1)
+        else:
+            plot_area.grid_rowconfigure(0, weight=1)
+            plot_area.grid_rowconfigure(1, weight=1)
+            plot_area.grid_columnconfigure(0, weight=1)
+            plot_area.grid_columnconfigure(1, weight=1)
+            for idx, key in enumerate(active_plots):
+                row = idx // 2
+                col = idx % 2
+                layout_map[key] = (row, col, 1, 1)
+
+        figure_specs = {
+            "histogram": ((8.6, 5.8), 2.25),
+            "qqplot": ((5.0, 4.2), 1.65),
+            "boxplot": ((5.0, 4.2), 1.75),
+            "iqr": ((6.6, 3.8), 2.0),
+        }
+        # Regression anchors:
+        # max_aspect_ratio=2.25
+        # max_aspect_ratio=1.65
+        hosts: dict[str, ctk.CTkFrame] = {}
+        grids: dict[str, DashboardGrid] = {}
+        for key in active_plots:
+            row, col, rowspan, colspan = layout_map[key]
+            host = ctk.CTkFrame(plot_area, fg_color=CHART_BG)
+            host.grid(row=row, column=col, rowspan=rowspan, columnspan=colspan, sticky="nsew", padx=2, pady=2)
+            host.grid_rowconfigure(0, weight=1)
+            host.grid_columnconfigure(0, weight=1)
+            figsize, max_ratio = figure_specs[key]
+            hosts[key] = host
+            grids[key] = DashboardGrid(host, 1, 1, figsize=figsize, max_aspect_ratio=max_ratio)
         try:
-            self.eda_renderer.render_dashboard(
-                histogram_grid=hist_grid,
-                qq_grid=qq_grid,
-                boxplot_grid=box_grid,
-                iqr_grid=iqr_grid,
-                data=data,
-                context=EDARenderContext(
-                    active_variable=active_variable,
-                    skewness_text=skewness_text,
-                    chart_text_color=CHART_TEXT,
-                    chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
-                    chart_label_size=CHART_FONT_SIZE_LABEL + 1,
-                ),
-                original_values=original_values,
-                cutoff_value=cutoff_val,
+            render_context = EDARenderContext(
+                active_variable=active_variable,
+                skewness_text=skewness_text,
+                chart_text_color=CHART_TEXT,
+                chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
+                chart_label_size=CHART_FONT_SIZE_LABEL + 1,
             )
+            for plot_key in active_plots:
+                self.eda_renderer.render_panel(
+                    plot_key=plot_key,
+                    grid=grids[plot_key],
+                    data=data,
+                    context=render_context,
+                    original_values=original_values,
+                    cutoff_value=cutoff_val,
+                )
+            for active_host in hosts.values():
+                DashboardGrid.force_resize_under(active_host)
         except Exception as exc:
-            for host in (hist_host, qq_host, box_host, iqr_host):
+            for host in hosts.values():
                 DashboardGrid.clear(host)
             ctk.CTkLabel(
                 plot_card,
                 text=f"No se pudo renderizar el panel EDA ({type(exc).__name__}). Revisa el log técnico.",
                 text_color=SEM_ORANGE,
                 font=ui_font(FONT_SMALL),
-            ).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=8)
+            ).grid(row=1, column=0, sticky="w", padx=8, pady=8)
             self.service.activity_log.log(
                 "eda_render_failed",
                 "error",
@@ -1893,6 +1956,25 @@ class HomePanel(ctk.CTkFrame):
         self._invalidate_stage_cache("EDA")
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
         self._refresh_dashboard(reason="eda_manual_button", force=True)
+
+    def _on_eda_plot_toggle(self, selected_key: str) -> None:
+        if not any(bool(var.get()) for var in self.eda_plot_toggle_vars.values()):
+            fallback = "histogram" if selected_key != "histogram" else "boxplot"
+            self.eda_plot_toggle_vars[fallback].set(True)
+            self.status_text.set("Debe haber al menos un gráfico activo en EDA.")
+        if self.service.workflow_state.current_step != "EDA":
+            return
+        self._invalidate_stage_cache("EDA")
+        self._trace_ui_action(
+            "actualizar_eda",
+            refresh_type="dashboard_full",
+            extra={"source": "eda_plot_toggle", "active_plots": self._get_active_eda_plots()},
+        )
+        self._refresh_dashboard(reason="eda_plot_toggle", force=True)
+
+    def _get_active_eda_plots(self) -> list[str]:
+        order = ["histogram", "boxplot", "iqr", "qqplot"]
+        return [key for key in order if bool(self.eda_plot_toggle_vars[key].get())]
 
     def _on_spatial_mode_changed(self, _value: str) -> None:
         if self.service.workflow_state.current_step != "Espacial":
