@@ -34,10 +34,15 @@ class WindowGeometryPolicyTests(unittest.TestCase):
 
     def test_main_bootstrap_calls_dpi_before_window_creation(self) -> None:
         source = Path("app/main.py").read_text(encoding="utf-8")
-        main_block_start = source.index("def main() -> None:")
-        dpi_call = source.index("_configure_windows_dpi_awareness()", main_block_start)
-        main_window_call = source.index("app = MainWindow(service=service)", main_block_start)
-        self.assertLess(dpi_call, main_window_call)
+        self.assertNotIn("SetProcessDpiAwareness", source)
+        self.assertNotIn("SetProcessDPIAware", source)
+        self.assertIn("app = MainWindow(service=service)", source)
+
+    def test_main_window_avoids_aggressive_runtime_geometry_sanitize(self) -> None:
+        source = Path("app/ui/main_window.py").read_text(encoding="utf-8")
+        self.assertNotIn('bind("<Configure>"', source)
+        self.assertNotIn("after_cancel(", source)
+        self.assertNotIn("parse_tk_geometry(", source)
 
 
 if __name__ == "__main__":
