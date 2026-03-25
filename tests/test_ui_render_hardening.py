@@ -89,6 +89,12 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("Direccional (pendiente backend)", source)
         self.assertIn('state="disabled"', source)
 
+    def test_variography_controls_panel_is_scrollable_and_compact(self) -> None:
+        source = Path("app/ui/panels/stages/variography_stage_view.py").read_text(encoding="utf-8")
+        self.assertIn("CTkScrollableFrame(", source)
+        self.assertIn("height=30", source)
+        self.assertIn("width=124", source)
+
 
 if __name__ == "__main__":
     unittest.main()

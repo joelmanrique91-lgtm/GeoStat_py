@@ -11,7 +11,7 @@ from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
-VARIOGRAPHY_CONTROLS_WIDTH = 356
+VARIOGRAPHY_CONTROLS_WIDTH = 340
 VARIOGRAPHY_TEXT_WRAP = 980
 logger = logging.getLogger(__name__)
 
@@ -75,9 +75,15 @@ class VariographyStageView:
         wrapper.grid_columnconfigure(1, weight=2)
         wrapper.grid_rowconfigure(0, weight=1)
 
-        controls = ctk.CTkFrame(wrapper, fg_color=BG_CARD, width=VARIOGRAPHY_CONTROLS_WIDTH)
+        controls = ctk.CTkScrollableFrame(
+            wrapper,
+            fg_color=BG_CARD,
+            width=VARIOGRAPHY_CONTROLS_WIDTH,
+            corner_radius=8,
+            scrollbar_button_color=BG_PANEL,
+            scrollbar_button_hover_color=BG_PANEL,
+        )
         controls.grid(row=0, column=0, sticky="nsw", padx=(0, 5), pady=0)
-        controls.grid_propagate(False)
         self._build_controls(controls, [str(v) for v in init.get("target_options", [])])
 
         results = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
@@ -128,26 +134,26 @@ class VariographyStageView:
             return
         self._render_empty_plot("Sin cálculo aún. Presione 'Calcular'.")
 
-    def _build_controls(self, parent: ctk.CTkFrame, target_options: list[str]) -> None:
+    def _build_controls(self, parent: ctk.CTkFrame | ctk.CTkScrollableFrame, target_options: list[str]) -> None:
         parent.grid_columnconfigure(0, weight=1)
         row = 0
-        ctk.CTkLabel(parent, text="Parámetros de variografía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(8, 2))
+        ctk.CTkLabel(parent, text="Parámetros de variografía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(6, 1))
         row += 1
-        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED, wraplength=332, justify="left").grid(row=row, column=0, sticky="w", padx=8, pady=(0, 4))
-        row += 1
-
-        ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
-        row += 1
-        ctk.CTkOptionMenu(parent, variable=self.target_var, values=target_options or [""], state="normal" if target_options else "disabled").grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
+        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED, wraplength=318, justify="left").grid(row=row, column=0, sticky="w", padx=8, pady=(0, 3))
         row += 1
 
-        ctk.CTkLabel(parent, text="Estimator", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(2, 1))
+        ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(1, 1))
         row += 1
-        ctk.CTkOptionMenu(parent, variable=self.estimator_var, values=["classical", "cressie_hawkins"]).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 4))
+        ctk.CTkOptionMenu(parent, variable=self.target_var, values=target_options or [""], state="normal" if target_options else "disabled").grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 3))
+        row += 1
+
+        ctk.CTkLabel(parent, text="Estimator", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(1, 1))
+        row += 1
+        ctk.CTkOptionMenu(parent, variable=self.estimator_var, values=["classical", "cressie_hawkins"]).grid(row=row, column=0, sticky="ew", padx=8, pady=(0, 3))
         row += 1
 
         core_grid = ctk.CTkFrame(parent, fg_color="transparent")
-        core_grid.grid(row=row, column=0, sticky="ew", padx=8, pady=(2, 4))
+        core_grid.grid(row=row, column=0, sticky="ew", padx=8, pady=(1, 3))
         core_grid.grid_columnconfigure((0, 1), weight=1)
         core_fields: list[tuple[str, ctk.StringVar]] = [
             ("lag_distance", self.lag_distance_var),
@@ -160,21 +166,21 @@ class VariographyStageView:
         row += 1
 
         directional_card = ctk.CTkFrame(parent, fg_color=BG_PANEL)
-        directional_card.grid(row=row, column=0, sticky="ew", padx=8, pady=(2, 4))
+        directional_card.grid(row=row, column=0, sticky="ew", padx=8, pady=(1, 3))
         directional_card.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkLabel(
             directional_card,
             text="Direccional (pendiente backend)",
             text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11, weight="bold"),
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(5, 1))
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(4, 1))
         ctk.CTkLabel(
             directional_card,
             text="Se muestran como referencia; aún no alteran el cálculo.",
             text_color=TEXT_MUTED,
-            wraplength=332,
+            wraplength=318,
             justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 3))
         directional_fields: list[tuple[str, ctk.StringVar]] = [
             ("azimuth", self.azimuth_var),
             ("dip", self.dip_var),
@@ -187,16 +193,16 @@ class VariographyStageView:
             self._build_compact_field(directional_card, row=2 + (idx // 2), col=idx % 2, label=label, var=var, state="disabled")
         row += 1
 
-        self._compute_button = ctk.CTkButton(parent, text="Ejecutar variografía", command=self._on_compute)
-        self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 8))
+        self._compute_button = ctk.CTkButton(parent, text="Ejecutar variografía", command=self._on_compute, height=30)
+        self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(6, 6))
 
     def _build_compact_field(self, parent: ctk.CTkFrame, *, row: int, col: int, label: str, var: ctk.StringVar, state: str = "normal") -> None:
         parent.grid_columnconfigure(col, weight=1)
         cell = ctk.CTkFrame(parent, fg_color="transparent")
-        cell.grid(row=row, column=col, sticky="ew", padx=4, pady=2)
+        cell.grid(row=row, column=col, sticky="ew", padx=3, pady=1)
         cell.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(cell, text=label, text_color=TEXT_MUTED, anchor="w", justify="left").grid(row=0, column=0, sticky="w", pady=(0, 1))
-        ctk.CTkEntry(cell, textvariable=var, state=state, width=132).grid(row=1, column=0, sticky="ew")
+        ctk.CTkEntry(cell, textvariable=var, state=state, width=124, height=30).grid(row=1, column=0, sticky="ew")
 
     def _bind_dirty_traces(self) -> None:
         observed = [
