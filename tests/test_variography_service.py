@@ -90,7 +90,7 @@ class VariographyServiceTests(unittest.TestCase):
         )
         warning_codes = {item.code for item in response.warnings}
         self.assertIn("LOW_NPAIRS_LAG", warning_codes)
-        self.assertIn("DIRECTION_PENDING_BACKEND", warning_codes)
+        self.assertIn("LOW_VALID_LAGS_FOR_FIT", warning_codes)
 
     def test_compute_blocks_when_dataframe_is_empty(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
@@ -116,6 +116,47 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertFalse(response.ok)
         blocker_codes = {item.code for item in response.blockers}
         self.assertIn("NO_ACTIVE_ROWS", blocker_codes)
+
+    def test_directional_parameters_affect_pair_counts(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        base = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "azimuth": 0.0,
+                "dip": 0.0,
+                "ang_tol_h": 90.0,
+                "ang_tol_v": 90.0,
+                "band_width": 0.0,
+                "band_height": 0.0,
+            }
+        )
+        directional = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "azimuth": 90.0,
+                "dip": 0.0,
+                "ang_tol_h": 5.0,
+                "ang_tol_v": 10.0,
+                "band_width": 8.0,
+                "band_height": 8.0,
+            }
+        )
+        self.assertIsNotNone(base.result)
+        if directional.result is None:
+            self.assertFalse(directional.ok)
+        else:
+            self.assertLessEqual(sum(directional.result.pair_counts), sum(base.result.pair_counts))
+            self.assertTrue(bool(directional.result.metadata.get("direction_applied")))
 
     def test_compute_no_pairs_in_range_returns_specific_blocker(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"

@@ -70,6 +70,26 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
         ax_gamma.set_title(f"Variograma experimental · {context.target_label}", color=context.chart_text_color)
         ax_gamma.set_xlabel("Lag distance")
         ax_gamma.set_ylabel("Gamma")
+        model_meta = response.get("metadata", {}).get("model", {}) if isinstance(response.get("metadata", {}), dict) else {}
+        if isinstance(model_meta, dict):
+            modeled = model_meta.get("curve_total", [])
+            by_structure = model_meta.get("curves_by_structure", [])
+            sill = _as_float_or_none(model_meta.get("sill"))
+            nugget = _as_float_or_none((model_meta.get("nugget", {}) or {}).get("value") if isinstance(model_meta.get("nugget", {}), dict) else None)
+            practical_range = _as_float_or_none(model_meta.get("practical_range"))
+            if isinstance(modeled, list) and len(modeled) == len(xs):
+                ax_gamma.plot(xs, [float(v) for v in modeled], color=SEM_ORANGE, linewidth=1.6, label="Modelo total")
+            if isinstance(by_structure, list):
+                for idx, curve in enumerate(by_structure, start=1):
+                    if isinstance(curve, list) and len(curve) == len(xs):
+                        ax_gamma.plot(xs, [float(v) for v in curve], linestyle="--", linewidth=0.9, alpha=0.75, label=f"Estructura {idx}")
+            if sill is not None:
+                ax_gamma.axhline(sill, color=SEM_RED, linestyle="-.", linewidth=1.0, alpha=0.8, label="Sill")
+            if nugget is not None:
+                ax_gamma.scatter([0.0], [nugget], color=SEM_RED, s=42, marker="x", label="Nugget")
+            if practical_range is not None:
+                ax_gamma.axvline(practical_range, color=SEM_RED, linestyle=":", linewidth=1.0, alpha=0.8, label="Range")
+
         if finite_points:
             ax_gamma.legend(fontsize=context.chart_legend_size, frameon=False)
 
@@ -90,7 +110,10 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
         diag_text = f"{context.info_text}\n\n"
         diag_text += f"Lags válidos: {len(finite_points)}/{max_len}\n"
         diag_text += f"Máx npairs: {max(pair_counts_int) if pair_counts_int else 0}\n"
-        diag_text += f"Lags con npairs <30: {len(low_npairs)}"
+        diag_text += f"Lags con npairs <30: {len(low_npairs)}\n"
+        if isinstance(model_meta, dict):
+            q = model_meta.get("quality", {}) if isinstance(model_meta.get("quality"), dict) else {}
+            diag_text += f"RMSE ajuste: {q.get('rmse', '-')}"
         ax_diag.axis("off")
         ax_diag.text(0.03, 0.96, diag_text, va="top", ha="left", fontsize=context.chart_label_size, color=context.chart_text_color)
 
@@ -103,6 +126,16 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
             f"hash: {metadata.get('computation_hash', '-')}",
             f"direction_applied: {metadata.get('direction_applied', False)}",
         ]
+        if isinstance(model_meta, dict):
+            nugget_meta = model_meta.get("nugget", {}) if isinstance(model_meta.get("nugget"), dict) else {}
+            lines.extend(
+                [
+                    f"sill: {model_meta.get('sill', '-')}",
+                    f"nugget_abs: {nugget_meta.get('value', '-')}",
+                    f"nugget_rel%: {model_meta.get('nugget_relative_pct', '-')}",
+                    f"usage_target: {model_meta.get('usage_target', '-')}",
+                ]
+            )
         ax_meta.text(0.03, 0.96, "\n".join(lines), va="top", ha="left", fontsize=context.chart_label_size, color=context.chart_text_color)
         grid.render()
         grid.canvas.draw_idle()
