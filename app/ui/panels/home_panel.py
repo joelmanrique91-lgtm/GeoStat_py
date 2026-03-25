@@ -104,6 +104,12 @@ WRAP_STAGE_BLOCKED = 1020
 WRAP_STAGE_SUMMARY = 1120
 WRAP_DYNAMIC_IMPACT = 340
 SPATIAL_GUARDRAIL_NOTE = "Uso: lectura exploratoria, no inferencia de continuidad."
+EDA_PLOT_TOGGLE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("histogram", "Histograma"),
+    ("boxplot", "Boxplot"),
+    ("iqr", "Cubplot (IQR)"),
+    ("qqplot", "QQplot"),
+)
 
 
 def ui_font(token: dict[str, object]) -> ctk.CTkFont:
@@ -285,6 +291,7 @@ class HomePanel(ctk.CTkFrame):
         self._stage_hosts: dict[str, ctk.CTkFrame] = {}
         self._rendered_stage_signatures: dict[str, tuple[object, ...]] = {}
         self._resize_after_id: str | None = None
+        self._eda_toggle_after_id: str | None = None
         self._last_view_body_size: tuple[int, int] = (0, 0)
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
@@ -557,13 +564,7 @@ class HomePanel(ctk.CTkFrame):
         checks = ctk.CTkFrame(section, fg_color=BG_CARD, corner_radius=6)
         checks.pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(checks, text="Gráficos visibles", text_color=TXT_MUTED, font=ui_font(FONT_MICRO)).pack(anchor="w", padx=6, pady=(4, 2))
-        labels = [
-            ("histogram", "Histograma"),
-            ("boxplot", "Boxplot"),
-            ("iqr", "Cubplot (IQR)"),
-            ("qqplot", "QQplot"),
-        ]
-        for key, label in labels:
+        for key, label in EDA_PLOT_TOGGLE_OPTIONS:
             ctk.CTkCheckBox(
                 checks,
                 text=label,
@@ -1089,13 +1090,7 @@ class HomePanel(ctk.CTkFrame):
         toggles.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
         for col in range(4):
             toggles.grid_columnconfigure(col, weight=1)
-        toggle_labels = [
-            ("histogram", "Histograma"),
-            ("boxplot", "Boxplot"),
-            ("iqr", "Cubplot (IQR)"),
-            ("qqplot", "QQplot"),
-        ]
-        for col, (key, label) in enumerate(toggle_labels):
+        for col, (key, label) in enumerate(EDA_PLOT_TOGGLE_OPTIONS):
             ctk.CTkCheckBox(
                 toggles,
                 text=label,
@@ -1153,8 +1148,8 @@ class HomePanel(ctk.CTkFrame):
             layout_map[active_plots[0]] = (0, 0, 1, 1)
             layout_map[active_plots[1]] = (0, 1, 1, 1)
         elif len(active_plots) == 3 and "histogram" in active_plots:
-            plot_area.grid_rowconfigure(0, weight=1)
-            plot_area.grid_rowconfigure(1, weight=1)
+            plot_area.grid_rowconfigure(0, weight=3)
+            plot_area.grid_rowconfigure(1, weight=2)
             plot_area.grid_columnconfigure(0, weight=1)
             plot_area.grid_columnconfigure(1, weight=1)
             layout_map["histogram"] = (0, 0, 1, 2)
@@ -1964,6 +1959,21 @@ class HomePanel(ctk.CTkFrame):
             self.status_text.set("Debe haber al menos un gráfico activo en EDA.")
         if self.service.workflow_state.current_step != "EDA":
             return
+        self._schedule_eda_toggle_refresh()
+
+    def _get_active_eda_plots(self) -> list[str]:
+        order = ["histogram", "boxplot", "iqr", "qqplot"]
+        return [key for key in order if bool(self.eda_plot_toggle_vars[key].get())]
+
+    def _schedule_eda_toggle_refresh(self) -> None:
+        if self._eda_toggle_after_id is not None:
+            self.after_cancel(self._eda_toggle_after_id)
+        self._eda_toggle_after_id = self.after(70, self._run_eda_toggle_refresh)
+
+    def _run_eda_toggle_refresh(self) -> None:
+        self._eda_toggle_after_id = None
+        if self.service.workflow_state.current_step != "EDA":
+            return
         self._invalidate_stage_cache("EDA")
         self._trace_ui_action(
             "actualizar_eda",
@@ -1971,10 +1981,6 @@ class HomePanel(ctk.CTkFrame):
             extra={"source": "eda_plot_toggle", "active_plots": self._get_active_eda_plots()},
         )
         self._refresh_dashboard(reason="eda_plot_toggle", force=True)
-
-    def _get_active_eda_plots(self) -> list[str]:
-        order = ["histogram", "boxplot", "iqr", "qqplot"]
-        return [key for key in order if bool(self.eda_plot_toggle_vars[key].get())]
 
     def _on_spatial_mode_changed(self, _value: str) -> None:
         if self.service.workflow_state.current_step != "Espacial":
