@@ -82,11 +82,10 @@ class DashboardGrid:
         if self._destroyed:
             return
         self._resize_after_id = None
-        widget = self.canvas.get_tk_widget()
         parent_width = int(self.parent.winfo_width())
         parent_height = int(self.parent.winfo_height())
-        width = int(max(widget.winfo_width(), parent_width))
-        height = int(max(widget.winfo_height(), parent_height))
+        width = int(parent_width)
+        height = int(parent_height)
         if width <= 16 or height <= 16:
             self.parent.after(50, self._resize_to_parent)
             return
