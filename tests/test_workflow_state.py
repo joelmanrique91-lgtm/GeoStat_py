@@ -79,7 +79,7 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertFalse(readiness["stages"]["spatial"]["ready"])
             self.assertIn("missing_spatial_columns", readiness["stages"]["spatial"]["blocking_reasons"])
 
-    def test_workflow_readiness_domains_stage_is_unblocked_when_disabled(self) -> None:
+    def test_workflow_readiness_domains_stage_is_blocked_when_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = GeostatService(adapter=GeostatSpyAdapter())
             csv_path = Path(tmp_dir) / "workflow_domains_missing.csv"
@@ -88,10 +88,10 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertTrue(service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
 
             readiness = service.get_workflow_readiness()
-            self.assertTrue(readiness["stages"]["domains"]["ready"])
-            self.assertEqual(readiness["stages"]["domains"]["blocking_reasons"], [])
+            self.assertFalse(readiness["stages"]["domains"]["ready"])
+            self.assertIn("domains_module_disabled", readiness["stages"]["domains"]["blocking_reasons"])
 
-    def test_workflow_readiness_all_core_stages_ready_when_configured(self) -> None:
+    def test_workflow_readiness_core_stages_ready_except_disabled_domains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = GeostatService(adapter=GeostatSpyAdapter())
             csv_path = Path(tmp_dir) / "workflow_ready.csv"
@@ -104,7 +104,7 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertTrue(readiness["stages"]["eda"]["ready"])
             self.assertTrue(readiness["stages"]["cutoffs"]["ready"])
             self.assertTrue(readiness["stages"]["spatial"]["ready"])
-            self.assertTrue(readiness["stages"]["domains"]["ready"])
+            self.assertFalse(readiness["stages"]["domains"]["ready"])
             self.assertTrue(readiness["stages"]["variography"]["ready"])
 
     def test_workflow_readiness_exposes_current_step(self) -> None:

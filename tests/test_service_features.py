@@ -74,7 +74,7 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertEqual(updated, {"lithology": "A", "alteration": "Arg", "mine": "Pit-1"})
         self.assertEqual(self.service.get_domain_ui_filters(), {"lithology": "A", "alteration": "Arg", "mine": "Pit-1"})
 
-    @patch("app.services.geostat_service.subprocess.run")
+    @patch("app.services.repository_update_service.subprocess.run")
     def test_update_repository_success_when_enabled(self, mock_run) -> None:
         mock_run.side_effect = [
             type("Result", (), {"returncode": 0, "stdout": "Already up to date.", "stderr": ""})(),
@@ -87,7 +87,7 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("actualizado", result.message.lower())
         self.assertFalse(result.restart_recommended)
 
-    @patch("app.services.geostat_service.subprocess.run")
+    @patch("app.services.repository_update_service.subprocess.run")
     def test_update_repository_fails_when_submodule_update_fails(self, mock_run) -> None:
         mock_run.side_effect = [
             type("Result", (), {"returncode": 0, "stdout": "Already up to date.", "stderr": ""})(),
@@ -139,6 +139,13 @@ class ServiceFeatureTests(unittest.TestCase):
         self.assertIn("availability", payload)
         self.assertIn("diagnostics", payload)
         self.assertTrue(payload["availability"]["histogram"]["available"])
+
+    def test_domains_stage_is_not_ready_when_module_disabled(self) -> None:
+        self._load_sample_dataset()
+        self.assertTrue(self.service.set_variable_config("Easting", "Northing", "RL", "Au", "HoleID", "Lithology").success)
+        readiness = self.service.get_workflow_readiness()
+        self.assertFalse(bool(readiness["stages"]["domains"]["ready"]))
+        self.assertIn("domains_module_disabled", readiness["stages"]["domains"]["blocking_reasons"])
 
     def test_prepare_univariate_uses_snapshot_resolution_for_effective_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
