@@ -1,7 +1,6 @@
 """Application entry point for the local desktop GUI."""
 
-import ctypes
-import sys
+import customtkinter as ctk
 
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.services.activity_log_service import ActivityLogService
@@ -28,7 +27,7 @@ def _configure_windows_dpi_awareness() -> None:
 
 def main() -> None:
     """Build and launch the GeoStat desktop app."""
-    _configure_windows_dpi_awareness()
+    ctk.deactivate_automatic_dpi_awareness()
     adapter = GeostatSpyAdapter()
     activity_log = ActivityLogService()
     service = GeostatService(adapter=adapter, activity_log=activity_log)

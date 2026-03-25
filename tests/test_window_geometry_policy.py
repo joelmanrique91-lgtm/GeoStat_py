@@ -36,6 +36,7 @@ class WindowGeometryPolicyTests(unittest.TestCase):
         source = Path("app/main.py").read_text(encoding="utf-8")
         self.assertNotIn("SetProcessDpiAwareness", source)
         self.assertNotIn("SetProcessDPIAware", source)
+        self.assertIn("ctk.deactivate_automatic_dpi_awareness()", source)
         self.assertIn("app = MainWindow(service=service)", source)
 
     def test_main_window_avoids_aggressive_runtime_geometry_sanitize(self) -> None:
