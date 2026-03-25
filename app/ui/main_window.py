@@ -13,6 +13,9 @@ class MainWindow:
     """Configures and runs the main CustomTkinter window."""
 
     def __init__(self, service: GeostatService) -> None:
+        self._geometry_after_id: str | None = None
+        self._is_applying_geometry = False
+        self._last_window_state = "normal"
         self.service = service
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
