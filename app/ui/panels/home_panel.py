@@ -1285,11 +1285,13 @@ class HomePanel(ctk.CTkFrame):
     def _render_spatial_2d_view(self, parent: ctk.CTkFrame) -> None:
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
+        wrapper.grid_columnconfigure(0, weight=1)
+        wrapper.grid_rowconfigure(5, weight=1)
         snapshot = self.service.get_analysis_context_snapshot()
-        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(0, 2))
-        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(0, 5))
-        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=8, pady=(0, 3))
-        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).pack(anchor="w", padx=8, pady=(0, 3))
+        ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=8, pady=(0, 2))
+        ctk.CTkLabel(wrapper, text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
+        ctk.CTkLabel(wrapper, text="Microlectura: continuidad visual estable sugiere dominios y variogramas más robustos.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=2, column=0, sticky="w", padx=8, pady=(0, 3))
+        ctk.CTkLabel(wrapper, text="Detalle técnico", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 3))
         try:
             color_by = self.spatial_color_var.get() or None
             result = self.service.prepare_visual_data(color_by=color_by)
@@ -1297,11 +1299,24 @@ class HomePanel(ctk.CTkFrame):
                 raise ValueError(result.message)
             spatial = result.spatial_data
         except Exception as exc:
-            ctk.CTkLabel(wrapper, text=f"No se pudo renderizar Espacial: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
+            ctk.CTkLabel(wrapper, text=f"No se pudo renderizar Espacial: {exc}", text_color=TXT_MAIN).grid(row=4, column=0, sticky="w", padx=8, pady=8)
             return
-
-        grid = DashboardGrid(
+        ctk.CTkLabel(
             wrapper,
+            text=(
+                f"Estado render: {spatial.plotted_points:,}/{spatial.source_points:,} muestras"
+                f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
+            ),
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=4, column=0, sticky="w", padx=8, pady=(0, 2))
+
+        chart_host = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
+        chart_host.grid(row=5, column=0, sticky="nsew", padx=0, pady=(0, 2))
+        chart_host.grid_columnconfigure(0, weight=1)
+        chart_host.grid_rowconfigure(0, weight=1)
+        grid = DashboardGrid(
+            chart_host,
             2,
             2,
             width_ratios=[1.45, 1.0],
@@ -1325,7 +1340,7 @@ class HomePanel(ctk.CTkFrame):
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(1, weight=1)
+        wrapper.grid_rowconfigure(3, weight=1)
 
         snapshot = self.service.get_analysis_context_snapshot()
         ctk.CTkLabel(wrapper, text="Resumen ejecutivo", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 2))
@@ -1334,7 +1349,13 @@ class HomePanel(ctk.CTkFrame):
             text=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)} · Modo 3D PoC",
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
-        ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 2))
+        ).grid(row=1, column=0, sticky="w", padx=6, pady=(0, 3))
+        ctk.CTkLabel(
+            wrapper,
+            text="Microlectura: valida coherencia espacial con navegación libre y zoom de rueda.",
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=2, column=0, sticky="w", padx=6, pady=(0, 3))
 
         renderer, fallback_reason = self._select_spatial_3d_renderer()
         if fallback_reason and fallback_reason != self._spatial_3d_renderer_warning_cache:
@@ -1347,7 +1368,7 @@ class HomePanel(ctk.CTkFrame):
             )
 
         self.spatial_3d_widget = renderer.create_widget(wrapper)
-        self.spatial_3d_widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
+        self.spatial_3d_widget.grid(row=3, column=0, sticky="nsew", padx=4, pady=(2, 0))
 
         available, reason = renderer.is_available()
         if not available:
@@ -1363,6 +1384,15 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_view_mode_var.set("2D")
             self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
             return
+        ctk.CTkLabel(
+            wrapper,
+            text=(
+                f"Estado render: {result.spatial_3d_data.point_count_rendered:,}/{result.spatial_3d_data.point_count_original:,} muestras"
+                f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
+            ),
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=2, column=0, sticky="e", padx=6, pady=(0, 3))
 
         renderer.render(
             self.spatial_3d_widget,

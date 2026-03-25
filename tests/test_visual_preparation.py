@@ -57,6 +57,19 @@ class VisualPreparationTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(len(result.spatial_data.target), 2)
 
+    def test_prepare_visual_2d_and_3d_share_same_filtered_subset(self) -> None:
+        self._load_numeric_dataset()
+        self.assertTrue(self.service.set_active_domain("b").success)
+        result_2d = self.service.prepare_visual_data()
+        result_3d = self.service.prepare_visual_3d_data()
+        self.assertTrue(result_2d.success)
+        self.assertTrue(result_3d.success)
+        self.assertIsNotNone(result_2d.spatial_data)
+        self.assertIsNotNone(result_3d.spatial_3d_data)
+        self.assertEqual(len(result_2d.spatial_data.target), 1)
+        self.assertEqual(result_3d.spatial_3d_data.point_count_original, 1)
+        self.assertEqual(result_3d.spatial_3d_data.point_count_rendered, 1)
+
     def test_statistics_table_contains_expected_metrics(self) -> None:
         self._load_numeric_dataset()
         table = dict(self.service.get_target_statistics_table())
