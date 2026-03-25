@@ -37,6 +37,8 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("draw_idle()", source)
         self.assertIn("after(80, self._resize_to_parent)", source)
         self.assertIn("def force_resize_under", source)
+        self.assertIn("width = int(parent_width)", source)
+        self.assertNotIn("max(widget.winfo_width(), parent_width)", source)
 
     def test_eda_view_uses_typed_cutoff_state_access(self) -> None:
         source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
@@ -96,6 +98,13 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("CTkScrollableFrame(", source)
         self.assertIn("height=30", source)
         self.assertIn("width=124", source)
+
+    def test_spatial_3d_view_supports_mouse_wheel_zoom_and_camera_persistence(self) -> None:
+        source = Path("app/ui/panels/spatial_3d_view.py").read_text(encoding="utf-8")
+        self.assertIn('mpl_connect("scroll_event", self._on_mouse_wheel_zoom)', source)
+        self.assertIn("def _on_mouse_wheel_zoom", source)
+        self.assertIn("self._last_elev", source)
+        self.assertIn("self._last_azim", source)
 
 
 if __name__ == "__main__":
