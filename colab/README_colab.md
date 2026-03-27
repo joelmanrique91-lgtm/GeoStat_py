@@ -25,3 +25,5 @@ Esta carpeta agrega una capa **temporal, aislada y reversible** para usar el mot
 - El notebook principal expone `ANALYTICS_PARAMS` como bloque central de parámetros.
 - Incluye `recalculate_analysis(...)` para recalcular filtros, EDA y variografía inline al cambiar parámetros.
 - Flujo principal por celdas (estable); no depende de widgets.
+
+- Incluye una capa opcional `Interactive Workbench (ipywidgets)`; si falla, el flujo manual por celdas sigue funcionando.
