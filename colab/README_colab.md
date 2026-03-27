@@ -16,7 +16,7 @@ Esta carpeta agrega una capa **temporal, aislada y reversible** para usar el mot
 1. Abre `colab/00_bootstrap.ipynb` en Google Colab.
 2. Ajusta parámetros iniciales (repo URL, branch opcional, mount Drive opcional, CSV opcional).
 3. Ejecuta **Run all**.
-4. Si todo pasa, quedas listo para trabajar temporalmente con el motor analítico.
+4. Si todo pasa, abre `colab/01_workbench_geostat.ipynb` para flujo analítico (upload CSV local -> configuración -> EDA -> variografía).
 
 ## Reversibilidad
 - Esta capa vive solo en `colab/`.
@@ -31,3 +31,9 @@ Esta carpeta agrega una capa **temporal, aislada y reversible** para usar el mot
 - `REPO_DIR_NAME = "GeoStat_py"`
 
 Puedes editar estos valores si necesitas apuntar a otro fork/branch temporalmente.
+
+
+## Etapa analítica en notebook
+- `colab/01_workbench_geostat.ipynb` usa `google.colab.files.upload()` para cargar CSV desde memoria local.
+- Reutiliza APIs reales del servicio (`load_csv`, autodetección, `set_variable_config`, EDA y variografía).
+- Visualiza resultados solo inline con Matplotlib (sin UI desktop).
