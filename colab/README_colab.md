@@ -37,3 +37,4 @@ Puedes editar estos valores si necesitas apuntar a otro fork/branch temporalment
 - `colab/01_workbench_geostat.ipynb` usa `google.colab.files.upload()` para cargar CSV desde memoria local.
 - Reutiliza APIs reales del servicio (`load_csv`, autodetección, `set_variable_config`, EDA y variografía).
 - Visualiza resultados solo inline con Matplotlib (sin UI desktop).
+- Si `01_workbench_geostat.ipynb` no encuentra el módulo `app`, intenta autorecuperar ruta del repo (`/content/GeoStat_py`) y continuar.
