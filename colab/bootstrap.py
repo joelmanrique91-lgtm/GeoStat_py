@@ -14,12 +14,17 @@ import subprocess
 import sys
 from typing import Any
 
+DEFAULT_REPO_URL = "https://github.com/joelmanrique91-lgtm/GeoStat_py.git"
+DEFAULT_BRANCH = "main"
+DEFAULT_BASE_DIR = "/content"
+DEFAULT_REPO_DIR_NAME = "GeoStat_py"
+
 
 @dataclass
 class BootstrapConfig:
-    repo_url: str
-    repo_dir: Path
-    branch: str = ""
+    repo_url: str = DEFAULT_REPO_URL
+    repo_dir: Path = Path(DEFAULT_BASE_DIR) / DEFAULT_REPO_DIR_NAME
+    branch: str = DEFAULT_BRANCH
     mount_drive: bool = False
     drive_mount_point: str = "/content/drive"
 

@@ -21,3 +21,13 @@ Esta carpeta agrega una capa **temporal, aislada y reversible** para usar el mot
 ## Reversibilidad
 - Esta capa vive solo en `colab/`.
 - Al volver a tu entorno local desktop, puedes ignorarla o eliminarla sin afectar el proyecto principal.
+
+
+## Configuración por defecto
+`colab/00_bootstrap.ipynb` ya viene preconfigurado para este repo con:
+- `REPO_URL = "https://github.com/joelmanrique91-lgtm/GeoStat_py.git"`
+- `BRANCH = "main"`
+- `BASE_DIR = "/content"`
+- `REPO_DIR_NAME = "GeoStat_py"`
+
+Puedes editar estos valores si necesitas apuntar a otro fork/branch temporalmente.
