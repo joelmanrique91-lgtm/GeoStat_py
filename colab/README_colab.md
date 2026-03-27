@@ -19,3 +19,9 @@ Esta carpeta agrega una capa **temporal, aislada y reversible** para usar el mot
 ## Reversibilidad
 - Toda la capa vive dentro de `colab/`.
 - Al volver al entorno local desktop, puedes ignorarla o eliminarla sin afectar el proyecto principal.
+
+
+## Interactividad notebook (sin UI desktop)
+- El notebook principal expone `ANALYTICS_PARAMS` como bloque central de parámetros.
+- Incluye `recalculate_analysis(...)` para recalcular filtros, EDA y variografía inline al cambiar parámetros.
+- Flujo principal por celdas (estable); no depende de widgets.
