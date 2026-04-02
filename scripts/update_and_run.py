@@ -5,11 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.append(str(CURRENT_DIR))
+
+from repo_ops import PROJECT_ROOT, git_path, is_git_repo, run_capture
+
 LOGS_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOGS_DIR / "launcher.log"
 
@@ -35,29 +39,20 @@ def configure_logger() -> logging.Logger:
 
 def run_command(command: list[str], logger: logging.Logger, *, timeout: int = 180) -> tuple[int, str]:
     logger.info("$ %s", " ".join(command))
-    result = subprocess.run(
-        command,
-        cwd=PROJECT_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=timeout,
-    )
-    output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part).strip()
+    code, output = run_capture(command, timeout=timeout)
     if output:
         logger.info(output)
-    return result.returncode, output
+    return code, output
 
 
 def update_repository(logger: logging.Logger) -> None:
-    git_path = shutil.which("git")
-    if git_path is None:
+    detected_git = git_path()
+    if detected_git is None:
         logger.warning("Git no encontrado en PATH. Se omite actualización y se continúa con versión local.")
         return
 
-    logger.info("Git detectado: %s", git_path)
-    code, _ = run_command(["git", "rev-parse", "--is-inside-work-tree"], logger)
-    if code != 0:
+    logger.info("Git detectado: %s", detected_git)
+    if not is_git_repo():
         logger.warning("Directorio actual no es repo git válido. Se omite actualización.")
         return
 

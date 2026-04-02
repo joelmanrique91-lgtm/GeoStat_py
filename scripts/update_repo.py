@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+import sys
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.append(str(CURRENT_DIR))
+
+from repo_ops import git_path, is_git_repo, run_capture
 
 
 def run(cmd: list[str]) -> tuple[int, str]:
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT, text=True, capture_output=True, check=False)
-    output = (result.stdout or result.stderr or "").strip()
-    return result.returncode, output
+    return run_capture(cmd)
 
 
 def main() -> int:
     print("[GeoStat] Actualización segura del repositorio (app cerrada).")
+
+    detected_git = git_path()
+    if detected_git is None:
+        print("\nError: Git no encontrado en PATH.")
+        return 1
+
+    if not is_git_repo():
+        print("\nError: el directorio actual no es un repositorio Git válido.")
+        return 1
+
     code, out = run(["git", "pull", "--ff-only"])
     print("\n$ git pull --ff-only")
     print(out or "(sin salida)")
