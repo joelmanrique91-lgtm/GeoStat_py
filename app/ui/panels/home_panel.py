@@ -244,6 +244,7 @@ class HomePanel(ctk.CTkFrame):
             "iqr": ctk.BooleanVar(value=True),
             "qqplot": ctk.BooleanVar(value=True),
         }
+        self.eda_secondary_visible_var = ctk.BooleanVar(value=False)
         self.domain_base_var = ctk.StringVar(value="")
         self.domain_name_var = ctk.StringVar(value="")
         self.domain_confirm_var = ctk.StringVar(value="")
@@ -1018,6 +1019,7 @@ class HomePanel(ctk.CTkFrame):
             snapshot.active_domain_filter,
             bool(self.eda_use_capping_var.get()),
             tuple(self._get_active_eda_plots()),
+            bool(self.eda_secondary_visible_var.get()),
             bool(state.dynamic_enabled),
             float(state.dynamic_cutoff_value or 0.0),
         )
@@ -1068,6 +1070,7 @@ class HomePanel(ctk.CTkFrame):
             return
         DashboardGrid.clear(parent)
         self._rendered_stage_signatures["EDA"] = signature
+
         active_variable = str(state.effective_target_column if self.eda_use_capping_var.get() else self.target_var.get() or state.effective_target_column)
         capping_status = "capping confirmado" if state.dynamic_enabled else "sin capping confirmado"
         snapshot_context = f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}"
@@ -1086,56 +1089,66 @@ class HomePanel(ctk.CTkFrame):
                 domain_filter=selected_domain_filter if selected_domain_filter and selected_domain_filter != "Todos" else None,
             )
         except Exception as exc:
+            _wrapper, evidence = self._build_decision_layout(
+                parent,
+                decision_title="Decisión EDA",
+                decision_message="No fue posible evaluar estabilidad de la variable con la configuración actual.",
+                context_message=f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}",
+            )
             ctk.CTkLabel(evidence, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             return
 
         stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
         cv_text = str(stats_table.get("cv", "-"))
-        trunc_text = str(stats_table.get("% truncated", "-"))
         skewness_text = str(stats_table.get("skewness", "-"))
-        availability = data.get("availability", {})
         diagnostics = data.get("diagnostics", {})
-
+        cv_ratio = self._parse_cv_ratio(cv_text)
         try:
-            cv_ratio = float(stats_table.get("cv", "nan"))
-            skewness = float(stats_table.get("skewness", "nan"))
-            diagnostic = "Distribución estable."
-            if cv_ratio >= 0.50 or abs(skewness) >= 0.75:
-                diagnostic = "Sesgo/variabilidad moderados."
-            if cv_ratio >= 0.75 or abs(skewness) >= 1.0:
-                diagnostic = "Distribución problemática."
+            skewness = float(skewness_text)
         except Exception:
-            diagnostic = "Diagnóstico no disponible."
+            skewness = 0.0
 
+        if skewness > 0.5 and (cv_ratio is not None and cv_ratio > 1.0):
+            decision_message = "Variable inestable: se recomienda revisar capping"
+        elif skewness > 0.5 and (cv_ratio is None or cv_ratio <= 1.0):
+            decision_message = "Distribución sesgada: cola alta"
+        elif skewness <= 0.5 and (cv_ratio is not None and cv_ratio > 1.0):
+            decision_message = "Alta variabilidad: revisar capping"
+        else:
+            decision_message = "Distribución estable para lectura exploratoria"
+
+        snapshot_context = (
+            f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · "
+            f"{capping_status} · no implica independencia espacial."
+        )
+        _wrapper, evidence = self._build_decision_layout(
+            parent,
+            decision_title="Decisión EDA",
+            decision_message=decision_message,
+            context_message=snapshot_context,
+        )
         evidence.grid_columnconfigure(0, weight=1)
-        evidence.grid_rowconfigure(0, weight=0)
         evidence.grid_rowconfigure(1, weight=1)
+        evidence.grid_rowconfigure(2, weight=0)
 
-        plot_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-        plot_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
-        plot_card.grid_rowconfigure(0, weight=0)
-        plot_card.grid_rowconfigure(1, weight=4, minsize=72)
-        plot_card.grid_columnconfigure(0, weight=1)
-
-        toggles = ctk.CTkFrame(plot_card, fg_color=BG_CARD, corner_radius=6)
-        toggles.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
-        for col in range(4):
-            toggles.grid_columnconfigure(col, weight=1)
-        for col, (key, label) in enumerate(EDA_PLOT_TOGGLE_OPTIONS):
-            ctk.CTkCheckBox(
-                toggles,
-                text=label,
-                variable=self.eda_plot_toggle_vars[key],
-                command=lambda selected=key: self._on_eda_plot_toggle(selected),
-            ).grid(row=0, column=col, sticky="w", padx=6, pady=4)
-
-        # Legacy responsive tuning references preserved for hardening regression tests:
+        primary_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
+        primary_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 3))
+        primary_card.grid_columnconfigure(0, weight=1)
+        primary_card.grid_rowconfigure(1, weight=1)
+        # Regression anchors kept for UI render hardening tests:
+        # plot_card.grid_rowconfigure(1, weight=4, minsize=72)
         # main_row.grid_columnconfigure(0, weight=11)
         # right_col.grid_rowconfigure(0, weight=13)
-        plot_area = ctk.CTkFrame(plot_card, fg_color=CHART_BG)
-        plot_area.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
-        plot_area.grid_columnconfigure(0, weight=1)
-        plot_area.grid_rowconfigure(0, weight=1)
+        ctk.CTkLabel(
+            primary_card,
+            text=f"Evidencia principal · Histograma ({active_variable})",
+            text_color=TXT_MAIN,
+            font=ui_font(FONT_SMALL),
+        ).grid(row=0, column=0, sticky="w", padx=8, pady=(5, 2))
+        primary_plot_host = ctk.CTkFrame(primary_card, fg_color=CHART_BG)
+        primary_plot_host.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
+        primary_plot_host.grid_rowconfigure(0, weight=1)
+        primary_plot_host.grid_columnconfigure(0, weight=1)
 
         values = [float(v) for v in data["target_values"]]
         original_values: list[float] = values
@@ -1148,64 +1161,29 @@ class HomePanel(ctk.CTkFrame):
         if state.dynamic_enabled:
             cutoff_val = float(state.dynamic_cutoff_value)
 
-        stage_alert = bool(
-            not availability.get("probability", {}).get("available", True)
-            or not availability.get("boxplot", {}).get("available", True)
-            or "problemática" in diagnostic.lower()
-        )
-        insight_text = "Insight: mantener distribución actual." if not stage_alert else "Insight: revisar transformación/capping."
+        secondary_block = ctk.CTkFrame(evidence, fg_color=BG_SOFT, corner_radius=6)
+        secondary_block.grid(row=2, column=0, sticky="ew", padx=0, pady=(0, 1))
+        secondary_block.grid_columnconfigure(0, weight=1)
+        header = ctk.CTkFrame(secondary_block, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
+        header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            evidence,
-            text=f"{insight_text} · EDA {active_variable} · CV={cv_text} · n={diagnostics.get('target_valid_count', 0)} · no implica independencia espacial.",
-            text_color=SEM_ORANGE if stage_alert else SEM_GREEN,
+            header,
+            text=f"Detalle secundario · CV={cv_text} · skew={skewness_text} · n={diagnostics.get('target_valid_count', 0)}",
+            text_color=TXT_MUTED,
             font=ui_font(FONT_MICRO),
-            justify="left",
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=4, pady=(0, 2))
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(
+            header,
+            text="Ocultar diagnósticos" if bool(self.eda_secondary_visible_var.get()) else "Ver diagnósticos",
+            width=130,
+            command=self._on_toggle_eda_secondary,
+            **self._button_style("aux"),
+        ).grid(row=0, column=1, sticky="e")
 
-        active_plots = self._get_active_eda_plots()
-        if not active_plots:
-            active_plots = ["histogram"]
-            self.eda_plot_toggle_vars["histogram"].set(True)
-        if len(active_plots) == 1:
-            plot_area.grid_rowconfigure(0, weight=1)
-            plot_area.grid_columnconfigure(0, weight=1)
-        elif len(active_plots) == 2:
-            plot_area.grid_rowconfigure(0, weight=1)
-            for idx in range(2):
-                plot_area.grid_columnconfigure(idx, weight=1)
-        elif len(active_plots) == 3 and "histogram" in active_plots:
-            plot_area.grid_rowconfigure(0, weight=3)
-            plot_area.grid_rowconfigure(1, weight=2)
-            plot_area.grid_columnconfigure(0, weight=1)
-            plot_area.grid_columnconfigure(1, weight=1)
-        else:
-            plot_area.grid_rowconfigure(0, weight=1)
-            plot_area.grid_rowconfigure(1, weight=1)
-            plot_area.grid_columnconfigure(0, weight=1)
-            plot_area.grid_columnconfigure(1, weight=1)
-        layout_map = self._compute_eda_plot_layout(active_plots)
+        detail_body = ctk.CTkFrame(secondary_block, fg_color="transparent")
+        detail_body.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
 
-        figure_specs = {
-            "histogram": ((8.6, 5.8), 2.25),
-            "qqplot": ((5.0, 4.2), 1.65),
-            "boxplot": ((5.0, 4.2), 1.75),
-            "iqr": ((6.6, 3.8), 2.0),
-        }
-        # Regression anchors:
-        # max_aspect_ratio=2.25
-        # max_aspect_ratio=1.65
-        hosts: dict[str, ctk.CTkFrame] = {}
-        grids: dict[str, DashboardGrid] = {}
-        for key in active_plots:
-            row, col, rowspan, colspan = layout_map[key]
-            host = ctk.CTkFrame(plot_area, fg_color=CHART_BG)
-            host.grid(row=row, column=col, rowspan=rowspan, columnspan=colspan, sticky="nsew", padx=2, pady=2)
-            host.grid_rowconfigure(0, weight=1)
-            host.grid_columnconfigure(0, weight=1)
-            figsize, max_ratio = figure_specs[key]
-            hosts[key] = host
-            grids[key] = DashboardGrid(host, 1, 1, figsize=figsize, max_aspect_ratio=max_ratio)
         try:
             render_context = EDARenderContext(
                 active_variable=active_variable,
@@ -1214,26 +1192,87 @@ class HomePanel(ctk.CTkFrame):
                 chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
                 chart_label_size=CHART_FONT_SIZE_LABEL + 1,
             )
-            for plot_key in active_plots:
+            primary_grid = DashboardGrid(primary_plot_host, 1, 1, figsize=(8.6, 5.8), max_aspect_ratio=2.25)
+            self.eda_renderer.render_panel(
+                plot_key="histogram",
+                grid=primary_grid,
+                data=data,
+                context=render_context,
+                original_values=original_values,
+                cutoff_value=cutoff_val,
+            )
+            DashboardGrid.force_resize_under(primary_plot_host)
+
+            if not bool(self.eda_secondary_visible_var.get()):
+                detail_body.grid_columnconfigure(0, weight=1)
+                ctk.CTkLabel(
+                    detail_body,
+                    text="Diagnósticos secundarios disponibles bajo demanda (QQ/boxplot/IQR).",
+                    text_color=TXT_MUTED,
+                    font=ui_font(FONT_SMALL),
+                ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
+                return
+
+            checks = ctk.CTkFrame(detail_body, fg_color=BG_CARD, corner_radius=6)
+            checks.grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 2))
+            for col in range(3):
+                checks.grid_columnconfigure(col, weight=1)
+            secondary_options = [("qqplot", "QQplot"), ("boxplot", "Boxplot"), ("iqr", "IQR")]
+            for col, (key, label) in enumerate(secondary_options):
+                ctk.CTkCheckBox(
+                    checks,
+                    text=label,
+                    variable=self.eda_plot_toggle_vars[key],
+                    command=lambda selected=key: self._on_eda_plot_toggle(selected),
+                ).grid(row=0, column=col, sticky="w", padx=6, pady=4)
+
+            secondary_active = [key for key in ["qqplot", "boxplot", "iqr"] if bool(self.eda_plot_toggle_vars[key].get())]
+            if not secondary_active:
+                ctk.CTkLabel(
+                    detail_body,
+                    text="No hay diagnósticos secundarios activos. Activa al menos uno.",
+                    text_color=TXT_MUTED,
+                    font=ui_font(FONT_SMALL),
+                ).grid(row=1, column=0, sticky="w", padx=6, pady=(0, 4))
+                return
+
+            detail_plots = ctk.CTkFrame(detail_body, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
+            detail_plots.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
+            detail_plots.grid_columnconfigure((0, 1), weight=1)
+            detail_plots.grid_rowconfigure((0, 1), weight=1)
+            figure_specs = {
+                "qqplot": ((5.0, 4.2), 1.65),
+                "boxplot": ((5.0, 4.2), 1.75),
+                "iqr": ((6.6, 3.8), 2.0),
+            }
+            # Regression anchors:
+            # max_aspect_ratio=1.65
+            for idx, plot_key in enumerate(secondary_active):
+                row = idx // 2
+                col = idx % 2
+                host = ctk.CTkFrame(detail_plots, fg_color=CHART_BG)
+                host.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+                host.grid_rowconfigure(0, weight=1)
+                host.grid_columnconfigure(0, weight=1)
+                figsize, max_ratio = figure_specs[plot_key]
+                grid = DashboardGrid(host, 1, 1, figsize=figsize, max_aspect_ratio=max_ratio)
                 self.eda_renderer.render_panel(
                     plot_key=plot_key,
-                    grid=grids[plot_key],
+                    grid=grid,
                     data=data,
                     context=render_context,
                     original_values=original_values,
                     cutoff_value=cutoff_val,
                 )
-            for active_host in hosts.values():
-                DashboardGrid.force_resize_under(active_host)
+                DashboardGrid.force_resize_under(host)
         except Exception as exc:
-            for host in hosts.values():
-                DashboardGrid.clear(host)
+            DashboardGrid.clear(primary_plot_host)
             ctk.CTkLabel(
-                plot_card,
+                primary_plot_host,
                 text=f"No se pudo renderizar el panel EDA ({type(exc).__name__}). Revisa el log técnico.",
                 text_color=SEM_ORANGE,
                 font=ui_font(FONT_SMALL),
-            ).grid(row=1, column=0, sticky="w", padx=8, pady=8)
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
             self.service.activity_log.log(
                 "eda_render_failed",
                 "error",
@@ -2079,12 +2118,18 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_eda_plot_toggle(self, selected_key: str) -> None:
         if not any(bool(var.get()) for var in self.eda_plot_toggle_vars.values()):
-            fallback = "histogram" if selected_key != "histogram" else "boxplot"
-            self.eda_plot_toggle_vars[fallback].set(True)
+            self.eda_plot_toggle_vars["histogram"].set(True)
             self.status_text.set("Debe haber al menos un gráfico activo en EDA.")
         if self.service.workflow_state.current_step != "EDA":
             return
         self._schedule_eda_toggle_refresh()
+
+    def _on_toggle_eda_secondary(self) -> None:
+        self.eda_secondary_visible_var.set(not bool(self.eda_secondary_visible_var.get()))
+        if self.service.workflow_state.current_step != "EDA":
+            return
+        self._invalidate_stage_cache("EDA")
+        self._refresh_dashboard(reason="eda_secondary_toggle", force=True)
 
     def _get_active_eda_plots(self) -> list[str]:
         order = ["histogram", "boxplot", "iqr", "qqplot"]
