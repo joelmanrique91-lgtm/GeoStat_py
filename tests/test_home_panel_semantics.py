@@ -92,6 +92,25 @@ class HomePanelSemanticsTests(unittest.TestCase):
         hint = _build_active_step_hint("Dominios", state)
         self.assertIn("Advertencia", hint)
 
+    def test_workflow_stage_label_prioritizes_warning_marker_when_ready_with_warning(self) -> None:
+        readiness = WorkflowReadinessState(
+            current_step="Datos",
+            analysis_context=self._build_state({}).analysis,
+            has_dataset=True,
+            has_variable_config=True,
+            stages={
+                "data": StageReadiness(ready=True),
+                "eda": StageReadiness(ready=True),
+                "cutoffs": StageReadiness(ready=True),
+                "spatial": StageReadiness(ready=True),
+                "domains": StageReadiness(ready=True, warnings=("low_data_after_domain_filter",)),
+                "variography": StageReadiness(ready=True),
+            },
+        )
+        label_domains = _build_workflow_stage_label("Dominios", "Datos", readiness)
+        self.assertIn("⚠ ALERTA", label_domains)
+        self.assertNotIn("✓ LISTO", label_domains)
+
     def test_context_chip_texts_prioritize_global_context_microcopy(self) -> None:
         state = self._build_state(
             {

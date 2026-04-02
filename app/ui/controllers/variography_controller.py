@@ -13,8 +13,9 @@ class VariographyController:
 
     def compute(self, ui_state: dict[str, object]) -> dict[str, object]:
         response = self.service.compute_experimental_variography(ui_state)
+        requested_n_lags = self._safe_int(ui_state.get("n_lags"), default=16)
         defaults = self.service.estimate_variography_defaults(
-            n_lags=int(ui_state.get("n_lags") or 16),
+            n_lags=requested_n_lags,
             context_snapshot=self.service.get_analysis_context_snapshot(),
         )
         payload = {
@@ -43,6 +44,18 @@ class VariographyController:
             }
             payload["metadata"] = dict(response.result.metadata)
         return payload
+
+    @staticmethod
+    def _safe_int(value: object, *, default: int) -> int:
+        try:
+            if value is None:
+                return default
+            normalized = str(value).strip()
+            if not normalized:
+                return default
+            return int(float(normalized))
+        except (TypeError, ValueError):
+            return default
 
     def mark_dirty(self, target_col: str) -> None:
         session = self.service.get_variography_session()

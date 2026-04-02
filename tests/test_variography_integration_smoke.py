@@ -61,6 +61,34 @@ class VariographyIntegrationSmokeTests(unittest.TestCase):
         self.assertLess(float(initial["max_distance"]), 160.0)
         self.assertGreater(float(initial["lag_distance"]), 0.0)
 
+    def test_controller_compute_handles_invalid_n_lags_without_crash(self) -> None:
+        service = GeostatService(adapter=GeostatSpyAdapter())
+        csv_path = Path("tests/fixtures/variography/variography_small_numeric.csv")
+        self.assertTrue(service.load_csv(str(csv_path)).success)
+        self.assertTrue(service.set_variable_config("x", "y", "z", "target").success)
+        controller = VariographyController(service=service)
+
+        for invalid in ("", "abc", "12.5", None):
+            response = controller.compute(
+                {
+                    "target_col": "target",
+                    "lag_distance": 10.0,
+                    "n_lags": invalid,
+                    "lag_tolerance": 5.0,
+                    "max_distance": 60.0,
+                    "azimuth": 0.0,
+                    "dip": 0.0,
+                    "ang_tol_h": 90.0,
+                    "ang_tol_v": 90.0,
+                    "band_width": 0.0,
+                    "band_height": 0.0,
+                    "estimator": "classical",
+                }
+            )
+            self.assertIn("ok", response)
+            self.assertIn("metadata", response)
+            self.assertIn("recommended_max_distance", response["metadata"])
+
 
 if __name__ == "__main__":
     unittest.main()

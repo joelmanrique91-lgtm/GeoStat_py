@@ -32,6 +32,30 @@ from app.services.visualization_service import compute_experimental_variogram
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value: object, default: float) -> float:
+    try:
+        if value is None:
+            return default
+        normalized = str(value).strip()
+        if not normalized:
+            return default
+        return float(normalized)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: object, default: int) -> int:
+    try:
+        if value is None:
+            return default
+        normalized = str(value).strip()
+        if not normalized:
+            return default
+        return int(float(normalized))
+    except (TypeError, ValueError):
+        return default
+
+
 class VariographyApplicationService:
     """Orchestrates request validation, computation wrapping and response normalization."""
 
@@ -63,18 +87,18 @@ class VariographyApplicationService:
             target_col=target,
             estimator=str(params.get("estimator") or "classical"),
             lag=LagDefinition(
-                lag_distance=float(params.get("lag_distance", 0.0)),
-                n_lags=int(params.get("n_lags", 0)),
-                lag_tolerance=float(params.get("lag_tolerance", 0.0)),
-                max_distance=float(params.get("max_distance", 0.0)),
+                lag_distance=_safe_float(params.get("lag_distance", 0.0), 0.0),
+                n_lags=_safe_int(params.get("n_lags", 0), 0),
+                lag_tolerance=_safe_float(params.get("lag_tolerance", 0.0), 0.0),
+                max_distance=_safe_float(params.get("max_distance", 0.0), 0.0),
             ),
             direction=DirectionDefinition(
-                azimuth=float(params.get("azimuth", 0.0)),
-                dip=float(params.get("dip", 0.0)),
-                ang_tol_h=float(params.get("ang_tol_h", 90.0)),
-                ang_tol_v=float(params.get("ang_tol_v", 90.0)),
-                band_width=float(params.get("band_width", 0.0)),
-                band_height=float(params.get("band_height", 0.0)),
+                azimuth=_safe_float(params.get("azimuth", 0.0), 0.0),
+                dip=_safe_float(params.get("dip", 0.0), 0.0),
+                ang_tol_h=_safe_float(params.get("ang_tol_h", 90.0), 90.0),
+                ang_tol_v=_safe_float(params.get("ang_tol_v", 90.0), 90.0),
+                band_width=_safe_float(params.get("band_width", 0.0), 0.0),
+                band_height=_safe_float(params.get("band_height", 0.0), 0.0),
             ),
         )
         return request
