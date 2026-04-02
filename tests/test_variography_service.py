@@ -92,6 +92,32 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertIn("INVALID_N_LAGS", codes)
         self.assertIn("INVALID_MAX_DISTANCE", codes)
 
+    def test_compute_blocks_invalid_directional_params(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "azimuth": 0.0,
+                "dip": 120.0,
+                "ang_tol_h": 95.0,
+                "ang_tol_v": -1.0,
+                "band_width": 0.0,
+                "band_height": 0.0,
+                "model": self._model_payload(),
+            }
+        )
+        self.assertFalse(response.ok)
+        codes = {item.code for item in response.blockers}
+        self.assertIn("INVALID_ANG_TOL_H", codes)
+        self.assertIn("INVALID_ANG_TOL_V", codes)
+        self.assertIn("INVALID_DIP", codes)
+
     def test_compute_returns_low_npairs_warning(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
         self.assertTrue(self.service.load_csv(str(csv_path)).success)
@@ -184,6 +210,31 @@ class VariographyServiceTests(unittest.TestCase):
         else:
             self.assertLessEqual(sum(directional.result.pair_counts), sum(base.result.pair_counts))
             self.assertTrue(bool(directional.result.metadata.get("direction_applied")))
+
+    def test_compute_is_reproducible_for_same_inputs(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        params = {
+            "target_col": "target",
+            "lag_distance": 10.0,
+            "n_lags": 5,
+            "lag_tolerance": 5.0,
+            "max_distance": 60.0,
+            "azimuth": 25.0,
+            "dip": 0.0,
+            "ang_tol_h": 35.0,
+            "ang_tol_v": 35.0,
+            "band_width": 0.0,
+            "band_height": 0.0,
+            "model": self._model_payload(),
+        }
+        a = self.service.compute_experimental_variography(params)
+        b = self.service.compute_experimental_variography(params)
+        self.assertIsNotNone(a.result)
+        self.assertIsNotNone(b.result)
+        self.assertEqual(a.result.pair_counts, b.result.pair_counts)
+        self.assertEqual(a.result.gamma_values, b.result.gamma_values)
 
     def test_compute_no_pairs_in_range_returns_specific_blocker(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"

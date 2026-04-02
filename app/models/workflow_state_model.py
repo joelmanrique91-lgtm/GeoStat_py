@@ -20,6 +20,7 @@ class WorkflowStateModel:
     cutoff_limits: list[float] = field(default_factory=list)
     cutoff_labels: list[str] = field(default_factory=list)
     cutoff_output_column: str = ""
+    cutoff_source_column: str = ""
     effective_target_column: str = ""
     dynamic_cutoff_enabled: bool = False
     dynamic_cutoff_target_column: str = ""
@@ -28,6 +29,7 @@ class WorkflowStateModel:
     dynamic_cutoff_value: float = 0.0
     dynamic_cutoff_output_column: str = ""
     dynamic_cutoff_category_column: str = ""
+    dynamic_cutoff_source_column: str = ""
     domain_layers_order: list[str] = field(default_factory=list)
     domain_active_layers: list[str] = field(default_factory=list)
     domain_output_column: str = ""

@@ -121,12 +121,16 @@ class VariographyApplicationService:
         self.session.estimator = request.estimator
         blockers = self._validate_request(request)
         warnings: list[VariographyIssue] = []
-        if request.direction.ang_tol_h <= 0 or request.direction.ang_tol_v <= 0:
-            blockers.append(VariographyIssue("INVALID_DIRECTION_TOL", "Las tolerancias angulares deben ser > 0.", "blocker"))
         if request.direction.band_width < 0 or request.direction.band_height < 0:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
-        if request.direction.ang_tol_h > 90 or request.direction.ang_tol_v > 90:
-            warnings.append(VariographyIssue("WIDE_DIRECTION_TOL", "Tolerancias angulares altas pueden mezclar direcciones.", "warning"))
+        if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
+            warnings.append(
+                VariographyIssue(
+                    "NEAR_OMNIDIRECTIONAL_WINDOW",
+                    "Tolerancias angulares cercanas a 90°: análisis prácticamente omnidireccional.",
+                    "warning",
+                )
+            )
         if request.estimator != "classical":
             warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
 
@@ -416,7 +420,7 @@ class VariographyApplicationService:
         warnings.append(
             VariographyIssue(
                 "THEORETICAL_ANISOTROPY_SIMPLIFIED",
-                "Anisotropía estructural teórica simplificada: el cálculo de curva usa principalmente range_major.",
+                "Anisotropía estructural simplificada: la curva teórica usa rango isotrópico equivalente (media geométrica de ejes).",
                 "warning",
             )
         )
@@ -485,6 +489,12 @@ class VariographyApplicationService:
             issues.append(VariographyIssue("INVALID_MAX_DISTANCE", "max_distance debe ser > 0.", "blocker"))
         if request.lag.lag_tolerance <= 0:
             issues.append(VariographyIssue("INVALID_LAG_TOLERANCE", "lag_tolerance debe ser > 0.", "blocker"))
+        if request.direction.ang_tol_h <= 0 or request.direction.ang_tol_h > 90:
+            issues.append(VariographyIssue("INVALID_ANG_TOL_H", "ang_tol_h debe estar en (0, 90].", "blocker"))
+        if request.direction.ang_tol_v <= 0 or request.direction.ang_tol_v > 90:
+            issues.append(VariographyIssue("INVALID_ANG_TOL_V", "ang_tol_v debe estar en (0, 90].", "blocker"))
+        if request.direction.dip < -90 or request.direction.dip > 90:
+            issues.append(VariographyIssue("INVALID_DIP", "dip debe estar en [-90, 90].", "blocker"))
         if request.lag.max_distance <= request.lag.lag_distance:
             issues.append(VariographyIssue("MAX_DISTANCE_TOO_SMALL", "max_distance debe ser mayor que lag_distance.", "blocker"))
         return issues
