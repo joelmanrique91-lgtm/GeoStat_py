@@ -1,0 +1,10 @@
+# Minimal dependencies for temporary analytical use in Google Colab.
+# NOTE: customtkinter is included only because app/main.py imports it and
+# GeostatService import chain may traverse package-level modules in some contexts.
+customtkinter
+numpy
+pandas
+scipy
+matplotlib
+scikit-learn
+jupyter
