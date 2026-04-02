@@ -128,6 +128,7 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
         ]
         if isinstance(model_meta, dict):
             nugget_meta = model_meta.get("nugget", {}) if isinstance(model_meta.get("nugget"), dict) else {}
+            usage_warnings = model_meta.get("usage_warnings", []) if isinstance(model_meta.get("usage_warnings"), list) else []
             lines.extend(
                 [
                     f"sill: {model_meta.get('sill', '-')}",
@@ -136,6 +137,8 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
                     f"usage_target: {model_meta.get('usage_target', '-')}",
                 ]
             )
+            if usage_warnings:
+                lines.append(f"usage_warnings: {len(usage_warnings)}")
         ax_meta.text(0.03, 0.96, "\n".join(lines), va="top", ha="left", fontsize=context.chart_label_size, color=context.chart_text_color)
         grid.render()
         grid.canvas.draw_idle()

@@ -45,6 +45,7 @@ class VariographyStageView:
         self.status_var = ctk.StringVar(value="Configura parámetros y ejecuta cálculo experimental.")
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
+        self.usage_warning_var = ctk.StringVar(value="")
         self._plot_host: ctk.CTkFrame | None = None
         self._compute_button: ctk.CTkButton | None = None
         self._compute_in_progress = False
@@ -129,6 +130,7 @@ class VariographyStageView:
         alerts = ctk.CTkFrame(results, fg_color="transparent")
         alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
         ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
 
         cached = self._session.last_response
@@ -263,6 +265,8 @@ class VariographyStageView:
                         "range_vertical": ctk.StringVar(value=f"{float(item.get('range_vertical', 40.0)):.6g}"),
                         "azimuth": ctk.StringVar(value=f"{float(item.get('azimuth', 0.0)):.6g}"),
                         "dip": ctk.StringVar(value=f"{float(item.get('dip', 0.0)):.6g}"),
+                        "lock_contribution": ctk.BooleanVar(value=bool(item.get("lock_contribution", False))),
+                        "lock_range": ctk.BooleanVar(value=bool(item.get("lock_range", False))),
                     }
                 )
         if not self._structure_rows:
@@ -281,14 +285,18 @@ class VariographyStageView:
             row = idx + 1
             line = ctk.CTkFrame(self._structures_frame, fg_color="transparent")
             line.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=1)
-            for col in range(8):
+            for col in range(10):
                 line.grid_columnconfigure(col, weight=1)
             ctk.CTkCheckBox(line, text="", width=20, variable=row_vars["active"]).grid(row=0, column=0, padx=1)
             ctk.CTkOptionMenu(line, variable=row_vars["type"], values=["spherical", "exponential", "gaussian", "linear"], width=98).grid(row=0, column=1, padx=1)
             for col, key in enumerate(["contribution", "range_major", "range_minor", "range_vertical", "azimuth", "dip"], start=2):
                 ctk.CTkEntry(line, textvariable=row_vars[key], width=62, height=28).grid(row=0, column=col, padx=1)
+            locks = ctk.CTkFrame(line, fg_color="transparent")
+            locks.grid(row=0, column=8, padx=1)
+            ctk.CTkCheckBox(locks, text="Lc", width=24, variable=row_vars["lock_contribution"]).pack(side="left", padx=1)
+            ctk.CTkCheckBox(locks, text="Lr", width=24, variable=row_vars["lock_range"]).pack(side="left", padx=1)
             ops = ctk.CTkFrame(line, fg_color="transparent")
-            ops.grid(row=0, column=8, padx=1)
+            ops.grid(row=0, column=9, padx=1)
             ctk.CTkButton(ops, text="D", width=24, command=lambda i=idx: self._mutate_structure("dup", i)).pack(side="left", padx=1)
             ctk.CTkButton(ops, text="-", width=24, command=lambda i=idx: self._mutate_structure("del", i)).pack(side="left", padx=1)
 
@@ -315,6 +323,8 @@ class VariographyStageView:
             "range_vertical": self._parse_float(str(row_vars["range_vertical"].get())),
             "azimuth": self._parse_float(str(row_vars["azimuth"].get())),
             "dip": self._parse_float(str(row_vars["dip"].get())),
+            "lock_contribution": bool(row_vars["lock_contribution"].get()),
+            "lock_range": bool(row_vars["lock_range"].get()),
         }
 
     def _bind_dirty_traces(self) -> None:
@@ -424,8 +434,14 @@ class VariographyStageView:
             self.blocker_var.set("\n".join(blockers) if blockers else "")
             result = response.get("result")
             if not isinstance(result, dict):
+                self.usage_warning_var.set("")
                 self._render_compute_failure_panel(response)
                 return
+            model_meta = result.get("metadata", {}).get("model", []) if isinstance(result.get("metadata", {}), dict) else {}
+            usage_warnings = model_meta.get("usage_warnings", []) if isinstance(model_meta, dict) else []
+            self.usage_warning_var.set(
+                "\n".join([f"[USAGE] {str(item)}" for item in usage_warnings]) if isinstance(usage_warnings, list) and usage_warnings else ""
+            )
             self._render_result_plot(result, bool(response.get("ok", False)))
             logger.info(
                 "Variography UI render success | ok=%s lag_len=%s gamma_len=%s pair_len=%s",

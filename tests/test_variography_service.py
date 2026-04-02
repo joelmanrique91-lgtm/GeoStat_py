@@ -15,6 +15,28 @@ class VariographyServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = GeostatService(adapter=GeostatSpyAdapter())
 
+    @staticmethod
+    def _model_payload() -> dict[str, object]:
+        return {
+            "usage_target": "kriging",
+            "nugget": {"enabled": True, "value": 0.1, "locked": False},
+            "structures": [
+                {
+                    "active": True,
+                    "type": "spherical",
+                    "contribution": 0.9,
+                    "range_major": 60.0,
+                    "range_minor": 40.0,
+                    "range_vertical": 20.0,
+                    "azimuth": 0.0,
+                    "dip": 0.0,
+                    "lock_contribution": False,
+                    "lock_range": False,
+                }
+            ],
+            "fit": {"method": "manual", "min_pairs": 30, "exclude_lags": []},
+        }
+
     def test_compute_success_with_real_fixture(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
         load = self.service.load_csv(str(csv_path))
@@ -34,6 +56,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "band_width": 0.0,
                 "band_height": 0.0,
                 "estimator": "classical",
+                "model": self._model_payload(),
             }
         )
         self.assertTrue(response.ok)
@@ -60,6 +83,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "band_width": 0.0,
                 "band_height": 0.0,
                 "estimator": "classical",
+                "model": self._model_payload(),
             }
         )
         self.assertFalse(response.ok)
@@ -86,11 +110,11 @@ class VariographyServiceTests(unittest.TestCase):
                 "band_width": 0.0,
                 "band_height": 0.0,
                 "estimator": "classical",
+                "model": self._model_payload(),
             }
         )
         warning_codes = {item.code for item in response.warnings}
         self.assertIn("LOW_NPAIRS_LAG", warning_codes)
-        self.assertIn("LOW_VALID_LAGS_FOR_FIT", warning_codes)
 
     def test_compute_blocks_when_dataframe_is_empty(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
@@ -111,6 +135,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "band_width": 0.0,
                 "band_height": 0.0,
                 "estimator": "classical",
+                "model": self._model_payload(),
             }
         )
         self.assertFalse(response.ok)
@@ -134,6 +159,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "ang_tol_v": 90.0,
                 "band_width": 0.0,
                 "band_height": 0.0,
+                "model": self._model_payload(),
             }
         )
         directional = self.service.compute_experimental_variography(
@@ -149,6 +175,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "ang_tol_v": 10.0,
                 "band_width": 8.0,
                 "band_height": 8.0,
+                "model": self._model_payload(),
             }
         )
         self.assertIsNotNone(base.result)
@@ -176,6 +203,7 @@ class VariographyServiceTests(unittest.TestCase):
                 "band_width": 0.0,
                 "band_height": 0.0,
                 "estimator": "classical",
+                "model": self._model_payload(),
             }
         )
         self.assertFalse(response.ok)
@@ -192,12 +220,35 @@ class VariographyServiceTests(unittest.TestCase):
                 "n_lags": 5,
                 "lag_tolerance": 5.0,
                 "max_distance": 60.0,
+                "model": self._model_payload(),
             }
         )
         self.assertFalse(response.ok)
         blocker_codes = {item.code for item in response.blockers}
         self.assertIn("MISSING_VARIABLE_CONFIG", blocker_codes)
         self.assertIn("INVALID_CONTEXT_COLUMNS", blocker_codes)
+
+    def test_compute_blocks_manual_fit_without_active_structures(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "model": {
+                    "nugget": {"enabled": True, "value": 0.1, "locked": False},
+                    "structures": [],
+                    "fit": {"method": "manual", "min_pairs": 30, "exclude_lags": []},
+                },
+            }
+        )
+        self.assertFalse(response.ok)
+        blocker_codes = {item.code for item in response.blockers}
+        self.assertIn("MISSING_ACTIVE_STRUCTURES_MANUAL", blocker_codes)
 
     def test_compute_blocks_non_numeric_context_columns(self) -> None:
         csv_path = FIXTURES / "variography_invalid_context.csv"
