@@ -105,7 +105,12 @@ set GEOSTAT_ENABLE_RUNTIME_GIT_UPDATE=1
 python -m app.main
 ```
 
-## 7) Mantenimiento / contribución
+## 7) Documentación técnica
+
+- Punto de entrada recomendado: `docs/README.md`.
+- Auditorías y reportes históricos se mantienen en `docs/` para trazabilidad.
+
+## 8) Mantenimiento / contribución
 
 - Mantener cambios acotados por capa (`models`, `services`, `ui`).
 - Preferir pruebas unitarias o de contrato cuando se toquen servicios.

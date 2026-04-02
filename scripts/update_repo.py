@@ -16,8 +16,8 @@ def run(cmd: list[str]) -> tuple[int, str]:
 
 def main() -> int:
     print("[GeoStat] Actualización segura del repositorio (app cerrada).")
-    code, out = run(["git", "pull"])
-    print("\n$ git pull")
+    code, out = run(["git", "pull", "--ff-only"])
+    print("\n$ git pull --ff-only")
     print(out or "(sin salida)")
     if code != 0:
         print("\nError: falló git pull.")
