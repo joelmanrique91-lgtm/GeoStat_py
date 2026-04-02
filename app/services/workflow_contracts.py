@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN_ESTIMATION_COLUMN = "domain_estimation"
 DOMAINS_MODULE_DISABLED_REASON = "domains_module_disabled"
-DOMAINS_MODULE_DISABLED_MESSAGE = "Módulo Dominios temporalmente deshabilitado."
+DOMAINS_MODULE_DISABLED_MESSAGE = "Módulo Dominios no implementado en esta versión (solo placeholder de interfaz)."
 
 BLOCKING_REASON_HINTS = {
     "missing_dataset": "Carga un CSV para continuar.",

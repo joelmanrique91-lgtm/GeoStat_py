@@ -1489,7 +1489,7 @@ class HomePanel(ctk.CTkFrame):
         wrapper, visual_host = self._build_decision_layout(
             parent,
             decision_title="Evidencia espacial secundaria (3D)",
-            decision_message="Usar 3D como verificación exploratoria; la lectura principal de continuidad se realiza en 2D.",
+            decision_message="Usar 3D como verificación exploratoria; NO sustituye variografía formal ni inferencia geoestadística.",
             context_message=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)} · Modo 3D PoC.",
         )
         wrapper.grid_rowconfigure(1, weight=1)

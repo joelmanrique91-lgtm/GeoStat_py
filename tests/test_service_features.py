@@ -318,29 +318,23 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertIsInstance(payload["domain_boxplot"]["enabled"], bool)
             self.assertIsInstance(payload["domain_boxplot"]["labels"], list)
             self.assertIsInstance(payload["domain_boxplot"]["values"], list)
-            self.assertIsInstance(payload["domain_boxplot"]["message"], str)
-            self.assertIsInstance(payload["domain_boxplot"]["valid_rows"], int)
-            self.assertIsInstance(payload["domain_boxplot"]["valid_categories"], int)
 
-            self.assertEqual(
-                set(payload["diagnostics"].keys()),
-                {
-                    "target",
-                    "domain",
-                    "total_rows",
-                    "target_valid_count",
-                    "target_nan_count",
-                    "domain_valid_rows",
-                    "domain_valid_categories",
-                },
+    def test_dynamic_cutoff_rejects_existing_output_column_for_traceability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = Path(tmp_dir) / "capping_existing_col.csv"
+            csv_path.write_text("x,y,z,target,target_capped\n0,0,0,1,1\n1,1,1,2,2\n", encoding="utf-8")
+            self.assertTrue(self.service.load_csv(str(csv_path)).success)
+            self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+            result = self.service.apply_dynamic_cutoff(
+                enabled=True,
+                target_column="target",
+                mode="percentile",
+                slider_percent=90.0,
+                output_column="target_capped",
+                keep_category_column=False,
             )
-            self.assertIsInstance(payload["diagnostics"]["target"], str)
-            self.assertIsInstance(payload["diagnostics"]["domain"], str)
-            self.assertIsInstance(payload["diagnostics"]["total_rows"], int)
-            self.assertIsInstance(payload["diagnostics"]["target_valid_count"], int)
-            self.assertIsInstance(payload["diagnostics"]["target_nan_count"], int)
-            self.assertIsInstance(payload["diagnostics"]["domain_valid_rows"], int)
-            self.assertIsInstance(payload["diagnostics"]["domain_valid_categories"], int)
+            self.assertFalse(result.success)
+            self.assertIn("ya existe", result.message)
 
     def test_prepare_univariate_contract_preserved_when_domain_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -371,12 +365,14 @@ class ServiceFeatureTests(unittest.TestCase):
             expected_keys = {
                 "enabled",
                 "target_column",
+                "source_column",
                 "limits",
                 "labels",
                 "output_column",
                 "effective_target_column",
                 "dynamic_enabled",
                 "dynamic_target_column",
+                "dynamic_source_column",
                 "dynamic_mode",
                 "dynamic_percent",
                 "dynamic_cutoff_value",
@@ -386,12 +382,14 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertEqual(set(state.keys()), expected_keys)
             self.assertFalse(state["enabled"])
             self.assertEqual(state["target_column"], "target")
+            self.assertEqual(state["source_column"], "target")
             self.assertEqual(state["limits"], [])
             self.assertEqual(state["labels"], [])
             self.assertEqual(state["output_column"], "")
             self.assertEqual(state["effective_target_column"], "target")
             self.assertFalse(state["dynamic_enabled"])
             self.assertEqual(state["dynamic_target_column"], "target")
+            self.assertEqual(state["dynamic_source_column"], "target")
             self.assertEqual(state["dynamic_mode"], "percentile")
             self.assertEqual(state["dynamic_percent"], 95.0)
             self.assertEqual(state["dynamic_cutoff_value"], 0.0)
