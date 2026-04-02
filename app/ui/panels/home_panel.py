@@ -945,7 +945,9 @@ class HomePanel(ctk.CTkFrame):
             self._render_blocked_stage_view(stage, stage_host)
             self._rendered_stage_signatures[stage] = ("blocked",)
             return
+        self._render_stage_ready_view(stage, stage_host, force_rebuild=force_rebuild)
 
+    def _render_stage_ready_view(self, stage: str, stage_host: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         if stage == "Datos":
             if not force_rebuild and self._rendered_stage_signatures.get(stage) == ("ready",):
                 return
@@ -993,6 +995,40 @@ class HomePanel(ctk.CTkFrame):
         self.workspace_subtitle_var.set("")
         self._render_variography_view(stage_host, force_rebuild=force_rebuild)
 
+    def _build_eda_render_signature(self, operational: GeostatOperationalState) -> tuple[object, ...]:
+        state = operational.cutoff
+        snapshot = operational.analysis
+        return (
+            snapshot.resolved_target_column,
+            snapshot.active_domain_column,
+            snapshot.active_domain_filter,
+            bool(self.eda_use_capping_var.get()),
+            tuple(self._get_active_eda_plots()),
+            bool(state.dynamic_enabled),
+            float(state.dynamic_cutoff_value or 0.0),
+        )
+
+    def _compute_eda_plot_layout(self, active_plots: list[str]) -> dict[str, tuple[int, int, int, int]]:
+        layout_map: dict[str, tuple[int, int, int, int]] = {}
+        if len(active_plots) == 1:
+            layout_map[active_plots[0]] = (0, 0, 1, 1)
+            return layout_map
+        if len(active_plots) == 2:
+            layout_map[active_plots[0]] = (0, 0, 1, 1)
+            layout_map[active_plots[1]] = (0, 1, 1, 1)
+            return layout_map
+        if len(active_plots) == 3 and "histogram" in active_plots:
+            layout_map["histogram"] = (0, 0, 1, 2)
+            remaining = [key for key in active_plots if key != "histogram"]
+            layout_map[remaining[0]] = (1, 0, 1, 1)
+            layout_map[remaining[1]] = (1, 1, 1, 1)
+            return layout_map
+        for idx, key in enumerate(active_plots):
+            row = idx // 2
+            col = idx % 2
+            layout_map[key] = (row, col, 1, 1)
+        return layout_map
+
     def _render_blocked_stage_view(self, stage: str, parent: ctk.CTkFrame) -> None:
         card = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
         card.grid(row=0, column=0, sticky="nsew")
@@ -1013,15 +1049,7 @@ class HomePanel(ctk.CTkFrame):
         operational = self.service.get_operational_state()
         state = operational.cutoff
         snapshot = operational.analysis
-        signature = (
-            snapshot.resolved_target_column,
-            snapshot.active_domain_column,
-            snapshot.active_domain_filter,
-            bool(self.eda_use_capping_var.get()),
-            tuple(self._get_active_eda_plots()),
-            bool(state.dynamic_enabled),
-            float(state.dynamic_cutoff_value or 0.0),
-        )
+        signature = self._build_eda_render_signature(operational)
         if not force_rebuild and self._rendered_stage_signatures.get("EDA") == signature:
             return
         DashboardGrid.clear(parent)
@@ -1139,35 +1167,24 @@ class HomePanel(ctk.CTkFrame):
         if not active_plots:
             active_plots = ["histogram"]
             self.eda_plot_toggle_vars["histogram"].set(True)
-        layout_map: dict[str, tuple[int, int, int, int]] = {}
         if len(active_plots) == 1:
-            layout_map[active_plots[0]] = (0, 0, 1, 1)
             plot_area.grid_rowconfigure(0, weight=1)
             plot_area.grid_columnconfigure(0, weight=1)
         elif len(active_plots) == 2:
             plot_area.grid_rowconfigure(0, weight=1)
             for idx in range(2):
                 plot_area.grid_columnconfigure(idx, weight=1)
-            layout_map[active_plots[0]] = (0, 0, 1, 1)
-            layout_map[active_plots[1]] = (0, 1, 1, 1)
         elif len(active_plots) == 3 and "histogram" in active_plots:
             plot_area.grid_rowconfigure(0, weight=3)
             plot_area.grid_rowconfigure(1, weight=2)
             plot_area.grid_columnconfigure(0, weight=1)
             plot_area.grid_columnconfigure(1, weight=1)
-            layout_map["histogram"] = (0, 0, 1, 2)
-            remaining = [key for key in active_plots if key != "histogram"]
-            layout_map[remaining[0]] = (1, 0, 1, 1)
-            layout_map[remaining[1]] = (1, 1, 1, 1)
         else:
             plot_area.grid_rowconfigure(0, weight=1)
             plot_area.grid_rowconfigure(1, weight=1)
             plot_area.grid_columnconfigure(0, weight=1)
             plot_area.grid_columnconfigure(1, weight=1)
-            for idx, key in enumerate(active_plots):
-                row = idx // 2
-                col = idx % 2
-                layout_map[key] = (row, col, 1, 1)
+        layout_map = self._compute_eda_plot_layout(active_plots)
 
         figure_specs = {
             "histogram": ((8.6, 5.8), 2.25),
