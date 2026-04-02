@@ -310,8 +310,9 @@ class GeostatService:
         return dict(resolved)
 
     def get_domain_filter_options(self) -> dict[str, list[str]]:
+        default_keys = tuple(default_domain_ui_filters().keys())
         if self.current_dataset is None:
-            return {"lithology": ["Todos"], "alteration": ["Todos"], "mine": ["Todos"]}
+            return {key: ["Todos"] for key in default_keys}
         df = self.current_dataset.dataframe
         options: dict[str, list[str]] = {}
         for key, column in self.get_domain_filter_candidates().items():
@@ -320,6 +321,8 @@ class GeostatService:
                 continue
             values = sorted({str(value).strip() for value in df[column].dropna().tolist() if str(value).strip()})
             options[key] = ["Todos", *values]
+        for key in default_keys:
+            options.setdefault(key, ["Todos"])
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
@@ -622,9 +625,9 @@ class GeostatService:
             if snapshot["blocking_reason"] == "missing_resolved_target_column":
                 missing_target = str(snapshot["resolved_target_column"])
                 return None, "", False, f"Target no válido para secciones espaciales: '{missing_target}'."
-            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
-        if self.current_dataset is None or self.variable_config is None:
-            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
+        readiness_message = self._resolve_dataset_config_readiness_error(snapshot, context="renderizar visuales")
+        if readiness_message:
+            return None, "", False, readiness_message
 
         dataframe = self.current_dataset.dataframe
         resolved_target = str(snapshot["resolved_target_column"])
@@ -953,10 +956,9 @@ class GeostatService:
 
     def _resolve_eda_target_column(self, use_effective_target: bool, require_numeric: bool) -> tuple[str, str]:
         snapshot = self.get_analysis_context_snapshot()
-        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
-            return "", "No hay dataset/configuración suficiente para EDA."
-        if self.current_dataset is None or self.variable_config is None:
-            return "", "No hay dataset/configuración suficiente para EDA."
+        readiness_message = self._resolve_dataset_config_readiness_error(snapshot, context="EDA")
+        if readiness_message:
+            return "", readiness_message
 
         target = str(snapshot["resolved_target_column"] if use_effective_target else snapshot["base_target_column"])
         if not target or target not in self.current_dataset.dataframe.columns:
@@ -966,6 +968,13 @@ class GeostatService:
             if not _is_numeric_dtype(series) and not _to_numeric(series).notna().any():
                 return target, f"Target no numérico para EDA univariado: '{target}'."
         return target, ""
+
+    def _resolve_dataset_config_readiness_error(self, snapshot: dict[str, object], *, context: str) -> str:
+        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
+            return f"No hay dataset/configuración suficiente para {context}."
+        if self.current_dataset is None or self.variable_config is None:
+            return f"No hay dataset/configuración suficiente para {context}."
+        return ""
 
     def get_summary_cards(self) -> dict[str, str]:
         if self.current_dataset is None:
