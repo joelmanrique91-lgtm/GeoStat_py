@@ -146,7 +146,12 @@ def _build_workflow_stage_label(step_name: str, active_step: str, readiness: Wor
     stage_state = readiness.stages.get(stage_key, None)
     is_ready = bool(stage_state.ready) if stage_state is not None else False
     has_warning = bool(stage_state.warnings) if stage_state is not None else False
-    readiness_marker = "✓ LISTO" if is_ready else ("⚠ ALERTA" if has_warning else "! BLOQ")
+    if has_warning:
+        readiness_marker = "⚠ ALERTA"
+    elif is_ready:
+        readiness_marker = "✓ LISTO"
+    else:
+        readiness_marker = "! BLOQ"
     nav_marker = "●" if step_name == active_step else "○"
     return f"{nav_marker} {labels.get(step_name, step_name)} · {readiness_marker}"
 

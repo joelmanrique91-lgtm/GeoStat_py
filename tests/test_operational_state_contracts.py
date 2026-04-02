@@ -48,6 +48,17 @@ class OperationalStateContractsTests(unittest.TestCase):
         domain_state = service.get_domain_state_typed()
         self.assertFalse(domain_state.domains_ready)
 
+    def test_domain_state_propagates_active_domain_filter(self) -> None:
+        service = GeostatService(adapter=GeostatSpyAdapter())
+        csv_path = Path("tests/fixtures/variography/variography_small_numeric.csv")
+        self.assertTrue(service.load_csv(str(csv_path)).success)
+        self.assertTrue(service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+        service.workflow_state.active_domain_filter = "A"
+
+        typed = service.get_operational_state()
+        self.assertEqual(typed.analysis.active_domain_filter, "A")
+        self.assertEqual(typed.domain.active_domain_filter, "A")
+
 
 if __name__ == "__main__":
     unittest.main()

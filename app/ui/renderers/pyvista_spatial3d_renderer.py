@@ -8,6 +8,7 @@ Current status:
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import customtkinter as ctk
@@ -27,6 +28,11 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
 
     def __init__(self) -> None:
         self._last_unavailable_reason: str = ""
+        self._feature_toggle_env = "GEOSTAT_ENABLE_PYVISTA_3D"
+        self._policy_disabled_message = (
+            "PyVista/VTK detectado, pero backend 3D deshabilitado por política "
+            f"(exporta {self._feature_toggle_env}=1 para habilitar modo experimental)."
+        )
 
     def is_available(self) -> tuple[bool, str]:
         try:
@@ -36,14 +42,16 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
             self._last_unavailable_reason = f"PyVista no disponible en entorno actual: {exc}"
             return False, self._last_unavailable_reason
 
-        # NOTE: Embedded Tk integration with interactive PyVista requires additional
-        # integration work (e.g., dedicated event-loop bridge). This pilot keeps
-        # behavior safe by deferring enablement until that bridge is implemented.
-        self._last_unavailable_reason = (
-            "PyVista detectado, pero integración embebida Tk no habilitada en esta fase "
-            "(pendiente puente de event-loop)."
-        )
-        return False, self._last_unavailable_reason
+        if not self._is_feature_enabled():
+            self._last_unavailable_reason = self._policy_disabled_message
+            return False, self._last_unavailable_reason
+
+        self._last_unavailable_reason = ""
+        return True, "ok"
+
+    def _is_feature_enabled(self) -> bool:
+        raw = os.environ.get(self._feature_toggle_env, "")
+        return str(raw).strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
     def create_widget(self, parent: ctk.CTkFrame) -> Any:
         host = ctk.CTkFrame(parent, fg_color="transparent")
@@ -51,8 +59,16 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
         return host
 
     def render(self, widget: Any, data: Spatial3DDataBundle, color_display_label: str) -> None:
-        # Intentionally unreachable while is_available() is False.
-        _ = (widget, data, color_display_label)
+        # Embedded interactive PyVista is still experimental in Tk host.
+        # Keep UX explicit to avoid blank panels if feature-toggle is enabled.
+        self.show_unavailable(
+            widget,
+            (
+                "Backend PyVista habilitado en modo experimental, pero render embebido Tk "
+                "aún no implementado de forma estable. Se recomienda usar fallback 2D/3D matplotlib."
+            ),
+        )
+        _ = (data, color_display_label)
 
     def show_unavailable(self, widget: Any, reason: str) -> None:
         if isinstance(widget, ctk.CTkFrame):

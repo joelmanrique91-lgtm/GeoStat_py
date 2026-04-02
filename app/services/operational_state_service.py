@@ -224,7 +224,7 @@ class OperationalStateService:
             effective_target_column=str(snapshot_payload["resolved_target_column"]),
             capping_confirmed=bool(self.host.has_confirmed_dynamic_capping()),
             domain_definition={},
-            active_domain_filter="",
+            active_domain_filter=str(snapshot_payload.get("active_domain_filter") or ""),
             domain_estimation_values=(),
             domains_ready=bool(self.host.is_domains_module_enabled()),
             ui_filters=default_domain_ui_filters(),
