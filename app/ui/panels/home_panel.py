@@ -1073,6 +1073,13 @@ class HomePanel(ctk.CTkFrame):
 
         active_variable = str(state.effective_target_column if self.eda_use_capping_var.get() else self.target_var.get() or state.effective_target_column)
         capping_status = "capping confirmado" if state.dynamic_enabled else "sin capping confirmado"
+        snapshot_context = f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}"
+        wrapper, evidence = self._build_decision_layout(
+            parent,
+            decision_title="Decisión EDA",
+            decision_message="Evaluar si la variable es estable para continuar el flujo.",
+            context_message=snapshot_context,
+        )
 
         try:
             selected_domain_filter = self.domain_filter_var.get().strip()
