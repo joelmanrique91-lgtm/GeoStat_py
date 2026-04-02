@@ -283,7 +283,7 @@ class HomePanel(ctk.CTkFrame):
         self.plot_frame: ctk.CTkFrame | None = None
         self.spatial_3d_widget: ctk.CTkFrame | None = None
         self.eda_renderer = MatplotlibEDARenderer()
-        self.spatial_2d_renderer = MatplotlibSpatial2DRenderer(service=self.service)
+        self.spatial_2d_renderer = MatplotlibSpatial2DRenderer()
         self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
         self.variography_controller = VariographyController(service=self.service)
@@ -1331,6 +1331,7 @@ class HomePanel(ctk.CTkFrame):
             Spatial2DRenderContext(
                 color_by=color_by,
                 snapshot=snapshot,
+                cutoff_state=self.service.get_cutoff_state(),
                 guardrail_note=SPATIAL_GUARDRAIL_NOTE,
                 info_text_color=TXT_MAIN,
                 info_border_color=BORDER_SOFT,

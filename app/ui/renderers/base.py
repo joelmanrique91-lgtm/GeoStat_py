@@ -22,6 +22,7 @@ class EDARenderContext:
 class Spatial2DRenderContext:
     color_by: str | None
     snapshot: dict[str, object]
+    cutoff_state: dict[str, object]
     guardrail_note: str
     info_text_color: str
     info_border_color: str

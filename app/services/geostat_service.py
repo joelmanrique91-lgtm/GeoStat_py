@@ -310,8 +310,9 @@ class GeostatService:
         return dict(resolved)
 
     def get_domain_filter_options(self) -> dict[str, list[str]]:
+        default_keys = tuple(default_domain_ui_filters().keys())
         if self.current_dataset is None:
-            return {"lithology": ["Todos"], "alteration": ["Todos"], "mine": ["Todos"]}
+            return {key: ["Todos"] for key in default_keys}
         df = self.current_dataset.dataframe
         options: dict[str, list[str]] = {}
         for key, column in self.get_domain_filter_candidates().items():
@@ -320,6 +321,8 @@ class GeostatService:
                 continue
             values = sorted({str(value).strip() for value in df[column].dropna().tolist() if str(value).strip()})
             options[key] = ["Todos", *values]
+        for key in default_keys:
+            options.setdefault(key, ["Todos"])
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
@@ -622,9 +625,9 @@ class GeostatService:
             if snapshot["blocking_reason"] == "missing_resolved_target_column":
                 missing_target = str(snapshot["resolved_target_column"])
                 return None, "", False, f"Target no válido para secciones espaciales: '{missing_target}'."
-            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
-        if self.current_dataset is None or self.variable_config is None:
-            return None, "", False, "No hay dataset/configuración suficiente para renderizar visuales."
+        readiness_message = self._resolve_dataset_config_readiness_error(snapshot, context="renderizar visuales")
+        if readiness_message:
+            return None, "", False, readiness_message
 
         dataframe = self.current_dataset.dataframe
         resolved_target = str(snapshot["resolved_target_column"])
@@ -727,17 +730,8 @@ class GeostatService:
             self.activity_log.log("univariate_payload_empty", "warning", message, {})
             raise ValueError(message)
 
-        df = self.current_dataset.dataframe
         snapshot = self.get_analysis_context_snapshot()
-        requested_filter = (domain_filter or "").strip()
-        active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
-        if requested_filter:
-            if active_domain_column and active_domain_column in df.columns:
-                df = df[df[active_domain_column].astype(str) == requested_filter]
-            else:
-                df = df.iloc[0:0]
-        elif str(snapshot["active_domain_filter"]).strip():
-            df = self._get_filtered_dataframe(snapshot)
+        df = self._resolve_univariate_dataframe(snapshot, domain_filter)
 
         numeric_target = _to_numeric(df[target])
         total_rows = int(len(df))
@@ -811,39 +805,7 @@ class GeostatService:
                     {"component": "probability", "target": target, "valid_count": valid_count},
                 )
 
-        domain_payload = _empty_domain_payload()
-        domain_col = str(snapshot.get("active_domain_column") or "").strip()
-        configured_domain = self.variable_config.domain_column if self.variable_config is not None and self.variable_config.domain_column else ""
-        if configured_domain and not domain_col:
-            domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
-        if domain_col and domain_col in df.columns:
-            grouped: list[tuple[str, list[float]]] = []
-            valid_rows = 0
-            for label, subset in df.groupby(domain_col, dropna=True):
-                label_text = str(label).strip()
-                if not label_text:
-                    continue
-                numeric_values = _to_numeric(subset[target]).dropna().astype(float).tolist()
-                if not numeric_values:
-                    continue
-                grouped.append((label_text, numeric_values))
-                valid_rows += len(numeric_values)
-
-            grouped.sort(key=lambda item: len(item[1]), reverse=True)
-            if max_domain_categories > 0 and len(grouped) > max_domain_categories:
-                grouped = grouped[:max_domain_categories]
-                domain_payload["message"] = f"Mostrando top {max_domain_categories} dominios por cantidad de muestras."
-            if grouped:
-                domain_payload = {
-                    "enabled": len(grouped) > 1,
-                    "labels": [label for label, _values in grouped],
-                    "values": [values for _label, values in grouped],
-                    "message": domain_payload.get("message", ""),
-                    "valid_rows": int(valid_rows),
-                    "valid_categories": len(grouped),
-                }
-                if len(grouped) <= 1:
-                    domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
+        domain_payload, domain_col = self._build_univariate_domain_payload(df, target, snapshot, max_domain_categories=max_domain_categories)
 
         payload = {
             "target_values": clean_target.tolist(),
@@ -874,6 +836,61 @@ class GeostatService:
             },
         )
         return payload
+
+    def _resolve_univariate_dataframe(self, snapshot: dict[str, object], domain_filter: str | None):
+        dataframe = self.current_dataset.dataframe
+        requested_filter = (domain_filter or "").strip()
+        active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
+        if requested_filter:
+            if active_domain_column and active_domain_column in dataframe.columns:
+                return dataframe[dataframe[active_domain_column].astype(str) == requested_filter]
+            return dataframe.iloc[0:0]
+        if str(snapshot["active_domain_filter"]).strip():
+            return self._get_filtered_dataframe(snapshot)
+        return dataframe
+
+    def _build_univariate_domain_payload(
+        self,
+        dataframe,
+        target: str,
+        snapshot: dict[str, object],
+        *,
+        max_domain_categories: int,
+    ) -> tuple[dict[str, object], str]:
+        domain_payload = _empty_domain_payload()
+        domain_col = str(snapshot.get("active_domain_column") or "").strip()
+        configured_domain = self.variable_config.domain_column if self.variable_config is not None and self.variable_config.domain_column else ""
+        if configured_domain and not domain_col:
+            domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
+        if domain_col and domain_col in dataframe.columns:
+            grouped: list[tuple[str, list[float]]] = []
+            valid_rows = 0
+            for label, subset in dataframe.groupby(domain_col, dropna=True):
+                label_text = str(label).strip()
+                if not label_text:
+                    continue
+                numeric_values = _to_numeric(subset[target]).dropna().astype(float).tolist()
+                if not numeric_values:
+                    continue
+                grouped.append((label_text, numeric_values))
+                valid_rows += len(numeric_values)
+
+            grouped.sort(key=lambda item: len(item[1]), reverse=True)
+            if max_domain_categories > 0 and len(grouped) > max_domain_categories:
+                grouped = grouped[:max_domain_categories]
+                domain_payload["message"] = f"Mostrando top {max_domain_categories} dominios por cantidad de muestras."
+            if grouped:
+                domain_payload = {
+                    "enabled": len(grouped) > 1,
+                    "labels": [label for label, _values in grouped],
+                    "values": [values for _label, values in grouped],
+                    "message": domain_payload.get("message", ""),
+                    "valid_rows": int(valid_rows),
+                    "valid_categories": len(grouped),
+                }
+                if len(grouped) <= 1:
+                    domain_payload["message"] = "Solo hay un dominio disponible tras filtros; se muestra boxplot global."
+        return domain_payload, domain_col
 
     def prepare_swath_data(self, bins: int = 20) -> dict[str, SwathSeries]:
         if self.current_dataset is None or self.variable_config is None:
@@ -953,10 +970,9 @@ class GeostatService:
 
     def _resolve_eda_target_column(self, use_effective_target: bool, require_numeric: bool) -> tuple[str, str]:
         snapshot = self.get_analysis_context_snapshot()
-        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
-            return "", "No hay dataset/configuración suficiente para EDA."
-        if self.current_dataset is None or self.variable_config is None:
-            return "", "No hay dataset/configuración suficiente para EDA."
+        readiness_message = self._resolve_dataset_config_readiness_error(snapshot, context="EDA")
+        if readiness_message:
+            return "", readiness_message
 
         target = str(snapshot["resolved_target_column"] if use_effective_target else snapshot["base_target_column"])
         if not target or target not in self.current_dataset.dataframe.columns:
@@ -966,6 +982,13 @@ class GeostatService:
             if not _is_numeric_dtype(series) and not _to_numeric(series).notna().any():
                 return target, f"Target no numérico para EDA univariado: '{target}'."
         return target, ""
+
+    def _resolve_dataset_config_readiness_error(self, snapshot: dict[str, object], *, context: str) -> str:
+        if snapshot["readiness"] == "blocked" and snapshot["blocking_reason"] in {"missing_dataset", "missing_variable_config"}:
+            return f"No hay dataset/configuración suficiente para {context}."
+        if self.current_dataset is None or self.variable_config is None:
+            return f"No hay dataset/configuración suficiente para {context}."
+        return ""
 
     def get_summary_cards(self) -> dict[str, str]:
         if self.current_dataset is None:
