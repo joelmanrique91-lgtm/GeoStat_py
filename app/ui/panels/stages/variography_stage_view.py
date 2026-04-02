@@ -33,9 +33,19 @@ class VariographyStageView:
         self.band_width_var = ctk.StringVar(value="0.0")
         self.band_height_var = ctk.StringVar(value="0.0")
         self.estimator_var = ctk.StringVar(value="classical")
+        self.usage_target_var = ctk.StringVar(value="kriging")
+        self.nugget_enabled_var = ctk.BooleanVar(value=True)
+        self.nugget_value_var = ctk.StringVar(value="0.0")
+        self.nugget_locked_var = ctk.BooleanVar(value=False)
+        self.fit_method_var = ctk.StringVar(value="manual")
+        self.min_pairs_var = ctk.StringVar(value="30")
+        self.exclude_lags_var = ctk.StringVar(value="")
+        self._structure_rows: list[dict[str, ctk.Variable]] = []
+        self._structures_frame: ctk.CTkFrame | None = None
         self.status_var = ctk.StringVar(value="Configura parámetros y ejecuta cálculo experimental.")
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
+        self.usage_warning_var = ctk.StringVar(value="")
         self._plot_host: ctk.CTkFrame | None = None
         self._compute_button: ctk.CTkButton | None = None
         self._compute_in_progress = False
@@ -68,6 +78,17 @@ class VariographyStageView:
         self.band_width_var.set(f"{float(init.get('band_width', 0.0)):.6g}")
         self.band_height_var.set(f"{float(init.get('band_height', 0.0)):.6g}")
         self.estimator_var.set(str(init.get("estimator", "classical")))
+        model_init = init.get("model", {}) if isinstance(init.get("model"), dict) else {}
+        nugget_init = model_init.get("nugget", {}) if isinstance(model_init.get("nugget"), dict) else {}
+        self.usage_target_var.set(str(model_init.get("usage_target", "kriging")))
+        self.nugget_enabled_var.set(bool(nugget_init.get("enabled", True)))
+        self.nugget_value_var.set(f"{float(nugget_init.get('value', 0.0)):.6g}")
+        self.nugget_locked_var.set(bool(nugget_init.get("locked", False)))
+        fit_init = model_init.get("fit", {}) if isinstance(model_init.get("fit"), dict) else {}
+        self.fit_method_var.set(str(fit_init.get("method", "manual")))
+        self.min_pairs_var.set(str(int(fit_init.get("min_pairs", 30))))
+        self.exclude_lags_var.set(",".join(str(v) for v in fit_init.get("exclude_lags", [])))
+        self._set_structures(model_init.get("structures", []))
 
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew", padx=2, pady=1)
@@ -109,6 +130,7 @@ class VariographyStageView:
         alerts = ctk.CTkFrame(results, fg_color="transparent")
         alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
         ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
 
         cached = self._session.last_response
@@ -137,9 +159,9 @@ class VariographyStageView:
     def _build_controls(self, parent: ctk.CTkFrame | ctk.CTkScrollableFrame, target_options: list[str]) -> None:
         parent.grid_columnconfigure(0, weight=1)
         row = 0
-        ctk.CTkLabel(parent, text="Parámetros de variografía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(6, 1))
+        ctk.CTkLabel(parent, text="A) Variograma experimental", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(6, 1))
         row += 1
-        ctk.CTkLabel(parent, text="Cálculo actual: omnidireccional.", text_color=TEXT_MUTED, wraplength=318, justify="left").grid(row=row, column=0, sticky="w", padx=8, pady=(0, 3))
+        ctk.CTkLabel(parent, text="Configura lags, tolerancias, direcciones y npairs mínimos.", text_color=TEXT_MUTED, wraplength=318, justify="left").grid(row=row, column=0, sticky="w", padx=8, pady=(0, 3))
         row += 1
 
         ctk.CTkLabel(parent, text="Variable objetivo", text_color=TEXT_MAIN).grid(row=row, column=0, sticky="w", padx=8, pady=(1, 1))
@@ -170,13 +192,13 @@ class VariographyStageView:
         directional_card.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkLabel(
             directional_card,
-            text="Direccional (pendiente backend)",
+            text="Direccionalidad real",
             text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11, weight="bold"),
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(4, 1))
         ctk.CTkLabel(
             directional_card,
-            text="Se muestran como referencia; aún no alteran el cálculo.",
+            text="Direccional (pendiente backend) superado: estos parámetros afectan el cálculo de pares experimentales.",
             text_color=TEXT_MUTED,
             wraplength=318,
             justify="left",
@@ -190,8 +212,31 @@ class VariographyStageView:
             ("band_height", self.band_height_var),
         ]
         for idx, (label, var) in enumerate(directional_fields):
-            self._build_compact_field(directional_card, row=2 + (idx // 2), col=idx % 2, label=label, var=var, state="disabled")
+            self._build_compact_field(directional_card, row=2 + (idx // 2), col=idx % 2, label=label, var=var, state="normal")
         row += 1
+
+        ctk.CTkLabel(parent, text="B) Modelado variográfico", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(row=row, column=0, sticky="w", padx=8, pady=(8, 1))
+        row += 1
+        model_card = ctk.CTkFrame(parent, fg_color=BG_PANEL)
+        model_card.grid(row=row, column=0, sticky="ew", padx=8, pady=(1, 3))
+        model_card.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkLabel(model_card, text="Objetivo final", text_color=TEXT_MAIN).grid(row=0, column=0, sticky="w", padx=6, pady=(4, 1))
+        ctk.CTkOptionMenu(model_card, variable=self.usage_target_var, values=["kriging", "simulation"]).grid(row=0, column=1, sticky="ew", padx=6, pady=(4, 1))
+        ctk.CTkCheckBox(model_card, text="Activar nugget c0", variable=self.nugget_enabled_var).grid(row=1, column=0, sticky="w", padx=6, pady=(2, 1))
+        ctk.CTkCheckBox(model_card, text="Nugget fijo (locked)", variable=self.nugget_locked_var).grid(row=1, column=1, sticky="w", padx=6, pady=(2, 1))
+        ctk.CTkLabel(model_card, text="Valor nugget", text_color=TEXT_MUTED).grid(row=2, column=0, sticky="w", padx=6, pady=(1, 1))
+        ctk.CTkEntry(model_card, textvariable=self.nugget_value_var, width=120).grid(row=2, column=1, sticky="ew", padx=6, pady=(1, 1))
+        ctk.CTkLabel(model_card, text="Ajuste", text_color=TEXT_MUTED).grid(row=3, column=0, sticky="w", padx=6, pady=(1, 1))
+        ctk.CTkOptionMenu(model_card, variable=self.fit_method_var, values=["manual", "WLS"]).grid(row=3, column=1, sticky="ew", padx=6, pady=(1, 1))
+        ctk.CTkLabel(model_card, text="min npairs", text_color=TEXT_MUTED).grid(row=4, column=0, sticky="w", padx=6, pady=(1, 1))
+        ctk.CTkEntry(model_card, textvariable=self.min_pairs_var, width=120).grid(row=4, column=1, sticky="ew", padx=6, pady=(1, 1))
+        ctk.CTkLabel(model_card, text="Excluir lags (1,2...)", text_color=TEXT_MUTED).grid(row=5, column=0, sticky="w", padx=6, pady=(1, 3))
+        ctk.CTkEntry(model_card, textvariable=self.exclude_lags_var, width=120).grid(row=5, column=1, sticky="ew", padx=6, pady=(1, 3))
+        row += 1
+        self._structures_frame = ctk.CTkFrame(parent, fg_color=BG_PANEL)
+        self._structures_frame.grid(row=row, column=0, sticky="ew", padx=8, pady=(1, 3))
+        row += 1
+        self._render_structures_table()
 
         self._compute_button = ctk.CTkButton(parent, text="Ejecutar variografía", command=self._on_compute, height=30)
         self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(6, 6))
@@ -203,6 +248,84 @@ class VariographyStageView:
         cell.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(cell, text=label, text_color=TEXT_MUTED, anchor="w", justify="left").grid(row=0, column=0, sticky="w", pady=(0, 1))
         ctk.CTkEntry(cell, textvariable=var, state=state, width=124, height=30).grid(row=1, column=0, sticky="ew")
+
+    def _set_structures(self, structures: object) -> None:
+        self._structure_rows = []
+        if isinstance(structures, list):
+            for item in structures:
+                if not isinstance(item, dict):
+                    continue
+                self._structure_rows.append(
+                    {
+                        "active": ctk.BooleanVar(value=bool(item.get("active", True))),
+                        "type": ctk.StringVar(value=str(item.get("type", "spherical"))),
+                        "contribution": ctk.StringVar(value=f"{float(item.get('contribution', 0.5)):.6g}"),
+                        "range_major": ctk.StringVar(value=f"{float(item.get('range_major', 120.0)):.6g}"),
+                        "range_minor": ctk.StringVar(value=f"{float(item.get('range_minor', 80.0)):.6g}"),
+                        "range_vertical": ctk.StringVar(value=f"{float(item.get('range_vertical', 40.0)):.6g}"),
+                        "azimuth": ctk.StringVar(value=f"{float(item.get('azimuth', 0.0)):.6g}"),
+                        "dip": ctk.StringVar(value=f"{float(item.get('dip', 0.0)):.6g}"),
+                        "lock_contribution": ctk.BooleanVar(value=bool(item.get("lock_contribution", False))),
+                        "lock_range": ctk.BooleanVar(value=bool(item.get("lock_range", False))),
+                    }
+                )
+        if not self._structure_rows:
+            self._set_structures([{}])
+
+    def _render_structures_table(self) -> None:
+        if self._structures_frame is None:
+            return
+        DashboardGrid.clear(self._structures_frame)
+        header = ctk.CTkLabel(self._structures_frame, text="Estructuras anidadas", text_color=TEXT_MAIN, font=ctk.CTkFont(size=12, weight="bold"))
+        header.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 2))
+        btns = ctk.CTkFrame(self._structures_frame, fg_color="transparent")
+        btns.grid(row=0, column=1, sticky="e", padx=6, pady=(4, 2))
+        ctk.CTkButton(btns, text="+", width=30, command=lambda: self._mutate_structure("add", -1)).pack(side="left", padx=2)
+        for idx, row_vars in enumerate(self._structure_rows):
+            row = idx + 1
+            line = ctk.CTkFrame(self._structures_frame, fg_color="transparent")
+            line.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=1)
+            for col in range(10):
+                line.grid_columnconfigure(col, weight=1)
+            ctk.CTkCheckBox(line, text="", width=20, variable=row_vars["active"]).grid(row=0, column=0, padx=1)
+            ctk.CTkOptionMenu(line, variable=row_vars["type"], values=["spherical", "exponential", "gaussian", "linear"], width=98).grid(row=0, column=1, padx=1)
+            for col, key in enumerate(["contribution", "range_major", "range_minor", "range_vertical", "azimuth", "dip"], start=2):
+                ctk.CTkEntry(line, textvariable=row_vars[key], width=62, height=28).grid(row=0, column=col, padx=1)
+            locks = ctk.CTkFrame(line, fg_color="transparent")
+            locks.grid(row=0, column=8, padx=1)
+            ctk.CTkCheckBox(locks, text="Lc", width=24, variable=row_vars["lock_contribution"]).pack(side="left", padx=1)
+            ctk.CTkCheckBox(locks, text="Lr", width=24, variable=row_vars["lock_range"]).pack(side="left", padx=1)
+            ops = ctk.CTkFrame(line, fg_color="transparent")
+            ops.grid(row=0, column=9, padx=1)
+            ctk.CTkButton(ops, text="D", width=24, command=lambda i=idx: self._mutate_structure("dup", i)).pack(side="left", padx=1)
+            ctk.CTkButton(ops, text="-", width=24, command=lambda i=idx: self._mutate_structure("del", i)).pack(side="left", padx=1)
+
+    def _mutate_structure(self, action: str, idx: int) -> None:
+        current_structs = [self._collect_structure_dict(v) for v in self._structure_rows]
+        if action == "add":
+            current_structs.append({})
+            self._set_structures(current_structs)
+        elif action == "dup" and 0 <= idx < len(current_structs):
+            current_structs.insert(idx + 1, dict(current_structs[idx]))
+            self._set_structures(current_structs)
+        elif action == "del" and len(self._structure_rows) > 1 and 0 <= idx < len(self._structure_rows):
+            current_structs.pop(idx)
+            self._set_structures(current_structs)
+        self._render_structures_table()
+
+    def _collect_structure_dict(self, row_vars: dict[str, ctk.Variable]) -> dict[str, object]:
+        return {
+            "active": bool(row_vars["active"].get()),
+            "type": str(row_vars["type"].get()),
+            "contribution": self._parse_float(str(row_vars["contribution"].get())),
+            "range_major": self._parse_float(str(row_vars["range_major"].get())),
+            "range_minor": self._parse_float(str(row_vars["range_minor"].get())),
+            "range_vertical": self._parse_float(str(row_vars["range_vertical"].get())),
+            "azimuth": self._parse_float(str(row_vars["azimuth"].get())),
+            "dip": self._parse_float(str(row_vars["dip"].get())),
+            "lock_contribution": bool(row_vars["lock_contribution"].get()),
+            "lock_range": bool(row_vars["lock_range"].get()),
+        }
 
     def _bind_dirty_traces(self) -> None:
         observed = [
@@ -218,6 +341,13 @@ class VariographyStageView:
             self.band_width_var,
             self.band_height_var,
             self.estimator_var,
+            self.usage_target_var,
+            self.nugget_value_var,
+            self.fit_method_var,
+            self.min_pairs_var,
+            self.exclude_lags_var,
+            self.nugget_enabled_var,
+            self.nugget_locked_var,
         ]
         for var in observed:
             var.trace_add("write", self._on_any_param_changed)
@@ -247,6 +377,20 @@ class VariographyStageView:
                 "band_width": self._parse_float(self.band_width_var.get()),
                 "band_height": self._parse_float(self.band_height_var.get()),
                 "estimator": self.estimator_var.get().strip() or "classical",
+                "model": {
+                    "usage_target": self.usage_target_var.get().strip() or "kriging",
+                    "nugget": {
+                        "enabled": bool(self.nugget_enabled_var.get()),
+                        "value": self._parse_float(self.nugget_value_var.get()),
+                        "locked": bool(self.nugget_locked_var.get()),
+                    },
+                    "structures": [self._collect_structure_dict(row) for row in self._structure_rows],
+                    "fit": {
+                        "method": self.fit_method_var.get().strip() or "manual",
+                        "min_pairs": self._parse_int(self.min_pairs_var.get()),
+                        "exclude_lags": [int(v.strip()) for v in self.exclude_lags_var.get().split(",") if v.strip()],
+                    },
+                },
             }
         except Exception as exc:
             self.warning_var.set("")
@@ -290,8 +434,14 @@ class VariographyStageView:
             self.blocker_var.set("\n".join(blockers) if blockers else "")
             result = response.get("result")
             if not isinstance(result, dict):
+                self.usage_warning_var.set("")
                 self._render_compute_failure_panel(response)
                 return
+            model_meta = result.get("metadata", {}).get("model", []) if isinstance(result.get("metadata", {}), dict) else {}
+            usage_warnings = model_meta.get("usage_warnings", []) if isinstance(model_meta, dict) else []
+            self.usage_warning_var.set(
+                "\n".join([f"[USAGE] {str(item)}" for item in usage_warnings]) if isinstance(usage_warnings, list) and usage_warnings else ""
+            )
             self._render_result_plot(result, bool(response.get("ok", False)))
             logger.info(
                 "Variography UI render success | ok=%s lag_len=%s gamma_len=%s pair_len=%s",

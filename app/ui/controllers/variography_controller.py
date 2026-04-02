@@ -81,5 +81,24 @@ class VariographyController:
             "band_width": float(session.band_width),
             "band_height": float(session.band_height),
             "estimator": str(session.estimator),
+            "model": {
+                "usage_target": "kriging",
+                "nugget": {"enabled": True, "value": 0.0, "locked": False},
+                "structures": [
+                    {
+                        "active": True,
+                        "type": "spherical",
+                        "contribution": 1.0,
+                        "range_major": max_distance * 0.8,
+                        "range_minor": max_distance * 0.8,
+                        "range_vertical": max_distance * 0.4,
+                        "azimuth": 0.0,
+                        "dip": 0.0,
+                        "lock_contribution": False,
+                        "lock_range": False,
+                    }
+                ],
+                "fit": {"method": "manual", "min_pairs": 30, "exclude_lags": []},
+            },
             "target_options": target_options,
         }

@@ -6,6 +6,7 @@ from dataclasses import asdict
 import hashlib
 import json
 import logging
+import math
 
 from pandas.api.types import is_numeric_dtype
 
@@ -19,6 +20,12 @@ from app.models.variography import (
     VariographyComputeResponse,
     VariographyIssue,
     VariographySession,
+)
+from app.services.variogram_modeling_service import (
+    ALLOWED_STRUCTURE_TYPES,
+    auto_fit_wls,
+    evaluate_model,
+    evaluate_quality,
 )
 from app.services.visualization_service import compute_experimental_variogram
 
@@ -96,13 +103,6 @@ class VariographyApplicationService:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
         if request.direction.ang_tol_h > 90 or request.direction.ang_tol_v > 90:
             warnings.append(VariographyIssue("WIDE_DIRECTION_TOL", "Tolerancias angulares altas pueden mezclar direcciones.", "warning"))
-        warnings.append(
-            VariographyIssue(
-                "DIRECTION_PENDING_BACKEND",
-                "Parámetros direccionales aún no filtran pares en este slice; cálculo actual es omnidireccional.",
-                "warning",
-            )
-        )
         if request.estimator != "classical":
             warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
 
@@ -168,6 +168,13 @@ class VariographyApplicationService:
                 request.lag.lag_distance,
                 request.lag.n_lags,
                 request.lag.max_distance,
+                lag_tolerance=request.lag.lag_tolerance,
+                azimuth=request.direction.azimuth,
+                dip=request.direction.dip,
+                ang_tol_h=request.direction.ang_tol_h,
+                ang_tol_v=request.direction.ang_tol_v,
+                band_width=request.direction.band_width,
+                band_height=request.direction.band_height,
                 max_points=2500,
             )
         except Exception as exc:
@@ -199,6 +206,8 @@ class VariographyApplicationService:
         if len(finite_gamma) < 2:
             blockers.append(VariographyIssue("INSUFFICIENT_LAG_COVERAGE", "Cobertura de pares insuficiente para interpretar el variograma.", "blocker"))
 
+        model_payload = self._build_model_payload(params, raw.lag_centers, raw.gamma_values, pair_counts, warnings, blockers)
+
         estimated_defaults = self.host_service.estimate_variography_defaults(
             n_lags=request.lag.n_lags,
             context_snapshot=self.host_service.get_analysis_context_snapshot(),
@@ -208,8 +217,8 @@ class VariographyApplicationService:
         dominant_warning = warnings[0].code if warnings else ""
         metadata = {
             "computation_hash": self._compute_hash(request),
-            "direction_applied": False,
-            "direction_note": "Slice inicial: cálculo omni; parámetros direccionales validados y auditados, aún no aplicados al set de pares.",
+            "direction_applied": True,
+            "direction_note": "Parámetros direccionales aplicados al set de pares.",
             "lag_tolerance": request.lag.lag_tolerance,
             "estimator": request.estimator,
             "effective_rows": effective_rows,
@@ -225,6 +234,7 @@ class VariographyApplicationService:
                 "max_distance": float(request.lag.max_distance),
                 "lag_tolerance": float(request.lag.lag_tolerance),
             },
+            "model": model_payload,
         }
         result = ExperimentalVariogramResult(
             schema_version=SCHEMA_VERSION,
@@ -270,6 +280,158 @@ class VariographyApplicationService:
             sum(result.pair_counts),
         )
         return response
+
+    def _build_model_payload(
+        self,
+        params: dict[str, object],
+        lag_centers: list[float],
+        gamma_values: list[float],
+        pair_counts: list[int],
+        warnings: list[VariographyIssue],
+        blockers: list[VariographyIssue],
+    ) -> dict[str, object]:
+        model = params.get("model") if isinstance(params.get("model"), dict) else {}
+        nugget_raw = model.get("nugget") if isinstance(model.get("nugget"), dict) else {}
+        nugget = {
+            "enabled": bool(nugget_raw.get("enabled", True)),
+            "value": float(nugget_raw.get("value", 0.0) or 0.0),
+            "locked": bool(nugget_raw.get("locked", False)),
+        }
+        if nugget["value"] < 0:
+            blockers.append(VariographyIssue("INVALID_NUGGET", "Nugget no puede ser negativo.", "blocker"))
+            nugget["value"] = 0.0
+        if not nugget["enabled"]:
+            nugget["value"] = 0.0
+        structures_raw = model.get("structures") if isinstance(model.get("structures"), list) else []
+        structures: list[dict[str, object]] = []
+        active_count = 0
+        for idx, item in enumerate(structures_raw):
+            if not isinstance(item, dict):
+                continue
+            structure_type = str(item.get("type", "spherical")).strip().lower()
+            if structure_type not in ALLOWED_STRUCTURE_TYPES:
+                blockers.append(VariographyIssue("INVALID_STRUCTURE_TYPE", f"Estructura #{idx + 1} tiene tipo no permitido: {structure_type}", "blocker"))
+                continue
+            contribution = float(item.get("contribution", 0.0) or 0.0)
+            if contribution < 0:
+                blockers.append(VariographyIssue("INVALID_STRUCTURE_CONTRIBUTION", f"Estructura #{idx + 1}: contribución no puede ser negativa.", "blocker"))
+                contribution = 0.0
+            range_major = float(item.get("range_major", 1.0) or 1.0)
+            range_minor = float(item.get("range_minor", range_major) or range_major)
+            range_vertical = float(item.get("range_vertical", range_major) or range_major)
+            if range_major <= 0 or range_minor <= 0 or range_vertical <= 0:
+                blockers.append(VariographyIssue("INVALID_STRUCTURE_RANGE", f"Estructura #{idx + 1}: ranges deben ser > 0.", "blocker"))
+                range_major = max(1e-6, range_major)
+                range_minor = max(1e-6, range_minor)
+                range_vertical = max(1e-6, range_vertical)
+            is_active = bool(item.get("active", True))
+            if is_active:
+                active_count += 1
+            structures.append(
+                {
+                    "active": is_active,
+                    "type": structure_type,
+                    "contribution": contribution,
+                    "range_major": range_major,
+                    "range_minor": range_minor,
+                    "range_vertical": range_vertical,
+                    "azimuth": float(item.get("azimuth", 0.0) or 0.0),
+                    "dip": float(item.get("dip", 0.0) or 0.0),
+                    "lock_contribution": bool(item.get("lock_contribution", False)),
+                    "lock_range": bool(item.get("lock_range", False)),
+                }
+            )
+
+        fit_raw = model.get("fit") if isinstance(model.get("fit"), dict) else {}
+        fit_method = str(fit_raw.get("method", "manual")).upper()
+        min_pairs = max(1, int(fit_raw.get("min_pairs", 30) or 30))
+        excluded_lags = [int(v) for v in (fit_raw.get("exclude_lags", []) if isinstance(fit_raw.get("exclude_lags"), list) else []) if int(v) > 0]
+        if not structures or active_count <= 0:
+            if fit_method == "MANUAL":
+                blockers.append(
+                    VariographyIssue(
+                        "MISSING_ACTIVE_STRUCTURES_MANUAL",
+                        "Debe definir al menos una estructura activa para modelado manual.",
+                        "blocker",
+                    )
+                )
+            else:
+                blockers.append(
+                    VariographyIssue(
+                        "MISSING_ACTIVE_STRUCTURES_AUTO",
+                        "Debe definir al menos una estructura activa para ajuste automático.",
+                        "blocker",
+                    )
+                )
+            return {
+                "nugget": nugget,
+                "structures": structures,
+                "fit": {"method": fit_method, "min_pairs": min_pairs, "exclude_lags": excluded_lags},
+                "curve_total": [],
+                "curves_by_structure": [],
+                "sill": 0.0,
+                "nugget_relative_pct": 0.0,
+                "practical_range": 0.0,
+                "quality": {"rmse": math.nan, "sse": math.nan, "valid_lags": 0, "invalid_lags": []},
+                "usage_target": str(model.get("usage_target", "kriging")),
+                "usage_warnings": ["Modelado bloqueado: sin estructuras activas."],
+            }
+        if fit_method == "WLS":
+            nugget, structures = auto_fit_wls(lag_centers, gamma_values, pair_counts, nugget, structures, min_pairs, excluded_lags)
+
+        modeled_total, by_structure, sill = evaluate_model(lag_centers, float(nugget["value"]), structures)
+        quality = evaluate_quality(lag_centers, gamma_values, pair_counts, modeled_total, min_pairs, excluded_lags)
+        if quality.valid_lags < 2:
+            warnings.append(VariographyIssue("LOW_VALID_LAGS_FOR_FIT", "Modelo ajustado con pocos lags válidos después de filtros.", "warning"))
+
+        nugget_rel = (float(nugget["value"]) / sill * 100.0) if sill > 0 else 0.0
+        if nugget_rel > 60.0:
+            warnings.append(VariographyIssue("HIGH_NUGGET_RATIO", "Nugget/sill alto: continuidad espacial baja para kriging local.", "warning"))
+        if sill <= 0:
+            blockers.append(VariographyIssue("INVALID_SILL", "Sill total inválido; revise nugget y contribuciones.", "blocker"))
+        warnings.append(
+            VariographyIssue(
+                "THEORETICAL_ANISOTROPY_SIMPLIFIED",
+                "Anisotropía estructural teórica simplificada: el cálculo de curva usa principalmente range_major.",
+                "warning",
+            )
+        )
+        model_ranges = [float(s.get("range_major", 0.0)) for s in structures if bool(s.get("active", True))]
+        practical_range = max(model_ranges) if model_ranges else 0.0
+        return {
+            "nugget": nugget,
+            "structures": structures,
+            "fit": {
+                "method": fit_method,
+                "min_pairs": min_pairs,
+                "exclude_lags": excluded_lags,
+            },
+            "curve_total": modeled_total,
+            "curves_by_structure": by_structure,
+            "sill": sill,
+            "nugget_relative_pct": nugget_rel,
+            "practical_range": practical_range,
+            "quality": {
+                "rmse": quality.rmse,
+                "sse": quality.sse,
+                "valid_lags": quality.valid_lags,
+                "invalid_lags": quality.invalid_lags,
+            },
+            "usage_target": str(model.get("usage_target", "kriging")),
+            "usage_warnings": self._usage_warnings(str(model.get("usage_target", "kriging")), nugget_rel, quality.rmse),
+        }
+
+    def _usage_warnings(self, usage_target: str, nugget_rel: float, rmse: float) -> list[str]:
+        warnings: list[str] = []
+        if usage_target == "kriging":
+            if nugget_rel > 70.0:
+                warnings.append("Modelo poco adecuado para kriging local: nugget muy alto.")
+            if math.isfinite(rmse) and rmse > 1.0:
+                warnings.append("Error de ajuste alto para kriging; revise estructuras y lags excluidos.")
+        if usage_target == "simulation":
+            if nugget_rel < 1.0:
+                warnings.append("Nugget extremadamente bajo puede subestimar variabilidad en simulación.")
+        return warnings
 
     def _validate_request(self, request: ExperimentalVariogramRequest) -> list[VariographyIssue]:
         issues: list[VariographyIssue] = []
