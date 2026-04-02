@@ -4,16 +4,12 @@ from __future__ import annotations
 
 from matplotlib.ticker import ScalarFormatter
 
-from app.services.geostat_service import GeostatService
 from app.services.visualization_service import SpatialDataBundle
 from app.ui.renderers.base import Spatial2DRenderContext, Spatial2DRenderer
 from app.ui.theme import CHART_FONT_SIZE_TICK, TEXT_MUTED, apply_axis_style, get_continuous_colormap
 
 
 class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
-    def __init__(self, service: GeostatService) -> None:
-        self.service = service
-
     def render(self, grid, spatial: SpatialDataBundle, context: Spatial2DRenderContext) -> None:
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.06,
@@ -76,7 +72,7 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         msg += f"\n• Target resuelto global: {context.snapshot['resolved_target_column'] or 'No definido'}"
         msg += f"\n• Color mostrado (local): {context.color_by or context.snapshot['resolved_target_column'] or 'No definido'}"
         msg += f"\n• {context.guardrail_note}"
-        state = self.service.get_cutoff_state()
+        state = context.cutoff_state
         if state["dynamic_enabled"]:
             msg += f"\n• Capping confirmado: {state['dynamic_cutoff_value']:.6g}"
         if spatial.downsampled:

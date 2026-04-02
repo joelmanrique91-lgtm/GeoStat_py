@@ -310,8 +310,9 @@ class GeostatService:
         return dict(resolved)
 
     def get_domain_filter_options(self) -> dict[str, list[str]]:
+        default_keys = tuple(default_domain_ui_filters().keys())
         if self.current_dataset is None:
-            return {"lithology": ["Todos"], "alteration": ["Todos"], "mine": ["Todos"]}
+            return {key: ["Todos"] for key in default_keys}
         df = self.current_dataset.dataframe
         options: dict[str, list[str]] = {}
         for key, column in self.get_domain_filter_candidates().items():
@@ -320,6 +321,8 @@ class GeostatService:
                 continue
             values = sorted({str(value).strip() for value in df[column].dropna().tolist() if str(value).strip()})
             options[key] = ["Todos", *values]
+        for key in default_keys:
+            options.setdefault(key, ["Todos"])
         return options
 
     def set_domain_ui_filters(self, filters: dict[str, str] | None) -> dict[str, str]:
