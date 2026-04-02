@@ -46,8 +46,12 @@ class VariographyStageView:
         self.warning_var = ctk.StringVar(value="")
         self.blocker_var = ctk.StringVar(value="")
         self.usage_warning_var = ctk.StringVar(value="")
+        self.leapfrog_output_var = ctk.StringVar(value="Sin salida para Leapfrog aún. Ejecute variografía para generar parámetros.")
+        self.leapfrog_status_var = ctk.StringVar(value="Salida Leapfrog no disponible: falta cálculo variográfico.")
         self._plot_host: ctk.CTkFrame | None = None
         self._compute_button: ctk.CTkButton | None = None
+        self._copy_button: ctk.CTkButton | None = None
+        self._leapfrog_output_box: ctk.CTkTextbox | None = None
         self._compute_in_progress = False
         self._auto_compute_done = False
         self._auto_compute_context_signature: tuple[object, ...] | None = None
@@ -132,12 +136,13 @@ class VariographyStageView:
         ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+        self._build_leapfrog_export_panel(results)
 
         cached = self._session.last_response
         if cached is not None and cached.result is not None:
             self.status_var.set(str(cached.message))
-            self.warning_var.set("\n".join([f"[{item.code}] {item.message}" for item in cached.warnings]) if cached.warnings else "")
-            self.blocker_var.set("\n".join([f"[{item.code}] {item.message}" for item in cached.blockers]) if cached.blockers else "")
+            self.warning_var.set(self._join_sorted_issue_lines(cached.warnings))
+            self.blocker_var.set(self._join_sorted_issue_lines(cached.blockers))
             result_payload = {
                 "lag_centers": cached.result.lag_centers,
                 "gamma_values": cached.result.gamma_values,
@@ -147,6 +152,7 @@ class VariographyStageView:
                 "downsampled": cached.result.downsampled,
                 "metadata": cached.result.metadata,
             }
+            self._update_leapfrog_from_result(result_payload, bool(cached.ok))
             self._render_result_plot(result_payload, bool(cached.ok))
             return
 
@@ -240,6 +246,23 @@ class VariographyStageView:
 
         self._compute_button = ctk.CTkButton(parent, text="Ejecutar variografía", command=self._on_compute, height=30)
         self._compute_button.grid(row=row, column=0, sticky="ew", padx=8, pady=(6, 6))
+
+    def _build_leapfrog_export_panel(self, parent: ctk.CTkFrame) -> None:
+        card = ctk.CTkFrame(parent, fg_color=BG_CARD)
+        card.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(card, text="Salida para Leapfrog", text_color=TEXT_MAIN, font=ctk.CTkFont(size=13, weight="bold")).grid(
+            row=0, column=0, sticky="w", padx=8, pady=(8, 2)
+        )
+        ctk.CTkLabel(card, textvariable=self.leapfrog_status_var, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(
+            row=1, column=0, sticky="w", padx=8, pady=(0, 4)
+        )
+        self._leapfrog_output_box = ctk.CTkTextbox(card, height=170, font=ctk.CTkFont(family="Courier", size=12))
+        self._leapfrog_output_box.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6))
+        self._copy_button = ctk.CTkButton(card, text="Copiar parámetros", command=self._on_copy_leapfrog_output, height=28)
+        self._copy_button.grid(row=3, column=0, sticky="e", padx=8, pady=(0, 8))
+        self._refresh_leapfrog_output_box()
+        self._set_copy_button_enabled(bool(self.leapfrog_output_var.get().strip()))
 
     def _build_compact_field(self, parent: ctk.CTkFrame, *, row: int, col: int, label: str, var: ctk.StringVar, state: str = "normal") -> None:
         parent.grid_columnconfigure(col, weight=1)
@@ -428,13 +451,15 @@ class VariographyStageView:
     def _on_compute_finished(self, response: dict[str, object]) -> None:
         try:
             self.status_var.set(str(response.get("message", "")))
-            warnings = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("warnings", [])]
-            blockers = [f"[{item.get('code')}] {item.get('message')}" for item in response.get("blockers", [])]
-            self.warning_var.set("\n".join(warnings) if warnings else "")
-            self.blocker_var.set("\n".join(blockers) if blockers else "")
+            self.warning_var.set(self._join_sorted_issue_lines(response.get("warnings", [])))
+            self.blocker_var.set(self._join_sorted_issue_lines(response.get("blockers", [])))
             result = response.get("result")
             if not isinstance(result, dict):
                 self.usage_warning_var.set("")
+                self._set_leapfrog_output(
+                    text="Sin salida para Leapfrog: el cálculo no devolvió resultado utilizable.",
+                    status="Salida Leapfrog no disponible: resultado variográfico no renderizable.",
+                )
                 self._render_compute_failure_panel(response)
                 return
             model_meta = result.get("metadata", {}).get("model", []) if isinstance(result.get("metadata", {}), dict) else {}
@@ -442,6 +467,7 @@ class VariographyStageView:
             self.usage_warning_var.set(
                 "\n".join([f"[USAGE] {str(item)}" for item in usage_warnings]) if isinstance(usage_warnings, list) and usage_warnings else ""
             )
+            self._update_leapfrog_from_result(result, bool(response.get("ok", False)))
             self._render_result_plot(result, bool(response.get("ok", False)))
             logger.info(
                 "Variography UI render success | ok=%s lag_len=%s gamma_len=%s pair_len=%s",
@@ -458,6 +484,7 @@ class VariographyStageView:
         if self._compute_button is None:
             return
         self._compute_button.configure(state="disabled" if busy else "normal")
+        self._set_copy_button_enabled((not busy) and bool(self.leapfrog_output_var.get().strip()))
 
     def _render_empty_plot(self, message: str = "Sin cálculo aún.") -> None:
         if self._plot_host is None:
@@ -570,6 +597,8 @@ class VariographyStageView:
             suggestion=suggestion,
             severity="warning",
         )
+        if self.leapfrog_status_var.get().strip():
+            self.status_var.set(f"{self.status_var.get()} · {self.leapfrog_status_var.get()}")
         logger.info("Variography UI fallback panel | blocker=%s message=%s", blocker_code, blocker_message)
 
     def _render_plot_feedback(self, *, title: str, message: str, suggestion: str, severity: str = "warning") -> None:
@@ -582,3 +611,127 @@ class VariographyStageView:
         ctk.CTkLabel(container, text=title, text_color=color, font=ctk.CTkFont(size=14, weight="bold"), justify="left").pack(anchor="w", padx=12, pady=(12, 6))
         ctk.CTkLabel(container, text=message, text_color=TEXT_MAIN, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w", padx=12, pady=(0, 6))
         ctk.CTkLabel(container, text=suggestion, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w", padx=12, pady=(0, 12))
+
+    def _join_sorted_issue_lines(self, issues: object) -> str:
+        if not isinstance(issues, list):
+            return ""
+        normalized: list[tuple[str, str]] = []
+        for item in issues:
+            if isinstance(item, dict):
+                code = str(item.get("code", "")).strip()
+                message = str(item.get("message", "")).strip()
+            else:
+                code = str(getattr(item, "code", "")).strip()
+                message = str(getattr(item, "message", "")).strip()
+            if code or message:
+                normalized.append((code, message))
+        normalized.sort(key=lambda x: (x[0], x[1]))
+        return "\n".join([f"[{code}] {message}" if code else message for code, message in normalized])
+
+    def _update_leapfrog_from_result(self, result: dict[str, object], ok: bool) -> None:
+        metadata = result.get("metadata", {}) if isinstance(result.get("metadata", {}), dict) else {}
+        model = metadata.get("model", {}) if isinstance(metadata.get("model", {}), dict) else {}
+        direction_applied = bool(metadata.get("direction_applied", False))
+        text, status = self._build_leapfrog_text(model, direction_applied=direction_applied, ok=ok)
+        self._set_leapfrog_output(text=text, status=status)
+        current_status = str(self.status_var.get()).strip()
+        if current_status:
+            self.status_var.set(f"{current_status} · {status}")
+        else:
+            self.status_var.set(status)
+
+    def _build_leapfrog_text(self, model: dict[str, object], *, direction_applied: bool, ok: bool) -> tuple[str, str]:
+        nugget_obj = model.get("nugget", {}) if isinstance(model.get("nugget", {}), dict) else {}
+        nugget_val = self._as_float_or_none(nugget_obj.get("value"))
+        sill_val = self._as_float_or_none(model.get("sill"))
+        structures = model.get("structures", []) if isinstance(model.get("structures", []), list) else []
+        active_structures = [s for s in structures if isinstance(s, dict) and bool(s.get("active", True))]
+        selected = sorted(
+            active_structures,
+            key=lambda s: float(s.get("contribution", 0.0) or 0.0),
+            reverse=True,
+        )[0] if active_structures else None
+        major_range = self._as_float_or_none(selected.get("range_major")) if isinstance(selected, dict) else None
+        semi_range = self._as_float_or_none(selected.get("range_minor")) if isinstance(selected, dict) else None
+        minor_range = self._as_float_or_none(selected.get("range_vertical")) if isinstance(selected, dict) else None
+        structure_type = str(selected.get("type", "Pendiente")) if isinstance(selected, dict) else "Pendiente"
+        contribution = self._as_float_or_none(selected.get("contribution")) if isinstance(selected, dict) else None
+        azimuth = self._fmt_numeric(selected.get("azimuth")) if direction_applied and isinstance(selected, dict) else "Pendiente"
+        dip = self._fmt_numeric(selected.get("dip")) if direction_applied and isinstance(selected, dict) else "Pendiente"
+        lines = [
+            "Major:",
+            f"Azimuth: {azimuth}",
+            f"Dip: {dip}",
+            f"Range: {self._fmt_numeric(major_range)}",
+            "",
+            "Semi-major:",
+            f"Azimuth: {azimuth}",
+            f"Dip: {dip}",
+            f"Range: {self._fmt_numeric(semi_range)}",
+            "",
+            "Minor:",
+            f"Azimuth: {azimuth}",
+            f"Dip: {dip}",
+            f"Range: {self._fmt_numeric(minor_range)}",
+            "",
+            f"Structure type: {structure_type if structure_type else 'Pendiente'}",
+            f"Contribution: {self._fmt_numeric(contribution)}",
+            f"Nugget: {self._fmt_numeric(nugget_val)}",
+            f"Sill: {self._fmt_numeric(sill_val)}",
+        ]
+        have_global = nugget_val is not None or sill_val is not None
+        have_structure = isinstance(selected, dict)
+        if have_global and have_structure and direction_applied and ok:
+            status = "Salida Leapfrog utilizable: parámetros globales y estructura principal disponibles."
+        elif have_global and have_structure:
+            status = "Salida parcial disponible: estructura principal y parámetros globales; direccionalidad pendiente."
+        elif have_global:
+            status = "Solo parámetros globales disponibles para Leapfrog (sin estructura activa)."
+        else:
+            status = "Salida Leapfrog pendiente: faltan nugget/sill del resultado variográfico."
+        return "\n".join(lines), status
+
+    def _set_leapfrog_output(self, *, text: str, status: str) -> None:
+        self.leapfrog_output_var.set(text)
+        self.leapfrog_status_var.set(status)
+        self._refresh_leapfrog_output_box()
+        self._set_copy_button_enabled(bool(text.strip()))
+
+    def _refresh_leapfrog_output_box(self) -> None:
+        if self._leapfrog_output_box is None:
+            return
+        self._leapfrog_output_box.configure(state="normal")
+        self._leapfrog_output_box.delete("1.0", "end")
+        self._leapfrog_output_box.insert("1.0", self.leapfrog_output_var.get())
+        self._leapfrog_output_box.configure(state="disabled")
+
+    def _set_copy_button_enabled(self, enabled: bool) -> None:
+        if self._copy_button is None:
+            return
+        self._copy_button.configure(state="normal" if enabled else "disabled")
+
+    def _on_copy_leapfrog_output(self) -> None:
+        text = str(self.leapfrog_output_var.get()).strip()
+        if not text:
+            self.leapfrog_status_var.set("No hay parámetros para copiar.")
+            return
+        if self._copy_button is None:
+            return
+        self._copy_button.clipboard_clear()
+        self._copy_button.clipboard_append(text)
+        self.leapfrog_status_var.set(f"{self.leapfrog_status_var.get()} Copiado al portapapeles.")
+
+    @staticmethod
+    def _as_float_or_none(value: object) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _fmt_numeric(self, value: object) -> str:
+        parsed = self._as_float_or_none(value)
+        if parsed is None:
+            return "Pendiente"
+        return f"{parsed:.6g}"
