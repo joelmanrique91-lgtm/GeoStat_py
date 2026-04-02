@@ -719,7 +719,8 @@ class VariographyStageView:
             return
         self._copy_button.clipboard_clear()
         self._copy_button.clipboard_append(text)
-        self.leapfrog_status_var.set(f"{self.leapfrog_status_var.get()} Copiado al portapapeles.")
+        base = str(self.leapfrog_status_var.get()).replace(" Copiado al portapapeles.", "").strip()
+        self.leapfrog_status_var.set(f"{base} Copiado al portapapeles.")
 
     @staticmethod
     def _as_float_or_none(value: object) -> float | None:

@@ -886,7 +886,12 @@ class HomePanel(ctk.CTkFrame):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
         row.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(row, text="Variografía experimental activa: usa la vista para configurar y calcular.", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        ctk.CTkLabel(
+            row,
+            text="Variografía activa: calcula el modelo y revisa la salida exportable para Leapfrog.",
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_BODY),
+        ).grid(row=0, column=0, sticky="w", padx=4, pady=2)
 
     def _apply_kpi_focus(self, step_name: str) -> None:
         focus_by_step = {
@@ -1048,7 +1053,7 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "EDA":
             self.workspace_title_var.set("Diagnóstico de distribución")
-            self.workspace_subtitle_var.set("")
+            self.workspace_subtitle_var.set("Determina si la variable está estable o si requiere intervención de capping.")
             self._render_eda_view(stage_host, force_rebuild=force_rebuild)
             return
 
@@ -1066,11 +1071,11 @@ class HomePanel(ctk.CTkFrame):
 
         if stage == "Dominios":
             self.workspace_title_var.set("05 Dominios")
-            self.workspace_subtitle_var.set("")
+            self.workspace_subtitle_var.set("Valida estado de dominios y la acción requerida para avanzar en el flujo.")
             self._render_domains_view(stage_host, force_rebuild=force_rebuild)
             return
         self.workspace_title_var.set("06 Variografía")
-        self.workspace_subtitle_var.set("")
+        self.workspace_subtitle_var.set("Consolida modelo experimental y salida de parámetros para modelado aguas abajo.")
         self._render_variography_view(stage_host, force_rebuild=force_rebuild)
 
     def _build_eda_render_signature(self, operational: GeostatOperationalState) -> tuple[object, ...]:
@@ -1600,8 +1605,8 @@ class HomePanel(ctk.CTkFrame):
         _wrapper, visual_host = self._build_decision_layout(
             parent,
             decision_title="Decisión variográfica",
-            decision_message="Calcular y validar un variograma experimental utilizable para modelado.",
-            context_message="Prioriza calidad de pares y consistencia antes de exportar parámetros.",
+            decision_message="Validar variograma experimental y confirmar parámetros que se exportarán al modelado.",
+            context_message="Prioriza calidad de pares y consistencia del ajuste antes de usar la salida para Leapfrog.",
         )
         self.variography_stage_view.mount(visual_host)
 
