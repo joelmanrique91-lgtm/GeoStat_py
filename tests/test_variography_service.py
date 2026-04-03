@@ -341,6 +341,35 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertIn("optimizer", model["fit"])
         self.assertIn("reliability", model)
         self.assertIn("anisotropy_mode", model)
+        self.assertIn("classification", model["reliability"])
+        self.assertIn(model["reliability"]["classification"], {"BLOCKED", "EXPLORATORY_ONLY", "LOW_RELIABILITY", "ACCEPTABLE_PRELIMINARY"})
+
+    def test_model_output_contract_is_estimation_ready_schema(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {"target_col": "target", "lag_distance": 10.0, "n_lags": 6, "lag_tolerance": 5.0, "max_distance": 60.0}
+        )
+        self.assertIsNotNone(response.result)
+        contract = response.result.metadata.get("estimation_contract", {})
+        self.assertEqual(contract.get("schema"), "variogram_model.v1")
+        self.assertIn("classification", contract)
+        model = contract.get("model", {})
+        self.assertIn("structures", model)
+        self.assertIn("nugget", model)
+        self.assertIn("assumptions", model)
+
+    def test_operational_classification_blocks_when_fit_is_unreliable(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {"target_col": "target", "lag_distance": 20.0, "n_lags": 12, "lag_tolerance": 0.1, "max_distance": 50.0}
+        )
+        if response.result is not None:
+            reliability = response.result.metadata.get("model", {}).get("reliability", {})
+            self.assertIn(reliability.get("classification"), {"BLOCKED", "EXPLORATORY_ONLY", "LOW_RELIABILITY", "ACCEPTABLE_PRELIMINARY"})
 
 
 if __name__ == "__main__":

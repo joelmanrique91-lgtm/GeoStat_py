@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 import math
 
+from app.models.variography.modeling_contracts import ReliabilityClass
 
 @dataclass(frozen=True)
 class FitReliability:
@@ -12,6 +13,15 @@ class FitReliability:
     flags: list[str]
     notes: list[str]
     metrics: dict[str, float]
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class OperationalReliability:
+    classification: ReliabilityClass
+    rationale: list[str]
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -102,3 +112,26 @@ def assess_fit_reliability(
         level = "high"
     return FitReliability(level=level, flags=flags, notes=notes, metrics=metrics)
 
+
+def classify_operational_reliability(
+    *,
+    fit_reliability: FitReliability,
+    blockers_count: int,
+    total_pairs: int,
+    valid_lags: int,
+) -> OperationalReliability:
+    rationale: list[str] = []
+    if blockers_count > 0:
+        rationale.append("Existen blockers activos de validación.")
+        return OperationalReliability(classification="BLOCKED", rationale=rationale)
+    if total_pairs < 60 or valid_lags < 3:
+        rationale.append("Cobertura de pares/lags insuficiente para uso preliminar confiable.")
+        return OperationalReliability(classification="EXPLORATORY_ONLY", rationale=rationale)
+    if fit_reliability.level == "low":
+        rationale.append("Confiabilidad del ajuste clasificada como baja por criterios geoestadísticos.")
+        return OperationalReliability(classification="LOW_RELIABILITY", rationale=rationale)
+    if fit_reliability.level == "medium":
+        rationale.append("Confiabilidad intermedia: usar sólo como referencia preliminar.")
+        return OperationalReliability(classification="LOW_RELIABILITY", rationale=rationale)
+    rationale.append("Sin blockers y confiabilidad del ajuste aceptable para uso preliminar.")
+    return OperationalReliability(classification="ACCEPTABLE_PRELIMINARY", rationale=rationale)
