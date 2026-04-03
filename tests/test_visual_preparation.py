@@ -108,7 +108,7 @@ class VisualPreparationTests(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertIn("Target no numérico", result.message)
 
-    def test_prepare_visual_data_fails_when_resolved_target_missing(self) -> None:
+    def test_prepare_visual_data_recovers_when_resolved_target_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             p = Path(tmp_dir) / "data.csv"
             p.write_text("x,y,z,target\n1,2,3,10\n2,3,4,11\n", encoding="utf-8")
@@ -126,8 +126,8 @@ class VisualPreparationTests(unittest.TestCase):
             )
             self.service.current_dataset.dataframe.drop(columns=["target_capped_missing"], inplace=True)
             result = self.service.prepare_visual_data()
-            self.assertFalse(result.success)
-            self.assertIn("Target no válido para secciones espaciales", result.message)
+            self.assertTrue(result.success)
+            self.assertIsNotNone(result.spatial_data)
 
     def test_prepare_visual_data_fails_when_active_domain_column_missing(self) -> None:
         self._load_numeric_dataset()

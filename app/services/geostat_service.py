@@ -588,6 +588,7 @@ class GeostatService:
         return self.variable_config.target_column
 
     def get_analysis_context_state(self) -> AnalysisContextState:
+        self.cutoff_service.ensure_state_integrity()
         return self.operational_state_service.build_analysis_context_state()
 
     def get_analysis_context_snapshot(self) -> dict[str, object]:

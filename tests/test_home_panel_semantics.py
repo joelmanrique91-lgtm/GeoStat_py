@@ -37,7 +37,7 @@ class HomePanelSemanticsTests(unittest.TestCase):
             has_variable_config=True,
             stages=stages,
         )
-        cutoff = CutoffState(False, "", (), (), "", "target", False, "", "percentile", 95.0, 0.0, "", "")
+        cutoff = CutoffState(False, "", "", (), (), "", "target", False, "", "", "percentile", 95.0, 0.0, "", "")
         domain = DomainState(effective_target_column="target")
         selection = VariableSelectionState(target_column="target")
         return GeostatOperationalState(analysis=analysis, readiness=readiness, cutoff=cutoff, domain=domain, selection=selection)

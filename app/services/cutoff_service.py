@@ -27,12 +27,33 @@ class CutoffService:
     def has_confirmed_dynamic_capping(self) -> bool:
         return bool(self.host.workflow_state.dynamic_cutoff_enabled and self.host.workflow_state.dynamic_cutoff_output_column)
 
+    def ensure_state_integrity(self) -> None:
+        """Keep workflow cutoff state coherent when derived columns are missing/stale."""
+        if self.host.current_dataset is None:
+            self.clear_cutoff_state()
+            self.clear_dynamic_cutoff_state()
+            return
+        columns = set(self.host.current_dataset.dataframe.columns)
+        if self.host.workflow_state.cutoffs_enabled:
+            out_col = str(self.host.workflow_state.cutoff_output_column or "")
+            if not out_col or out_col not in columns:
+                self.clear_cutoff_state()
+        if self.host.workflow_state.dynamic_cutoff_enabled:
+            out_col = str(self.host.workflow_state.dynamic_cutoff_output_column or "")
+            if (not out_col) or (out_col not in columns):
+                self.clear_dynamic_cutoff_state()
+            else:
+                category = str(self.host.workflow_state.dynamic_cutoff_category_column or "")
+                if category and category not in columns:
+                    self.host.workflow_state.dynamic_cutoff_category_column = ""
+
     def clear_cutoff_state(self) -> None:
         self.host.workflow_state.cutoffs_enabled = False
         self.host.workflow_state.cutoff_target_column = ""
         self.host.workflow_state.cutoff_limits = []
         self.host.workflow_state.cutoff_labels = []
         self.host.workflow_state.cutoff_output_column = ""
+        self.host.workflow_state.cutoff_source_column = ""
         self.host.workflow_state.effective_target_column = ""
 
     def clear_dynamic_cutoff_state(self) -> None:
@@ -43,6 +64,7 @@ class CutoffService:
         self.host.workflow_state.dynamic_cutoff_value = 0.0
         self.host.workflow_state.dynamic_cutoff_output_column = ""
         self.host.workflow_state.dynamic_cutoff_category_column = ""
+        self.host.workflow_state.dynamic_cutoff_source_column = ""
 
     def format_cutoff_number(self, value: float) -> str:
         try:
@@ -143,8 +165,12 @@ class CutoffService:
 
         cutoff = float(preview["cutoff_value"])
         out_col = (output_column or f"{target_column}_capped").strip()
+        if not out_col:
+            return False, "El nombre de salida para capping no puede ser vacío.", 0.0
         if out_col in {self.host.variable_config.x_column, self.host.variable_config.y_column, self.host.variable_config.z_column}:
             return False, "El nombre de salida no puede sobrescribir X/Y/Z.", 0.0
+        if out_col in self.host.current_dataset.dataframe.columns and out_col != target_column and out_col != self.host.workflow_state.dynamic_cutoff_output_column:
+            return False, f"La columna de salida '{out_col}' ya existe. Usa otro nombre para trazabilidad.", 0.0
 
         source = _to_numeric(self.host.current_dataset.dataframe[target_column])
         self.host.current_dataset.dataframe[out_col] = source.clip(upper=cutoff)
@@ -155,6 +181,8 @@ class CutoffService:
         category_col = ""
         if keep_category_column:
             category_col = f"{out_col}_class"
+            if category_col in self.host.current_dataset.dataframe.columns and category_col != self.host.workflow_state.dynamic_cutoff_category_column:
+                return False, f"La columna de categoría '{category_col}' ya existe. Cambia nombre de salida.", 0.0
             labels = [f"<= {self.format_cutoff_number(cutoff)}", f"> {self.format_cutoff_number(cutoff)}"]
             import pandas as pd
 
@@ -170,6 +198,7 @@ class CutoffService:
         self.host.workflow_state.dynamic_cutoff_value = cutoff
         self.host.workflow_state.dynamic_cutoff_output_column = out_col
         self.host.workflow_state.dynamic_cutoff_category_column = category_col
+        self.host.workflow_state.dynamic_cutoff_source_column = target_column
         self.host.workflow_state.effective_target_column = out_col
         self.host.activity_log.log(
             "dynamic_cutoff_applied",
@@ -209,8 +238,12 @@ class CutoffService:
 
         labels = self.build_cutoff_labels(limits)
         output_name = (output_column or f"{target_column}_cutoff").strip()
+        if not output_name:
+            return False, "El nombre de salida para cutoff manual no puede ser vacío."
         if output_name in {self.host.variable_config.x_column, self.host.variable_config.y_column, self.host.variable_config.z_column}:
             return False, "El nombre de salida no puede sobrescribir X/Y/Z."
+        if output_name in self.host.current_dataset.dataframe.columns and output_name != self.host.workflow_state.cutoff_output_column:
+            return False, f"La columna de salida '{output_name}' ya existe. Usa otro nombre para trazabilidad."
 
         import pandas as pd
 
@@ -227,6 +260,7 @@ class CutoffService:
         self.host.workflow_state.cutoff_limits = limits
         self.host.workflow_state.cutoff_labels = labels
         self.host.workflow_state.cutoff_output_column = output_name
+        self.host.workflow_state.cutoff_source_column = target_column
         self.host.workflow_state.effective_target_column = output_name
 
         self.clear_dynamic_cutoff_state()

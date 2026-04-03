@@ -92,6 +92,32 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertIn("INVALID_N_LAGS", codes)
         self.assertIn("INVALID_MAX_DISTANCE", codes)
 
+    def test_compute_blocks_invalid_directional_params(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 5,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "azimuth": 0.0,
+                "dip": 120.0,
+                "ang_tol_h": 95.0,
+                "ang_tol_v": -1.0,
+                "band_width": 0.0,
+                "band_height": 0.0,
+                "model": self._model_payload(),
+            }
+        )
+        self.assertFalse(response.ok)
+        codes = {item.code for item in response.blockers}
+        self.assertIn("INVALID_ANG_TOL_H", codes)
+        self.assertIn("INVALID_ANG_TOL_V", codes)
+        self.assertIn("INVALID_DIP", codes)
+
     def test_compute_returns_low_npairs_warning(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
         self.assertTrue(self.service.load_csv(str(csv_path)).success)
@@ -185,6 +211,31 @@ class VariographyServiceTests(unittest.TestCase):
             self.assertLessEqual(sum(directional.result.pair_counts), sum(base.result.pair_counts))
             self.assertTrue(bool(directional.result.metadata.get("direction_applied")))
 
+    def test_compute_is_reproducible_for_same_inputs(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        params = {
+            "target_col": "target",
+            "lag_distance": 10.0,
+            "n_lags": 5,
+            "lag_tolerance": 5.0,
+            "max_distance": 60.0,
+            "azimuth": 25.0,
+            "dip": 0.0,
+            "ang_tol_h": 35.0,
+            "ang_tol_v": 35.0,
+            "band_width": 0.0,
+            "band_height": 0.0,
+            "model": self._model_payload(),
+        }
+        a = self.service.compute_experimental_variography(params)
+        b = self.service.compute_experimental_variography(params)
+        self.assertIsNotNone(a.result)
+        self.assertIsNotNone(b.result)
+        self.assertEqual(a.result.pair_counts, b.result.pair_counts)
+        self.assertEqual(a.result.gamma_values, b.result.gamma_values)
+
     def test_compute_no_pairs_in_range_returns_specific_blocker(self) -> None:
         csv_path = FIXTURES / "variography_small_numeric.csv"
         self.assertTrue(self.service.load_csv(str(csv_path)).success)
@@ -266,6 +317,59 @@ class VariographyServiceTests(unittest.TestCase):
         self.assertFalse(response.ok)
         blocker_codes = {item.code for item in response.blockers}
         self.assertIn("NON_NUMERIC_CONTEXT_COLUMN", blocker_codes)
+
+    def test_model_payload_exposes_optimizer_and_reliability_metadata(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 6,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "model": {
+                    **self._model_payload(),
+                    "fit": {"method": "WLS", "min_pairs": 5, "exclude_lags": []},
+                },
+            }
+        )
+        self.assertIsNotNone(response.result)
+        model = response.result.metadata.get("model", {})
+        self.assertIn("fit", model)
+        self.assertIn("optimizer", model["fit"])
+        self.assertIn("reliability", model)
+        self.assertIn("anisotropy_mode", model)
+        self.assertIn("classification", model["reliability"])
+        self.assertIn(model["reliability"]["classification"], {"BLOCKED", "EXPLORATORY_ONLY", "LOW_RELIABILITY", "ACCEPTABLE_PRELIMINARY"})
+
+    def test_model_output_contract_is_estimation_ready_schema(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {"target_col": "target", "lag_distance": 10.0, "n_lags": 6, "lag_tolerance": 5.0, "max_distance": 60.0}
+        )
+        self.assertIsNotNone(response.result)
+        contract = response.result.metadata.get("estimation_contract", {})
+        self.assertEqual(contract.get("schema"), "variogram_model.v1")
+        self.assertIn("classification", contract)
+        model = contract.get("model", {})
+        self.assertIn("structures", model)
+        self.assertIn("nugget", model)
+        self.assertIn("assumptions", model)
+
+    def test_operational_classification_blocks_when_fit_is_unreliable(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {"target_col": "target", "lag_distance": 20.0, "n_lags": 12, "lag_tolerance": 0.1, "max_distance": 50.0}
+        )
+        if response.result is not None:
+            reliability = response.result.metadata.get("model", {}).get("reliability", {})
+            self.assertIn(reliability.get("classification"), {"BLOCKED", "EXPLORATORY_ONLY", "LOW_RELIABILITY", "ACCEPTABLE_PRELIMINARY"})
 
 
 if __name__ == "__main__":

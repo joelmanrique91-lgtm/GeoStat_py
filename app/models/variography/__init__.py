@@ -11,6 +11,13 @@ from .contracts import (
     VariographyIssue,
 )
 from .session import VariographySession
+from .modeling_contracts import (
+    FitDiagnosticsContract,
+    ReliabilityClass,
+    ReliabilityContract,
+    StructureContract,
+    VariogramModelContract,
+)
 
 __all__ = [
     "AnalysisContextRef",
@@ -22,4 +29,9 @@ __all__ = [
     "VariographyComputeResponse",
     "VariographyIssue",
     "VariographySession",
+    "ReliabilityClass",
+    "StructureContract",
+    "FitDiagnosticsContract",
+    "ReliabilityContract",
+    "VariogramModelContract",
 ]
