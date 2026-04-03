@@ -92,13 +92,18 @@ def auto_fit_wls(
     structures: list[dict[str, object]],
     min_pairs: int,
     excluded_lags: list[int],
-) -> tuple[dict[str, object], list[dict[str, object]]]:
+) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
     if not structures:
-        return nugget, structures
+        return nugget, structures, {"applied": False, "reason": "no_structures"}
 
     valid_idx = [idx for idx, (g, p) in enumerate(zip(gamma, npairs)) if p >= min_pairs and math.isfinite(float(g)) and (idx + 1) not in excluded_lags]
     if not valid_idx:
-        return nugget, structures
+        return nugget, structures, {"applied": False, "reason": "no_valid_lags"}
+
+    try:
+        from scipy.optimize import least_squares
+    except Exception:
+        return nugget, structures, {"applied": False, "reason": "scipy_not_available"}
 
     try:
         from scipy.optimize import least_squares
@@ -114,7 +119,7 @@ def auto_fit_wls(
     working_structures = [dict(s) for s in structures]
     active_indices = [idx for idx, s in enumerate(working_structures) if bool(s.get("active", True))]
     if not active_indices:
-        return nugget, structures
+        return nugget, structures, {"applied": False, "reason": "no_active_structures"}
 
     param_names: list[tuple[str, int | None]] = []
     x0: list[float] = []
@@ -141,7 +146,7 @@ def auto_fit_wls(
             hi.append(max(max(h_valid) * 3.0, 1.0))
 
     if not param_names:
-        return nugget, structures
+        return nugget, structures, {"applied": False, "reason": "all_params_locked"}
 
     fixed_nugget = max(0.0, float(nugget.get("value", 0.0) or 0.0))
 
@@ -170,6 +175,7 @@ def auto_fit_wls(
         modeled, _, _ = evaluate_model(h_valid, nugget_value, decoded_structures)
         return [(float(gm) - float(ge)) * float(w) for gm, ge, w in zip(modeled, g_valid, w_valid)]
 
+    x0 = [min(max(value, lo[idx]), hi[idx]) for idx, value in enumerate(x0)]
     result = least_squares(
         residuals,
         x0=x0,
@@ -181,4 +187,16 @@ def auto_fit_wls(
     updated_nugget = dict(nugget)
     if not nugget_locked:
         updated_nugget["value"] = fit_nugget
-    return updated_nugget, fit_structures
+    return updated_nugget, fit_structures, {
+        "applied": True,
+        "solver": "scipy.optimize.least_squares",
+        "method": "trf",
+        "nfev": int(getattr(result, "nfev", 0)),
+        "cost": float(getattr(result, "cost", math.nan)),
+        "success": bool(getattr(result, "success", False)),
+        "message": str(getattr(result, "message", "")),
+        "weights_mode": "sqrt(npairs)/max_gamma",
+        "bounds": {"lower": [float(v) for v in lo], "upper": [float(v) for v in hi]},
+        "parameter_order": [f"{name}:{idx if idx is not None else 'global'}" for name, idx in param_names],
+        "used_lag_indices": [int(v) + 1 for v in valid_idx],
+    }

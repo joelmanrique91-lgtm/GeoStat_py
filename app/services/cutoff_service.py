@@ -27,6 +27,26 @@ class CutoffService:
     def has_confirmed_dynamic_capping(self) -> bool:
         return bool(self.host.workflow_state.dynamic_cutoff_enabled and self.host.workflow_state.dynamic_cutoff_output_column)
 
+    def ensure_state_integrity(self) -> None:
+        """Keep workflow cutoff state coherent when derived columns are missing/stale."""
+        if self.host.current_dataset is None:
+            self.clear_cutoff_state()
+            self.clear_dynamic_cutoff_state()
+            return
+        columns = set(self.host.current_dataset.dataframe.columns)
+        if self.host.workflow_state.cutoffs_enabled:
+            out_col = str(self.host.workflow_state.cutoff_output_column or "")
+            if not out_col or out_col not in columns:
+                self.clear_cutoff_state()
+        if self.host.workflow_state.dynamic_cutoff_enabled:
+            out_col = str(self.host.workflow_state.dynamic_cutoff_output_column or "")
+            if (not out_col) or (out_col not in columns):
+                self.clear_dynamic_cutoff_state()
+            else:
+                category = str(self.host.workflow_state.dynamic_cutoff_category_column or "")
+                if category and category not in columns:
+                    self.host.workflow_state.dynamic_cutoff_category_column = ""
+
     def clear_cutoff_state(self) -> None:
         self.host.workflow_state.cutoffs_enabled = False
         self.host.workflow_state.cutoff_target_column = ""

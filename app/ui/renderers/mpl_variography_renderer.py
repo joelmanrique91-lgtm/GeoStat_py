@@ -125,15 +125,19 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
             f"downsampled: {response.get('downsampled', False)}",
             f"hash: {metadata.get('computation_hash', '-')}",
             f"direction_applied: {metadata.get('direction_applied', False)}",
+            f"direction_mode: {metadata.get('direction_mode', '-')}",
         ]
         if isinstance(model_meta, dict):
             nugget_meta = model_meta.get("nugget", {}) if isinstance(model_meta.get("nugget"), dict) else {}
             usage_warnings = model_meta.get("usage_warnings", []) if isinstance(model_meta.get("usage_warnings"), list) else []
+            reliability = model_meta.get("reliability", {}) if isinstance(model_meta.get("reliability"), dict) else {}
             lines.extend(
                 [
                     f"sill: {model_meta.get('sill', '-')}",
                     f"nugget_abs: {nugget_meta.get('value', '-')}",
                     f"nugget_rel%: {model_meta.get('nugget_relative_pct', '-')}",
+                    f"anisotropy_mode: {model_meta.get('anisotropy_mode', '-')}",
+                    f"fit_reliability: {reliability.get('level', '-')}",
                     f"usage_target: {model_meta.get('usage_target', '-')}",
                 ]
             )

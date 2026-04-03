@@ -28,6 +28,7 @@ from app.services.variogram_modeling_service import (
     evaluate_quality,
 )
 from app.services.visualization_service import compute_experimental_variogram
+from app.services.variography_validation_service import assess_fit_reliability
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,7 @@ class VariographyApplicationService:
         metadata = {
             "computation_hash": self._compute_hash(request),
             "direction_applied": True,
+            "direction_mode": "directional" if (request.direction.ang_tol_h < 90.0 or request.direction.ang_tol_v < 90.0 or request.direction.band_width > 0.0 or request.direction.band_height > 0.0) else "omnidirectional",
             "direction_note": "Parámetros direccionales aplicados al set de pares.",
             "lag_tolerance": request.lag.lag_tolerance,
             "estimator": request.estimator,
@@ -405,7 +407,9 @@ class VariographyApplicationService:
                 "usage_warnings": ["Modelado bloqueado: sin estructuras activas."],
             }
         if fit_method == "WLS":
-            nugget, structures = auto_fit_wls(lag_centers, gamma_values, pair_counts, nugget, structures, min_pairs, excluded_lags)
+            nugget, structures, fit_meta = auto_fit_wls(lag_centers, gamma_values, pair_counts, nugget, structures, min_pairs, excluded_lags)
+        else:
+            fit_meta = {"applied": False, "reason": "manual_mode"}
 
         modeled_total, by_structure, sill = evaluate_model(lag_centers, float(nugget["value"]), structures)
         quality = evaluate_quality(lag_centers, gamma_values, pair_counts, modeled_total, min_pairs, excluded_lags)
@@ -424,8 +428,33 @@ class VariographyApplicationService:
                 "warning",
             )
         )
+        fit_reliability = assess_fit_reliability(
+            lag_centers=lag_centers,
+            gamma_values=gamma_values,
+            pair_counts=pair_counts,
+            model_payload={
+                "structures": structures,
+                "quality": {
+                    "rmse": quality.rmse,
+                    "sse": quality.sse,
+                    "valid_lags": quality.valid_lags,
+                },
+                "sill": sill,
+                "nugget_relative_pct": nugget_rel,
+            },
+            min_pairs=min_pairs,
+        )
+        if fit_reliability.level != "high":
+            warnings.append(
+                VariographyIssue(
+                    "LOW_MODEL_RELIABILITY",
+                    f"Ajuste con confiabilidad {fit_reliability.level}; revisar flags: {', '.join(fit_reliability.flags[:4]) or 'sin detalle'}",
+                    "warning",
+                )
+            )
         model_ranges = [float(s.get("range_major", 0.0)) for s in structures if bool(s.get("active", True))]
         practical_range = max(model_ranges) if model_ranges else 0.0
+        # TODO(geostat): sustituir rango isotrópico equivalente por modelado anisotrópico completo orientado por dirección de lag.
         return {
             "nugget": nugget,
             "structures": structures,
@@ -433,18 +462,21 @@ class VariographyApplicationService:
                 "method": fit_method,
                 "min_pairs": min_pairs,
                 "exclude_lags": excluded_lags,
+                "optimizer": fit_meta,
             },
             "curve_total": modeled_total,
             "curves_by_structure": by_structure,
             "sill": sill,
             "nugget_relative_pct": nugget_rel,
             "practical_range": practical_range,
+            "anisotropy_mode": "equivalent_isotropic_range",
             "quality": {
                 "rmse": quality.rmse,
                 "sse": quality.sse,
                 "valid_lags": quality.valid_lags,
                 "invalid_lags": quality.invalid_lags,
             },
+            "reliability": fit_reliability.as_dict(),
             "usage_target": str(model.get("usage_target", "kriging")),
             "usage_warnings": self._usage_warnings(str(model.get("usage_target", "kriging")), nugget_rel, quality.rmse),
         }

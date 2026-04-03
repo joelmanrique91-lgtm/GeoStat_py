@@ -318,6 +318,30 @@ class VariographyServiceTests(unittest.TestCase):
         blocker_codes = {item.code for item in response.blockers}
         self.assertIn("NON_NUMERIC_CONTEXT_COLUMN", blocker_codes)
 
+    def test_model_payload_exposes_optimizer_and_reliability_metadata(self) -> None:
+        csv_path = FIXTURES / "variography_small_numeric.csv"
+        self.assertTrue(self.service.load_csv(str(csv_path)).success)
+        self.assertTrue(self.service.set_variable_config("x", "y", "z", "target").success)
+        response = self.service.compute_experimental_variography(
+            {
+                "target_col": "target",
+                "lag_distance": 10.0,
+                "n_lags": 6,
+                "lag_tolerance": 5.0,
+                "max_distance": 60.0,
+                "model": {
+                    **self._model_payload(),
+                    "fit": {"method": "WLS", "min_pairs": 5, "exclude_lags": []},
+                },
+            }
+        )
+        self.assertIsNotNone(response.result)
+        model = response.result.metadata.get("model", {})
+        self.assertIn("fit", model)
+        self.assertIn("optimizer", model["fit"])
+        self.assertIn("reliability", model)
+        self.assertIn("anisotropy_mode", model)
+
 
 if __name__ == "__main__":
     unittest.main()
