@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from app.services.variography_geometry import DirectionalConfig, pair_matches_direction
 
 @dataclass
 class SpatialDataBundle:
@@ -217,6 +218,8 @@ def compute_experimental_variogram(
         raise ValueError(f"Columnas faltantes para variograma: {', '.join(missing)}")
     if lag <= 0 or n_lags <= 0 or max_distance <= 0:
         raise ValueError("Parámetros de variograma inválidos: lag, n_lags y max_distance deben ser > 0.")
+    if lag_tolerance is not None and float(lag_tolerance) <= 0:
+        raise ValueError("lag_tolerance debe ser > 0.")
     if not pd.api.types.is_numeric_dtype(dataframe[target_col]):
         raise ValueError("Target no numérico para variograma.")
 
@@ -233,48 +236,37 @@ def compute_experimental_variogram(
 
     lag_window = float(lag_tolerance) if lag_tolerance is not None else float(lag) * 0.5
     lag_window = max(1e-9, lag_window)
-
-    def _angle_diff(a: float, b: float) -> float:
-        delta = abs((a - b + 180.0) % 360.0 - 180.0)
-        return delta
-
-    def _direction_matches(dx: float, dy: float, dz: float) -> bool:
-        horizontal = math.sqrt(dx**2 + dy**2)
-        pair_azimuth = math.degrees(math.atan2(dy, dx))
-        pair_dip = math.degrees(math.atan2(dz, horizontal))
-        # Bidirectional matching (theta and theta+180 are equivalent for variography).
-        az_diff = min(_angle_diff(pair_azimuth, azimuth), _angle_diff(pair_azimuth, azimuth + 180.0))
-        dip_diff = min(abs(pair_dip - dip), abs(pair_dip + dip))
-        if az_diff > max(0.0, float(ang_tol_h)):
-            return False
-        if dip_diff > max(0.0, float(ang_tol_v)):
-            return False
-        if band_width > 0:
-            dir_x = math.cos(math.radians(azimuth))
-            dir_y = math.sin(math.radians(azimuth))
-            lateral = abs(-dir_y * dx + dir_x * dy)
-            if lateral > (float(band_width) * 0.5):
-                return False
-        if band_height > 0 and abs(dz) > (float(band_height) * 0.5):
-            return False
-        return True
+    direction = DirectionalConfig(
+        azimuth_deg=float(azimuth),
+        dip_deg=float(dip),
+        azimuth_tolerance_deg=float(ang_tol_h),
+        dip_tolerance_deg=float(ang_tol_v),
+        band_width=float(band_width),
+        band_height=float(band_height),
+    )
+    errors = direction.validate()
+    if errors:
+        raise ValueError("Configuración direccional inválida: " + "; ".join(errors))
 
     dist_acc: list[list[float]] = [[] for _ in range(n_lags)]
+    min_center = float(lag)
+    max_center = float(n_lags) * float(lag)
     for i in range(len(records) - 1):
         x0, y0, z0, v0 = records[i]
         for j in range(i + 1, len(records)):
             x1, y1, z1, v1 = records[j]
             dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
-            if not _direction_matches(dx, dy, dz):
+            if not pair_matches_direction(dx, dy, dz, direction):
                 continue
             d = math.sqrt(dx**2 + dy**2 + dz**2)
-            if d > max_distance:
+            if d > max_distance or d < (min_center - lag_window) or d > (max_center + lag_window):
                 continue
-            for idx in range(n_lags):
-                center = (idx + 1) * lag
-                if abs(d - center) <= lag_window:
-                    dist_acc[idx].append(0.5 * (v1 - v0) ** 2)
-                    break
+            nearest_idx = int(round((d / float(lag)) - 1.0))
+            if nearest_idx < 0 or nearest_idx >= n_lags:
+                continue
+            center = (nearest_idx + 1) * float(lag)
+            if abs(d - center) <= lag_window:
+                dist_acc[nearest_idx].append(0.5 * (v1 - v0) ** 2)
 
     lag_centers, gammas, pairs = [], [], []
     for idx in range(n_lags):

@@ -72,12 +72,14 @@ class WorkflowReadinessState:
 class CutoffState:
     enabled: bool
     target_column: str
+    source_column: str
     limits: tuple[float, ...]
     labels: tuple[str, ...]
     output_column: str
     effective_target_column: str
     dynamic_enabled: bool
     dynamic_target_column: str
+    dynamic_source_column: str
     dynamic_mode: str
     dynamic_percent: float
     dynamic_cutoff_value: float
@@ -88,12 +90,14 @@ class CutoffState:
         return {
             "enabled": self.enabled,
             "target_column": self.target_column,
+            "source_column": self.source_column,
             "limits": list(self.limits),
             "labels": list(self.labels),
             "output_column": self.output_column,
             "effective_target_column": self.effective_target_column,
             "dynamic_enabled": self.dynamic_enabled,
             "dynamic_target_column": self.dynamic_target_column,
+            "dynamic_source_column": self.dynamic_source_column,
             "dynamic_mode": self.dynamic_mode,
             "dynamic_percent": self.dynamic_percent,
             "dynamic_cutoff_value": self.dynamic_cutoff_value,

@@ -28,6 +28,7 @@ from app.services.variogram_modeling_service import (
     evaluate_quality,
 )
 from app.services.visualization_service import compute_experimental_variogram
+from app.services.variography_validation_service import assess_fit_reliability
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +122,16 @@ class VariographyApplicationService:
         self.session.estimator = request.estimator
         blockers = self._validate_request(request)
         warnings: list[VariographyIssue] = []
-        if request.direction.ang_tol_h <= 0 or request.direction.ang_tol_v <= 0:
-            blockers.append(VariographyIssue("INVALID_DIRECTION_TOL", "Las tolerancias angulares deben ser > 0.", "blocker"))
         if request.direction.band_width < 0 or request.direction.band_height < 0:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
-        if request.direction.ang_tol_h > 90 or request.direction.ang_tol_v > 90:
-            warnings.append(VariographyIssue("WIDE_DIRECTION_TOL", "Tolerancias angulares altas pueden mezclar direcciones.", "warning"))
+        if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
+            warnings.append(
+                VariographyIssue(
+                    "NEAR_OMNIDIRECTIONAL_WINDOW",
+                    "Tolerancias angulares cercanas a 90°: análisis prácticamente omnidireccional.",
+                    "warning",
+                )
+            )
         if request.estimator != "classical":
             warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
 
@@ -242,6 +247,7 @@ class VariographyApplicationService:
         metadata = {
             "computation_hash": self._compute_hash(request),
             "direction_applied": True,
+            "direction_mode": "directional" if (request.direction.ang_tol_h < 90.0 or request.direction.ang_tol_v < 90.0 or request.direction.band_width > 0.0 or request.direction.band_height > 0.0) else "omnidirectional",
             "direction_note": "Parámetros direccionales aplicados al set de pares.",
             "lag_tolerance": request.lag.lag_tolerance,
             "estimator": request.estimator,
@@ -401,7 +407,9 @@ class VariographyApplicationService:
                 "usage_warnings": ["Modelado bloqueado: sin estructuras activas."],
             }
         if fit_method == "WLS":
-            nugget, structures = auto_fit_wls(lag_centers, gamma_values, pair_counts, nugget, structures, min_pairs, excluded_lags)
+            nugget, structures, fit_meta = auto_fit_wls(lag_centers, gamma_values, pair_counts, nugget, structures, min_pairs, excluded_lags)
+        else:
+            fit_meta = {"applied": False, "reason": "manual_mode"}
 
         modeled_total, by_structure, sill = evaluate_model(lag_centers, float(nugget["value"]), structures)
         quality = evaluate_quality(lag_centers, gamma_values, pair_counts, modeled_total, min_pairs, excluded_lags)
@@ -416,12 +424,37 @@ class VariographyApplicationService:
         warnings.append(
             VariographyIssue(
                 "THEORETICAL_ANISOTROPY_SIMPLIFIED",
-                "Anisotropía estructural teórica simplificada: el cálculo de curva usa principalmente range_major.",
+                "Anisotropía estructural simplificada: la curva teórica usa rango isotrópico equivalente (media geométrica de ejes).",
                 "warning",
             )
         )
+        fit_reliability = assess_fit_reliability(
+            lag_centers=lag_centers,
+            gamma_values=gamma_values,
+            pair_counts=pair_counts,
+            model_payload={
+                "structures": structures,
+                "quality": {
+                    "rmse": quality.rmse,
+                    "sse": quality.sse,
+                    "valid_lags": quality.valid_lags,
+                },
+                "sill": sill,
+                "nugget_relative_pct": nugget_rel,
+            },
+            min_pairs=min_pairs,
+        )
+        if fit_reliability.level != "high":
+            warnings.append(
+                VariographyIssue(
+                    "LOW_MODEL_RELIABILITY",
+                    f"Ajuste con confiabilidad {fit_reliability.level}; revisar flags: {', '.join(fit_reliability.flags[:4]) or 'sin detalle'}",
+                    "warning",
+                )
+            )
         model_ranges = [float(s.get("range_major", 0.0)) for s in structures if bool(s.get("active", True))]
         practical_range = max(model_ranges) if model_ranges else 0.0
+        # TODO(geostat): sustituir rango isotrópico equivalente por modelado anisotrópico completo orientado por dirección de lag.
         return {
             "nugget": nugget,
             "structures": structures,
@@ -429,18 +462,21 @@ class VariographyApplicationService:
                 "method": fit_method,
                 "min_pairs": min_pairs,
                 "exclude_lags": excluded_lags,
+                "optimizer": fit_meta,
             },
             "curve_total": modeled_total,
             "curves_by_structure": by_structure,
             "sill": sill,
             "nugget_relative_pct": nugget_rel,
             "practical_range": practical_range,
+            "anisotropy_mode": "equivalent_isotropic_range",
             "quality": {
                 "rmse": quality.rmse,
                 "sse": quality.sse,
                 "valid_lags": quality.valid_lags,
                 "invalid_lags": quality.invalid_lags,
             },
+            "reliability": fit_reliability.as_dict(),
             "usage_target": str(model.get("usage_target", "kriging")),
             "usage_warnings": self._usage_warnings(str(model.get("usage_target", "kriging")), nugget_rel, quality.rmse),
         }
@@ -485,6 +521,12 @@ class VariographyApplicationService:
             issues.append(VariographyIssue("INVALID_MAX_DISTANCE", "max_distance debe ser > 0.", "blocker"))
         if request.lag.lag_tolerance <= 0:
             issues.append(VariographyIssue("INVALID_LAG_TOLERANCE", "lag_tolerance debe ser > 0.", "blocker"))
+        if request.direction.ang_tol_h <= 0 or request.direction.ang_tol_h > 90:
+            issues.append(VariographyIssue("INVALID_ANG_TOL_H", "ang_tol_h debe estar en (0, 90].", "blocker"))
+        if request.direction.ang_tol_v <= 0 or request.direction.ang_tol_v > 90:
+            issues.append(VariographyIssue("INVALID_ANG_TOL_V", "ang_tol_v debe estar en (0, 90].", "blocker"))
+        if request.direction.dip < -90 or request.direction.dip > 90:
+            issues.append(VariographyIssue("INVALID_DIP", "dip debe estar en [-90, 90].", "blocker"))
         if request.lag.max_distance <= request.lag.lag_distance:
             issues.append(VariographyIssue("MAX_DISTANCE_TOO_SMALL", "max_distance debe ser mayor que lag_distance.", "blocker"))
         return issues

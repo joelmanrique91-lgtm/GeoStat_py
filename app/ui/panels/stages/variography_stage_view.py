@@ -204,7 +204,7 @@ class VariographyStageView:
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(4, 1))
         ctk.CTkLabel(
             directional_card,
-            text="Direccional (pendiente backend) superado: estos parámetros afectan el cálculo de pares experimentales.",
+            text="Direccional (pendiente backend) superado: direccionalidad aplicada al cálculo experimental de pares. Nota: tolerancias amplias no sustituyen análisis omnidireccional riguroso.",
             text_color=TEXT_MUTED,
             wraplength=318,
             justify="left",
