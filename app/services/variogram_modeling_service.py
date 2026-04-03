@@ -105,6 +105,11 @@ def auto_fit_wls(
     except Exception:
         return nugget, structures, {"applied": False, "reason": "scipy_not_available"}
 
+    try:
+        from scipy.optimize import least_squares
+    except Exception:
+        return nugget, structures
+
     g_valid = [float(gamma[idx]) for idx in valid_idx]
     p_valid = [max(1.0, float(npairs[idx])) for idx in valid_idx]
     h_valid = [float(lags[idx]) for idx in valid_idx]
