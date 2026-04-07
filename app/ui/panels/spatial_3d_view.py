@@ -6,6 +6,7 @@ import customtkinter as ctk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
+from app.models.spatial import PointCloudGeometry, SceneState
 from app.services.visualization_service import Spatial3DDataBundle
 from app.ui.theme import (
     BG_CARD,
@@ -110,6 +111,28 @@ class Spatial3DView(ctk.CTkFrame):
     def show_unavailable(self, reason: str) -> None:
         self.destroy_plot()
         self.meta_label.configure(text=reason)
+
+
+    def update_scene(self, scene: SceneState, color_display_label: str) -> None:
+        point_layer = next((layer for layer in scene.layers if layer.layer_type == "point_cloud" and layer.visible), None)
+        if point_layer is None or not isinstance(point_layer.payload, PointCloudGeometry):
+            self.show_unavailable("Escena sin capa de puntos visible para render 3D.")
+            return
+        payload = point_layer.payload
+        bundle = Spatial3DDataBundle(
+            x=[p[0] for p in payload.points_xyz],
+            y=[p[1] for p in payload.points_xyz],
+            z=[p[2] for p in payload.points_xyz],
+            color_values=list(payload.color_values),
+            point_count_original=int(payload.source_point_count or len(payload.points_xyz)),
+            point_count_rendered=int(payload.rendered_point_count or len(payload.points_xyz)),
+            downsampling_applied=bool((payload.source_point_count or len(payload.points_xyz)) > (payload.rendered_point_count or len(payload.points_xyz))),
+            color_mode=payload.color_mode,
+            color_label=payload.color_label,
+            color_tick_positions=list(payload.color_tick_positions) if payload.color_tick_positions else None,
+            color_tick_labels=list(payload.color_tick_labels) if payload.color_tick_labels else None,
+        )
+        self.update_cloud(bundle, color_display_label)
 
     def update_cloud(self, data: Spatial3DDataBundle, color_display_label: str) -> None:
         self._ensure_plot()

@@ -11,7 +11,7 @@ import customtkinter as ctk
 from app.services.geostat_service import GeostatService
 from app.services.workflow_contracts import DOMAINS_MODULE_DISABLED_MESSAGE
 from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
-from app.ui.controllers.variography_controller import VariographyController
+from app.ui.controllers import SpatialViewerController, VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.panels.stages import VariographyStageView
 from app.ui.renderers import (
@@ -328,6 +328,7 @@ class HomePanel(ctk.CTkFrame):
         self.spatial_2d_renderer = MatplotlibSpatial2DRenderer()
         self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
+        self.spatial_viewer_controller = SpatialViewerController(service=self.service)
         self.variography_controller = VariographyController(service=self.service)
         self.variography_stage_view = VariographyStageView(controller=self.variography_controller)
         self._spatial_3d_renderer_warning_cache: str = ""
@@ -1505,51 +1506,38 @@ class HomePanel(ctk.CTkFrame):
                 {"reason": fallback_reason},
             )
 
-        self.spatial_3d_widget = renderer.create_widget(visual_host)
-        self.spatial_3d_widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
-
-        available, reason = renderer.is_available()
-        if not available:
-            renderer.show_unavailable(self.spatial_3d_widget, f"{reason}. Volviendo automáticamente a 2D.")
-            self.spatial_view_mode_var.set("2D")
-            self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
-            return
-
         color_by = self.spatial_color_var.get() or None
-        result = self.service.prepare_visual_3d_data(color_by=color_by)
-        if not result.success or result.spatial_3d_data is None:
-            renderer.show_unavailable(self.spatial_3d_widget, f"No se pudo renderizar 3D: {result.message}. Volviendo a 2D.")
+        result = self.spatial_viewer_controller.render_scene(
+            parent=visual_host,
+            renderer=renderer,
+            color_by=color_by,
+            view_mode="3d",
+        )
+        self.spatial_3d_widget = visual_host.winfo_children()[-1] if visual_host.winfo_children() else None
+        if not result.success and result.fallback_to_2d:
             self.spatial_view_mode_var.set("2D")
             self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
             return
+        scene = result.scene
+        if scene is None:
+            return
+
+        points_layer = next((layer for layer in scene.layers if layer.layer_id == "points"), None)
+        rendered = 0
+        total = 0
+        if points_layer is not None and hasattr(points_layer.payload, "rendered_point_count"):
+            rendered = int(getattr(points_layer.payload, "rendered_point_count", 0))
+            total = int(getattr(points_layer.payload, "source_point_count", 0))
+
         ctk.CTkLabel(
             visual_host,
             text=(
-                f"Estado render: {result.spatial_3d_data.point_count_rendered:,}/{result.spatial_3d_data.point_count_original:,} muestras"
+                f"Estado render: {rendered:,}/{total:,} muestras"
                 f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
             ),
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
         ).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 3))
-        continuity_label, continuity_note = self._spatial_continuity_diagnostic_from_arrays(
-            [float(v) for v in result.spatial_3d_data.x],
-            [float(v) for v in result.spatial_3d_data.y],
-            [float(v) for v in result.spatial_3d_data.color_values],
-        )
-        ctk.CTkLabel(
-            visual_host,
-            text=f"{continuity_label} (3D secundario) · {continuity_note}",
-            text_color=TXT_MUTED,
-            font=ui_font(FONT_MICRO),
-            wraplength=WRAP_STAGE_SUMMARY,
-            justify="left",
-        ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 3))
-
-        renderer.render(
-            self.spatial_3d_widget,
-            result.spatial_3d_data,
-            color_by or snapshot["resolved_target_column"] or "No definido",
-        )
 
     def _select_spatial_3d_renderer(self):
         available, reason = self.pyvista_spatial_3d_renderer.is_available()
