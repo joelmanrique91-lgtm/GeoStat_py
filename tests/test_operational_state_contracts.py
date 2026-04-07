@@ -35,7 +35,7 @@ class OperationalStateContractsTests(unittest.TestCase):
         self.assertEqual(cutoff["effective_target_column"], typed.cutoff.effective_target_column)
         self.assertEqual(domain["effective_target_column"], typed.domain.effective_target_column)
 
-    def test_domains_stage_reflects_disabled_module_state(self) -> None:
+    def test_domains_stage_requires_support_confirmation(self) -> None:
         service = GeostatService(adapter=GeostatSpyAdapter())
         csv_path = Path("tests/fixtures/variography/variography_small_numeric.csv")
         self.assertTrue(service.load_csv(str(csv_path)).success)
@@ -43,10 +43,10 @@ class OperationalStateContractsTests(unittest.TestCase):
 
         readiness = service.get_workflow_readiness_state()
         self.assertFalse(readiness.stage("domains").ready)
-        self.assertIn("domains_module_disabled", readiness.stage("domains").blocking_reasons)
+        self.assertIn("missing_support_confirmation", readiness.stage("domains").blocking_reasons)
 
         domain_state = service.get_domain_state_typed()
-        self.assertFalse(domain_state.domains_ready)
+        self.assertTrue(domain_state.domains_ready)
 
     def test_domain_state_propagates_active_domain_filter(self) -> None:
         service = GeostatService(adapter=GeostatSpyAdapter())
