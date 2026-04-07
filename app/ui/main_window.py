@@ -17,7 +17,7 @@ class MainWindow:
         self._is_applying_geometry = False
         self._last_window_state = "normal"
         self.service = service
-        ctk.set_appearance_mode("Dark")
+        ctk.set_appearance_mode("Light")
         ctk.set_default_color_theme("blue")
 
         self.root = ctk.CTk()

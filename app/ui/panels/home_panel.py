@@ -133,11 +133,50 @@ STEP_DISPLAY_NAMES = {
     "Cutoffs": "Control de Outliers",
 }
 
+STAGE_DECISION_NARRATIVE: dict[str, dict[str, str]] = {
+    "Datos": {
+        "title": "Inicio / Proyecto",
+        "subtitle": "¿Qué datos tengo y qué calidad mínima habilita un flujo defendible?",
+        "interpretation": "Sin trazabilidad de columnas y soporte base, cualquier resultado aguas abajo pierde respaldo técnico.",
+        "next_action": "Cargar dataset, mapear X/Y/Z/target y confirmar configuración base.",
+    },
+    "EDA": {
+        "title": "Datos y QA/QC",
+        "subtitle": "¿La variable está estable o requiere intervención previa al modelado?",
+        "interpretation": "Distribución, sesgo y dispersión definen el riesgo de sobrepeso de outliers en continuidad y estimación.",
+        "next_action": "Si CV/sesgo son críticos, evaluar capping con trazabilidad de impacto.",
+    },
+    "Cutoffs": {
+        "title": "Dominios y soporte",
+        "subtitle": "¿El soporte compositado y el capping preservan señal útil sin distorsión excesiva?",
+        "interpretation": "Un soporte inconsistente sesga continuidad y genera decisiones no comparables entre dominios.",
+        "next_action": "Comparar antes/después y confirmar umbral operativo solo con evidencia cuantificada.",
+    },
+    "Espacial": {
+        "title": "Contexto espacial y continuidad exploratoria",
+        "subtitle": "¿Cómo se organiza espacialmente la variable antes de variografía formal?",
+        "interpretation": "La lectura 2D/3D orienta hipótesis de anisotropía, pero no sustituye variograma experimental.",
+        "next_action": "Usar perfiles y filtros para preparar la etapa hero de continuidad y variografía.",
+    },
+    "Dominios": {
+        "title": "Estimación (precondiciones)",
+        "subtitle": "¿Qué dominio activo respalda una estimación técnicamente consistente?",
+        "interpretation": "Si dominios no están habilitados, se debe explicitar el bloqueo y su impacto en la decisión.",
+        "next_action": "Resolver configuración de dominios o continuar con filtro global documentado.",
+    },
+    "Variografía": {
+        "title": "Continuidad y variografía",
+        "subtitle": "¿Qué continuidad espacial y anisotropía respaldan estimación, simulación y validación?",
+        "interpretation": "La calidad de pares, coherencia anisotrópica y estabilidad del ajuste gobiernan el riesgo técnico.",
+        "next_action": "Validar modelo y exportar parámetros sólo cuando las alertas sean explicables y trazables.",
+    },
+}
+
 def _build_workflow_stage_label(step_name: str, active_step: str, readiness: WorkflowReadinessState) -> str:
     labels = {
-        "Datos": "01 Datos",
-        "EDA": "02 EDA",
-        "Cutoffs": "03 Control de Outliers",
+        "Datos": "01 Inicio",
+        "EDA": "02 QA/QC",
+        "Cutoffs": "03 Soporte",
         "Espacial": "04 Espacial",
         "Dominios": "05 Dominios",
         "Variografía": "06 Variografía",
@@ -326,8 +365,8 @@ class HomePanel(ctk.CTkFrame):
         self.stage_actions_collapsed = not _should_expand_stage_actions("Datos", initial_readiness)
 
         self.control_sections: dict[str, ctk.CTkFrame] = {}
-        self.workspace_title_var = ctk.StringVar(value="Vista Datos")
-        self.workspace_subtitle_var = ctk.StringVar(value="Carga y configura columnas para habilitar el flujo analítico.")
+        self.workspace_title_var = ctk.StringVar(value=STAGE_DECISION_NARRATIVE["Datos"]["title"])
+        self.workspace_subtitle_var = ctk.StringVar(value=STAGE_DECISION_NARRATIVE["Datos"]["subtitle"])
         self.workflow_hint_var = ctk.StringVar(value="Etapa lista.")
         self.unified_context_var = ctk.StringVar(value="Dataset: No cargado · Target activo: No definido · Dominio/filtro: No definido · Workflow: Listo · Capping inactivo")
         self.plot_frame: ctk.CTkFrame | None = None
@@ -418,7 +457,8 @@ class HomePanel(ctk.CTkFrame):
         top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(top, textvariable=self.workspace_title_var, font=ui_font(FONT_SUBTITLE), text_color=TXT_MAIN).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(top, textvariable=self.status_text, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=0, column=1, sticky="e")
-        ctk.CTkLabel(top, textvariable=self.workflow_hint_var, font=ui_font(FONT_MICRO), text_color=SEM_ORANGE).grid(row=1, column=0, sticky="w", pady=(0, 0))
+        ctk.CTkLabel(top, textvariable=self.workspace_subtitle_var, font=ui_font(FONT_SMALL), text_color=TXT_MUTED).grid(row=1, column=0, sticky="w", pady=(0, 0))
+        ctk.CTkLabel(top, textvariable=self.workflow_hint_var, font=ui_font(FONT_MICRO), text_color=SEM_ORANGE).grid(row=2, column=0, sticky="w", pady=(0, 0))
 
         self._build_kpi_strip(self.content_panel)
         self._build_stage_action_bar(self.content_panel)
@@ -456,6 +496,7 @@ class HomePanel(ctk.CTkFrame):
         identity = ctk.CTkFrame(header, fg_color="transparent")
         identity.grid(row=0, column=0, sticky="w", padx=PAD_CARD_X, pady=(1, 1))
         ctk.CTkLabel(identity, text="GeoStat Py", font=ui_font(FONT_TITLE_COMPACT), text_color=TXT_MAIN).pack(anchor="w")
+        ctk.CTkLabel(identity, text="Plataforma de decisiones geoestadísticas", font=ui_font(FONT_MICRO), text_color=TXT_MUTED).pack(anchor="w")
         context_chip = ctk.CTkFrame(header, fg_color=CHIP_BG, corner_radius=7)
         context_chip.grid(row=1, column=0, sticky="ew", padx=PAD_CARD_X, pady=(1, 2))
         ctk.CTkLabel(
@@ -479,9 +520,9 @@ class HomePanel(ctk.CTkFrame):
     def _build_step_progress(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=8)
         labels = {
-            "Datos": "01 Datos",
-            "EDA": "02 EDA",
-            "Cutoffs": "03 Control de Outliers",
+            "Datos": "01 Inicio",
+            "EDA": "02 QA/QC",
+            "Cutoffs": "03 Soporte",
             "Espacial": "04 Espacial",
             "Dominios": "05 Dominios",
             "Variografía": "06 Variografía",
@@ -1082,12 +1123,13 @@ class HomePanel(ctk.CTkFrame):
         self._render_stage_ready_view(stage, stage_host, force_rebuild=force_rebuild)
 
     def _render_stage_ready_view(self, stage: str, stage_host: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+        narrative = STAGE_DECISION_NARRATIVE.get(stage, {})
         if stage == "Datos":
             if not force_rebuild and self._rendered_stage_signatures.get(stage) == ("ready",):
                 return
             DashboardGrid.clear(stage_host)
-            self.workspace_title_var.set("Preparación de datos – habilitación del flujo")
-            self.workspace_subtitle_var.set("Paso 1 de workflow: carga y validación estructural para habilitar todas las vistas.")
+            self.workspace_title_var.set(narrative.get("title", "Preparación de datos – habilitación del flujo"))
+            self.workspace_subtitle_var.set(narrative.get("subtitle", "Paso 1 de workflow: carga y validación estructural para habilitar todas las vistas."))
             card = ctk.CTkFrame(stage_host, fg_color=BG_SOFT, corner_radius=8)
             card.grid(row=0, column=0, sticky="nsew")
             card.grid_rowconfigure(2, weight=1)
@@ -1103,30 +1145,30 @@ class HomePanel(ctk.CTkFrame):
             return
 
         if stage == "EDA":
-            self.workspace_title_var.set("Diagnóstico de distribución")
-            self.workspace_subtitle_var.set("Determina si la variable está estable o si requiere intervención de capping.")
+            self.workspace_title_var.set(narrative.get("title", "Diagnóstico de distribución"))
+            self.workspace_subtitle_var.set(narrative.get("subtitle", "Determina si la variable está estable o si requiere intervención de capping."))
             self._render_eda_view(stage_host, force_rebuild=force_rebuild)
             return
 
         if stage == "Cutoffs":
-            self.workspace_title_var.set("Impacto de capping – control de outliers")
-            self.workspace_subtitle_var.set("Cuantifica cuánto cambia la distribución antes de confirmar el umbral operativo.")
+            self.workspace_title_var.set(narrative.get("title", "Impacto de capping – control de outliers"))
+            self.workspace_subtitle_var.set(narrative.get("subtitle", "Cuantifica cuánto cambia la distribución antes de confirmar el umbral operativo."))
             self._render_cutoff_view(stage_host, force_rebuild=force_rebuild)
             return
 
         if stage == "Espacial":
-            self.workspace_title_var.set("Continuidad espacial – lectura exploratoria")
-            self.workspace_subtitle_var.set("Contrasta continuidad visual en XY/XZ/YZ con el target activo.")
+            self.workspace_title_var.set(narrative.get("title", "Continuidad espacial – lectura exploratoria"))
+            self.workspace_subtitle_var.set(narrative.get("subtitle", "Contrasta continuidad visual en XY/XZ/YZ con el target activo."))
             self._render_spatial_view(stage_host, force_rebuild=force_rebuild)
             return
 
         if stage == "Dominios":
-            self.workspace_title_var.set("05 Dominios")
-            self.workspace_subtitle_var.set("Valida estado de dominios y la acción requerida para avanzar en el flujo.")
+            self.workspace_title_var.set(narrative.get("title", "05 Dominios"))
+            self.workspace_subtitle_var.set(narrative.get("subtitle", "Valida estado de dominios y la acción requerida para avanzar en el flujo."))
             self._render_domains_view(stage_host, force_rebuild=force_rebuild)
             return
-        self.workspace_title_var.set("06 Variografía")
-        self.workspace_subtitle_var.set("Consolida modelo experimental y salida de parámetros para modelado aguas abajo.")
+        self.workspace_title_var.set(narrative.get("title", "06 Variografía"))
+        self.workspace_subtitle_var.set(narrative.get("subtitle", "Consolida modelo experimental y salida de parámetros para modelado aguas abajo."))
         self._render_variography_view(stage_host, force_rebuild=force_rebuild)
 
     def _build_eda_render_signature(self, operational: GeostatOperationalState) -> tuple[object, ...]:
@@ -1237,6 +1279,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title="Decisión EDA",
             decision_message=decision_message,
             context_message=snapshot_context,
+            interpretation=STAGE_DECISION_NARRATIVE["EDA"]["interpretation"],
+            next_action=STAGE_DECISION_NARRATIVE["EDA"]["next_action"],
         )
         evidence.grid_columnconfigure(0, weight=1)
         evidence.grid_rowconfigure(1, weight=1)
@@ -1420,6 +1464,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title="Decisión de capping",
             decision_message="¿Este ajuste mejora la estabilidad de la variable sin distorsionarla de forma excesiva?",
             context_message=f"{_build_visual_context_line(snapshot)} · Selección → impacto → aplicación.",
+            interpretation=STAGE_DECISION_NARRATIVE["Cutoffs"]["interpretation"],
+            next_action=STAGE_DECISION_NARRATIVE["Cutoffs"]["next_action"],
         )
         _ = wrapper
         container.grid_columnconfigure(0, weight=0, minsize=440)
@@ -1492,6 +1538,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title=f"Decisión espacial (2D) · {continuity_label}",
             decision_message=decision_message,
             context_message=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)} · {continuity_note}",
+            interpretation=STAGE_DECISION_NARRATIVE["Espacial"]["interpretation"],
+            next_action=STAGE_DECISION_NARRATIVE["Espacial"]["next_action"],
         )
         wrapper.grid_rowconfigure(1, weight=1)
         visual_host.grid_rowconfigure(1, weight=1)
@@ -1538,6 +1586,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title="Evidencia espacial secundaria (3D)",
             decision_message="Usar 3D como verificación exploratoria; NO sustituye variografía formal ni inferencia geoestadística.",
             context_message=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)} · Modo 3D PoC.",
+            interpretation="La escena 3D debe usarse para revisar dominios activos, densidad y vecindarios potenciales.",
+            next_action="Confirmar patrones en 2D/3D y consolidar hipótesis direccional antes de variografía.",
         )
         wrapper.grid_rowconfigure(1, weight=1)
         visual_host.grid_rowconfigure(1, weight=1)
@@ -1644,6 +1694,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title="Dominios · estado bloqueado",
             decision_message="¿Por qué no puedo avanzar y qué tengo que hacer ahora?",
             context_message="Estado, motivo y acción requerida para continuar el flujo.",
+            interpretation=STAGE_DECISION_NARRATIVE["Dominios"]["interpretation"],
+            next_action=STAGE_DECISION_NARRATIVE["Dominios"]["next_action"],
         )
         panel = ctk.CTkFrame(visual_host, fg_color=BG_SOFT, corner_radius=8)
         panel.grid(row=0, column=0, sticky="ew", padx=6, pady=4)
@@ -1686,6 +1738,8 @@ class HomePanel(ctk.CTkFrame):
             decision_title="Decisión variográfica",
             decision_message="Validar variograma experimental y confirmar parámetros que se exportarán al modelado.",
             context_message="Prioriza calidad de pares y consistencia del ajuste antes de usar la salida para Leapfrog.",
+            interpretation=STAGE_DECISION_NARRATIVE["Variografía"]["interpretation"],
+            next_action=STAGE_DECISION_NARRATIVE["Variografía"]["next_action"],
         )
         self.variography_stage_view.mount(visual_host)
 
@@ -1814,6 +1868,8 @@ class HomePanel(ctk.CTkFrame):
         decision_title: str,
         decision_message: str,
         context_message: str = "",
+        interpretation: str = "",
+        next_action: str = "",
     ) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
@@ -1841,6 +1897,24 @@ class HomePanel(ctk.CTkFrame):
                 wraplength=WRAP_STAGE_SUMMARY,
                 justify="left",
             ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
+        if interpretation:
+            ctk.CTkLabel(
+                decision_card,
+                text=f"Interpretación: {interpretation}",
+                text_color=TXT_MAIN,
+                font=ui_font(FONT_SMALL),
+                wraplength=WRAP_STAGE_SUMMARY,
+                justify="left",
+            ).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 4))
+        if next_action:
+            ctk.CTkLabel(
+                decision_card,
+                text=f"Siguiente acción sugerida: {next_action}",
+                text_color=SEM_BLUE_SOFT,
+                font=ui_font(FONT_SMALL),
+                wraplength=WRAP_STAGE_SUMMARY,
+                justify="left",
+            ).grid(row=4, column=0, sticky="w", padx=10, pady=(0, 8))
 
         visual_host = ctk.CTkFrame(wrapper, fg_color=BG_SOFT, corner_radius=8)
         visual_host.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 4))

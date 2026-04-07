@@ -9,7 +9,7 @@ import customtkinter as ctk
 from app.ui.controllers.variography_controller import VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
-from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
+from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_BLUE_SOFT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
 VARIOGRAPHY_CONTROLS_WIDTH = 340
 VARIOGRAPHY_TEXT_WRAP = 980
@@ -114,13 +114,14 @@ class VariographyStageView:
         results = ctk.CTkFrame(wrapper, fg_color=BG_PANEL)
         results.grid(row=0, column=1, sticky="nsew", padx=(1, 0))
         results.grid_columnconfigure(0, weight=1)
-        results.grid_rowconfigure(2, weight=1)
+        results.grid_rowconfigure(3, weight=1)
 
-        ctk.CTkLabel(results, text="Variografía experimental", text_color=TEXT_MAIN, font=ctk.CTkFont(size=15, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 2))
-        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=1, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(results, text="Pantalla hero · Continuidad y anisotropía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 1))
+        ctk.CTkLabel(results, text="Pregunta de decisión: ¿el modelo variográfico es estable y defendible para estimación/simulación?", text_color=SEM_BLUE_SOFT, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=1, column=0, sticky="w", pady=(0, 1))
+        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=2, column=0, sticky="w", pady=(0, 4))
 
         self._plot_host = ctk.CTkFrame(results, fg_color=BG_CARD)
-        self._plot_host.grid(row=2, column=0, sticky="nsew")
+        self._plot_host.grid(row=3, column=0, sticky="nsew")
         self._render_empty_plot()
         if self._pending_async_error:
             self._render_plot_feedback(
@@ -132,7 +133,7 @@ class VariographyStageView:
             self._pending_async_error = ""
 
         alerts = ctk.CTkFrame(results, fg_color="transparent")
-        alerts.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        alerts.grid(row=4, column=0, sticky="ew", pady=(4, 0))
         ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
         ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
