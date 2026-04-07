@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from tkinter import filedialog, messagebox
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+import logging
 import threading
 import time
 
@@ -133,6 +135,7 @@ STEP_TO_READINESS_KEY = {
 STEP_DISPLAY_NAMES = {
     "Cutoffs": "Soporte/Compositado",
 }
+logger = logging.getLogger(__name__)
 
 STAGE_DECISION_NARRATIVE: dict[str, dict[str, str]] = {
     "Datos": {
@@ -365,6 +368,15 @@ class InteractionStateController:
         return max(0.0, time.perf_counter() - self._last_action_at)
 
 
+@dataclass(frozen=True)
+class ViewRefreshPlan:
+    stage: str
+    requires_rebuild: bool
+    requires_data_refresh: bool
+    resize_hint: tuple[int, int] | None
+    cache_key: str
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -480,9 +492,12 @@ class HomePanel(ctk.CTkFrame):
         self._interaction_state = InteractionStateController()
         self._eda_payload_cache: dict[tuple[object, ...], tuple[dict[str, object], dict[str, str]]] = {}
         self._spatial_payload_cache: dict[tuple[object, ...], object] = {}
+        self._eda_incremental_state: dict[int, dict[str, object]] = {}
+        self._spatial2d_incremental_state: dict[int, dict[str, object]] = {}
         self._resize_after_id: str | None = None
         self._eda_toggle_after_id: str | None = None
         self._last_view_body_size: tuple[int, int] = (0, 0)
+        self._last_refresh_plan: ViewRefreshPlan | None = None
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
         self._build_layout()
@@ -1237,10 +1252,12 @@ class HomePanel(ctk.CTkFrame):
             return
         self._rendered_stage_signatures[stage] = signature
 
-    def _show_stage_view(self, stage: str, *, force_rebuild: bool = False) -> None:
+    def _show_stage_view(self, stage: str, *, force_rebuild: bool = False, data_refresh: bool = False) -> None:
         stage_host = self._show_only_stage_host(stage)
         stage_host.grid_columnconfigure(0, weight=1)
         stage_host.grid_rowconfigure(0, weight=1)
+        mode = "STRUCTURE_REBUILD" if force_rebuild else ("DATA_REFRESH" if data_refresh else "NOOP")
+        logger.debug("UI_REFRESH stage=%s mode=%s key=%s", stage, mode, (self._last_refresh_plan.cache_key if self._last_refresh_plan else "na"))
         readiness = self.service.get_workflow_readiness_state()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.stages.get(stage_key, None)
@@ -1251,9 +1268,9 @@ class HomePanel(ctk.CTkFrame):
             self._render_blocked_stage_view(stage, stage_host)
             self._set_stage_signature(stage, ("blocked",))
             return
-        self._render_stage_ready_view(stage, stage_host, force_rebuild=force_rebuild)
+        self._render_stage_ready_view(stage, stage_host, force_rebuild=force_rebuild, data_refresh=data_refresh)
 
-    def _render_stage_ready_view(self, stage: str, stage_host: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+    def _render_stage_ready_view(self, stage: str, stage_host: ctk.CTkFrame, *, force_rebuild: bool = False, data_refresh: bool = False) -> None:
         narrative = STAGE_DECISION_NARRATIVE.get(stage, {})
         if stage == "Datos":
             if not force_rebuild and self._get_stage_signature(stage) == ("ready",):
@@ -1278,7 +1295,7 @@ class HomePanel(ctk.CTkFrame):
         if stage == "EDA":
             self.workspace_title_var.set(narrative.get("title", "Diagnóstico de distribución"))
             self.workspace_subtitle_var.set(narrative.get("subtitle", "Determina si la variable está estable o si requiere intervención de capping."))
-            self._render_eda_view(stage_host, force_rebuild=force_rebuild)
+            self._render_eda_view(stage_host, force_rebuild=force_rebuild, data_refresh=data_refresh)
             return
 
         if stage == "Cutoffs":
@@ -1290,7 +1307,7 @@ class HomePanel(ctk.CTkFrame):
         if stage == "Espacial":
             self.workspace_title_var.set(narrative.get("title", "Continuidad espacial – lectura exploratoria"))
             self.workspace_subtitle_var.set(narrative.get("subtitle", "Contrasta continuidad visual en XY/XZ/YZ con el target activo."))
-            self._render_spatial_view(stage_host, force_rebuild=force_rebuild)
+            self._render_spatial_view(stage_host, force_rebuild=force_rebuild, data_refresh=data_refresh)
             return
 
         if stage == "Dominios":
@@ -1300,6 +1317,9 @@ class HomePanel(ctk.CTkFrame):
             return
         self.workspace_title_var.set(narrative.get("title", "06 Variografía"))
         self.workspace_subtitle_var.set(narrative.get("subtitle", "Consolida modelo experimental y salida de parámetros para modelado aguas abajo."))
+        if data_refresh and not force_rebuild:
+            logger.debug("UI_REFRESH stage=Variografía mode=DATA_REFRESH")
+            self._invalidate_stage_cache("Variografía")
         self._render_variography_view(stage_host, force_rebuild=force_rebuild)
 
     def _build_eda_render_signature(self, operational: GeostatOperationalState) -> tuple[object, ...]:
@@ -1354,12 +1374,12 @@ class HomePanel(ctk.CTkFrame):
             justify="left",
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
-    def _render_eda_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+    def _render_eda_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False, data_refresh: bool = False) -> None:
         operational = self.service.get_operational_state()
         state = operational.cutoff
         snapshot = operational.analysis
         signature = self._build_eda_render_signature(operational)
-        if not force_rebuild and self._get_stage_signature("EDA") == signature:
+        if not force_rebuild and not data_refresh and self._get_stage_signature("EDA") == signature:
             return
         self._set_stage_signature("EDA", signature)
 
@@ -1403,6 +1423,53 @@ class HomePanel(ctk.CTkFrame):
             return
 
         data, stats_table = payload_cached
+        structure_signature = (bool(self.eda_secondary_visible_var.get()), tuple(self._get_active_eda_plots()))
+        existing_state = self._eda_incremental_state.get(id(parent))
+        if (
+            data_refresh
+            and not force_rebuild
+            and isinstance(existing_state, dict)
+            and existing_state.get("structure_signature") == structure_signature
+            and isinstance(existing_state.get("primary_grid"), DashboardGrid)
+        ):
+            logger.debug("UI_REFRESH stage=EDA mode=DATA_REFRESH")
+            logger.debug("UI_HOST action=REUSED stage=EDA host_id=%s", id(parent))
+            logger.debug("UI_CANVAS action=REUSED stage=EDA")
+            primary_grid = existing_state["primary_grid"]
+            render_context = EDARenderContext(
+                active_variable=active_variable,
+                skewness_text=str(stats_table.get("skewness", "-")),
+                chart_text_color=CHART_TEXT,
+                chart_legend_size=CHART_FONT_SIZE_LEGEND,
+                chart_label_size=CHART_FONT_SIZE_LABEL + 1,
+            )
+            values = [float(v) for v in data["target_values"]]
+            original_values = values
+            cutoff_val = float(state.dynamic_cutoff_value) if state.dynamic_enabled else None
+            self.eda_renderer.render_panel(
+                plot_key="histogram",
+                grid=primary_grid,
+                data=data,
+                context=render_context,
+                original_values=original_values,
+                cutoff_value=cutoff_val,
+            )
+            secondary = existing_state.get("secondary_grids", {})
+            if isinstance(secondary, dict):
+                for plot_key, grid in secondary.items():
+                    if isinstance(grid, DashboardGrid):
+                        self.eda_renderer.render_panel(
+                            plot_key=str(plot_key),
+                            grid=grid,
+                            data=data,
+                            context=render_context,
+                            original_values=original_values,
+                            cutoff_value=cutoff_val,
+                        )
+            return
+        if force_rebuild and parent.winfo_children():
+            DashboardGrid.clear(parent)
+            self._eda_incremental_state.pop(id(parent), None)
         cv_text = str(stats_table.get("cv", "-"))
         skewness_text = str(stats_table.get("skewness", "-"))
         diagnostics = data.get("diagnostics", {})
@@ -1527,6 +1594,11 @@ class HomePanel(ctk.CTkFrame):
             DashboardGrid.force_resize_under(primary_plot_host)
 
             if mode == "primary_only":
+                self._eda_incremental_state[id(parent)] = {
+                    "structure_signature": structure_signature,
+                    "primary_grid": primary_grid,
+                    "secondary_grids": {},
+                }
                 ctk.CTkLabel(detail_body, text="Modo primary_only: diagnósticos bajo demanda.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
                     row=0, column=0, sticky="w", padx=6, pady=4
                 )
@@ -1570,6 +1642,7 @@ class HomePanel(ctk.CTkFrame):
                 return
 
             figure_specs = {"qqplot": (5.8, 4.5), "boxplot": (5.8, 4.5), "iqr": (6.8, 4.5)}
+            secondary_map: dict[str, DashboardGrid] = {}
             # Regression anchor: max_aspect_ratio=1.65
             for idx, plot_key in enumerate(secondary_active):
                 col = min(idx, 2)
@@ -1587,7 +1660,13 @@ class HomePanel(ctk.CTkFrame):
                     original_values=original_values,
                     cutoff_value=cutoff_val,
                 )
+                secondary_map[plot_key] = grid
                 DashboardGrid.force_resize_under(host)
+            self._eda_incremental_state[id(parent)] = {
+                "structure_signature": structure_signature,
+                "primary_grid": primary_grid,
+                "secondary_grids": secondary_map,
+            }
         except Exception as exc:
             DashboardGrid.clear(primary_plot_host)
             ctk.CTkLabel(
@@ -1646,7 +1725,7 @@ class HomePanel(ctk.CTkFrame):
         self._last_cutoff_preview_signature = None
         self._refresh_cutoff_preview()
 
-    def _render_spatial_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
+    def _render_spatial_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False, data_refresh: bool = False) -> None:
         signature = (
             self.spatial_view_mode_var.get(),
             self.spatial_color_var.get(),
@@ -1658,18 +1737,21 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_quality_var.get(),
             self.service.get_analysis_context_state().active_domain_filter,
         )
-        if not force_rebuild and self._get_stage_signature("Espacial") == signature:
+        if not force_rebuild and not data_refresh and self._get_stage_signature("Espacial") == signature:
             return
-        DashboardGrid.clear(parent)
+        if force_rebuild:
+            DashboardGrid.clear(parent)
+            logger.debug("UI_HOST event=HOST_DESTROYED stage=Espacial reason=structure_rebuild")
+            self._spatial2d_incremental_state.pop(id(parent), None)
         self._set_stage_signature("Espacial", signature)
         if self.spatial_view_mode_var.get() == "3D":
-            self._render_spatial_3d_view(parent)
+            self._render_spatial_3d_view(parent, data_refresh=data_refresh)
             return
         if self.spatial_3d_widget is not None and self.spatial_3d_widget.winfo_exists():
             self.spatial_3d_widget.grid_remove()
-        self._render_spatial_2d_view(parent)
+        self._render_spatial_2d_view(parent, data_refresh=data_refresh)
 
-    def _render_spatial_2d_view(self, parent: ctk.CTkFrame) -> None:
+    def _render_spatial_2d_view(self, parent: ctk.CTkFrame, *, data_refresh: bool = False) -> None:
         snapshot = self.service.get_analysis_context_snapshot()
         signature = (
             "spatial2d",
@@ -1723,6 +1805,32 @@ class HomePanel(ctk.CTkFrame):
             )
             wrapper.grid_rowconfigure(1, weight=1)
             ctk.CTkLabel(visual_host, text=f"No se pudo renderizar Espacial: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+            return
+        existing_state = self._spatial2d_incremental_state.get(id(parent))
+        if (
+            data_refresh
+            and isinstance(existing_state, dict)
+            and existing_state.get("signature") == signature
+            and isinstance(existing_state.get("grid"), DashboardGrid)
+        ):
+            logger.debug("UI_REFRESH stage=SPATIAL mode=DATA_REFRESH subtype=2D")
+            logger.debug("UI_HOST action=REUSED stage=SPATIAL2D host_id=%s", id(parent))
+            logger.debug("UI_CANVAS action=REUSED stage=SPATIAL2D")
+            grid = existing_state["grid"]
+            self.spatial_2d_renderer.render(
+                grid,
+                spatial,
+                Spatial2DRenderContext(
+                    color_by=color_by,
+                    snapshot=snapshot,
+                    cutoff_state=self.service.get_cutoff_state(),
+                    guardrail_note=SPATIAL_GUARDRAIL_NOTE,
+                    info_text_color=TXT_MAIN,
+                    info_border_color=BORDER_SOFT,
+                    info_bg_color=BG_CARD,
+                    label_size=CHART_FONT_SIZE_LABEL,
+                ),
+            )
             return
         continuity_label, continuity_note = self._spatial_continuity_diagnostic(spatial)
         if continuity_label == "Continuidad alta":
@@ -1779,8 +1887,16 @@ class HomePanel(ctk.CTkFrame):
                 label_size=CHART_FONT_SIZE_LABEL,
             ),
         )
+        self._spatial2d_incremental_state[id(parent)] = {
+            "signature": signature,
+            "grid": grid,
+        }
 
-    def _render_spatial_3d_view(self, parent: ctk.CTkFrame) -> None:
+    def _render_spatial_3d_view(self, parent: ctk.CTkFrame, *, data_refresh: bool = False) -> None:
+        if data_refresh and self.spatial_3d_widget is not None and self.spatial_3d_widget.winfo_exists():
+            logger.debug("UI_HOST event=HOST_REUSED stage=Espacial3D widget_id=%s", id(self.spatial_3d_widget))
+            self._refresh_spatial_3d_data_only(parent)
+            return
         snapshot = self.service.get_analysis_context_snapshot()
         wrapper, visual_host = self._build_decision_layout(
             parent,
@@ -1868,6 +1984,28 @@ class HomePanel(ctk.CTkFrame):
             command=lambda: self._open_external_spatial_viewer(scene, color_by or scene.active_variable),
             **self._button_style("aux"),
         ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 3))
+
+    def _refresh_spatial_3d_data_only(self, parent: ctk.CTkFrame) -> None:
+        renderer, _fallback_reason = self._select_spatial_3d_renderer()
+        color_by = self.spatial_color_var.get() or None
+        result = self.spatial_viewer_controller.render_scene(
+            parent=parent,
+            renderer=renderer,
+            existing_widget=self.spatial_3d_widget,
+            color_by=color_by,
+            view_mode="3d",
+            quality=self.spatial_quality_var.get(),
+            style_options={
+                "profile": self.spatial_profile_var.get(),
+                "point_size": float(self.spatial_point_size_var.get()),
+                "opacity": float(self.spatial_opacity_var.get()),
+                "z_focus_pct": float(self.spatial_z_focus_var.get()),
+            },
+        )
+        if result.success:
+            logger.debug("UI_REFRESH stage=Espacial mode=DATA_REFRESH result=updated")
+        else:
+            logger.debug("UI_REFRESH stage=Espacial mode=DATA_REFRESH result=fallback")
 
     def _select_spatial_3d_renderer(self):
         # Embedded 3D remains primary to preserve in-app workflow.
@@ -2027,6 +2165,34 @@ class HomePanel(ctk.CTkFrame):
             )
         self.workflow_hint_var.set(_build_active_step_hint(active_step, self.service.get_operational_state()))
 
+    def _build_refresh_plan(self, *, stage: str, reason: str, force: bool) -> ViewRefreshPlan:
+        width = int(self.view_body.winfo_width() or 0)
+        height = int(self.view_body.winfo_height() or 0)
+        resize_hint = (width, height) if width > 0 and height > 0 else None
+        reason_norm = str(reason).strip().lower()
+        structure_reasons = {"step_render", "spatial_mode_changed", "config_applied", "csv_loaded"}
+        data_reasons = {
+            "eda_async_ready",
+            "spatial2d_async_ready",
+            "eda_manual_button",
+            "eda_plot_toggle",
+            "eda_secondary_toggle",
+            "spatial_color_changed",
+            "spatial_style_changed",
+            "domain_filter_changed",
+            "domain_ui_filters_changed",
+        }
+        requires_rebuild = bool(force or reason_norm in structure_reasons or self._get_stage_signature(stage) is None)
+        requires_data_refresh = bool(force or reason_norm in data_reasons)
+        cache_key = f"{stage}:{reason_norm}:{int(requires_rebuild)}:{int(requires_data_refresh)}"
+        return ViewRefreshPlan(
+            stage=stage,
+            requires_rebuild=requires_rebuild,
+            requires_data_refresh=requires_data_refresh,
+            resize_hint=resize_hint,
+            cache_key=cache_key,
+        )
+
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
         self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
         self.allow_variography_without_domain_var.set(bool(self.service.workflow_state.allow_variography_without_domain))
@@ -2036,7 +2202,13 @@ class HomePanel(ctk.CTkFrame):
         current_step = self.service.workflow_state.current_step
         self._apply_kpi_focus(current_step)
         self._render_stage_action_bar(current_step)
-        self._show_stage_view(current_step, force_rebuild=force)
+        plan = self._build_refresh_plan(stage=current_step, reason=reason, force=force)
+        self._last_refresh_plan = plan
+        self._show_stage_view(
+            current_step,
+            force_rebuild=plan.requires_rebuild,
+            data_refresh=plan.requires_data_refresh and not plan.requires_rebuild,
+        )
 
     def _sync_eda_capping_state(self) -> None:
         has_capping = self.service.has_confirmed_dynamic_capping()
