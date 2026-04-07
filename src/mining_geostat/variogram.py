@@ -132,22 +132,51 @@ def experimental_variogram_3d(
     if errs:
         raise ValueError("; ".join(errs))
 
-    gamma_bins: list[list[float]] = [[] for _ in range(n_lags)]
-    for i in range(len(coords) - 1):
-        for j in range(i + 1, len(coords)):
-            dx, dy, dz = (coords[j] - coords[i]).tolist()
-            if not _matches_direction(dx, dy, dz, direction):
-                continue
-            d = _distance(coords[i], coords[j])
-            if d > max_distance or d <= 0:
-                continue
-            idx = int(round((d / lag) - 1.0))
-            if 0 <= idx < n_lags:
-                gamma_bins[idx].append(0.5 * float((vals[j] - vals[i]) ** 2))
+    n_points = len(coords)
+    i_idx, j_idx = np.triu_indices(n_points, k=1)
+    deltas = coords[j_idx] - coords[i_idx]
+    dx = deltas[:, 0]
+    dy = deltas[:, 1]
+    dz = deltas[:, 2]
+
+    d = np.sqrt(dx * dx + dy * dy + dz * dz)
+    valid = (d > 0.0) & (d <= float(max_distance))
+
+    ux, uy, uz = _unit_direction(direction.azimuth_deg, direction.dip_deg)
+    dot = np.abs((dx * ux + dy * uy + dz * uz) / np.maximum(d, 1e-12))
+    dot = np.clip(dot, -1.0, 1.0)
+    ang = np.degrees(np.arccos(dot))
+    valid &= ang <= direction.azimuth_tolerance_deg
+
+    horizontal = np.sqrt(dx * dx + dy * dy)
+    pair_dip = np.degrees(np.arctan2(dz, horizontal))
+    dip_diff = np.minimum(np.abs(pair_dip - direction.dip_deg), np.abs(-pair_dip - direction.dip_deg))
+    valid &= dip_diff <= direction.dip_tolerance_deg
+
+    if direction.band_width > 0.0:
+        proj = dx * ux + dy * uy + dz * uz
+        perp = np.sqrt(np.maximum(0.0, d * d - proj * proj))
+        valid &= perp <= direction.band_width * 0.5
+    if direction.band_height > 0.0:
+        valid &= np.abs(dz) <= direction.band_height * 0.5
+
+    if not np.any(valid):
+        raise ValueError("No hay pares para el variograma con la configuración dada")
+
+    d_valid = d[valid]
+    semivar = 0.5 * np.square(vals[j_idx[valid]] - vals[i_idx[valid]])
+    bins = np.rint((d_valid / lag) - 1.0).astype(int)
+    in_range = (bins >= 0) & (bins < n_lags)
+
+    gamma_sum = np.bincount(bins[in_range], weights=semivar[in_range], minlength=n_lags)
+    npairs_arr = np.bincount(bins[in_range], minlength=n_lags)
 
     lag_centers = [float((k + 1) * lag) for k in range(n_lags)]
-    gamma = [float(np.mean(g)) if g else math.nan for g in gamma_bins]
-    npairs = [len(g) for g in gamma_bins]
+    npairs = npairs_arr.astype(int).tolist()
+    gamma = [
+        float(gamma_sum[k] / npairs_arr[k]) if npairs_arr[k] > 0 else math.nan
+        for k in range(n_lags)
+    ]
     if max(npairs) == 0:
         raise ValueError("No hay pares para el variograma con la configuración dada")
 
