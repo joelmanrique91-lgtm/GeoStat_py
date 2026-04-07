@@ -47,6 +47,39 @@ def compute_responsive_figure_size(
     return new_w, new_h
 
 
+def compute_responsive_figure_size(
+    *,
+    container_width: int,
+    container_height: int,
+    dpi: float,
+    min_width_inches: float = 2.0,
+    min_height_inches: float = 1.6,
+    max_aspect_ratio: float | None = None,
+    base_aspect_ratio: float | None = None,
+) -> tuple[float, float]:
+    """Compute a host-bounded responsive figure size in inches."""
+    avail_w = max(float(container_width) / max(dpi, 1e-6), min_width_inches)
+    avail_h = max(float(container_height) / max(dpi, 1e-6), min_height_inches)
+    new_w = avail_w
+    new_h = avail_h
+    if max_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        if ratio > max_aspect_ratio:
+            new_w = max(new_h * max_aspect_ratio, min_width_inches)
+    if base_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        min_ratio = max(base_aspect_ratio * 0.55, 0.60)
+        if ratio < min_ratio:
+            candidate_w = max(new_h * min_ratio, min_width_inches)
+            if candidate_w <= avail_w:
+                new_w = candidate_w
+            else:
+                new_h = max(new_w / min_ratio, min_height_inches)
+    new_w = min(new_w, avail_w)
+    new_h = min(new_h, avail_h)
+    return new_w, new_h
+
+
 class DashboardGrid:
     """Simple reusable figure grid wrapper (1x1, 1x2, 2x2, 3x1)."""
     _instances_by_parent: dict[int, list["DashboardGrid"]] = {}
