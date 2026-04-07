@@ -5,7 +5,9 @@ from __future__ import annotations
 import customtkinter as ctk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
+from app.models.spatial import AssayIntervals3D, DrillholeTrajectory, PointCloudGeometry, SceneState
 from app.services.visualization_service import Spatial3DDataBundle
 from app.ui.theme import (
     BG_CARD,
@@ -74,6 +76,11 @@ class Spatial3DView(ctk.CTkFrame):
         self.footer.grid(row=3, column=0, sticky="ew", padx=2, pady=(0, 0))
         self.footer.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(self.footer, text="Reset view", command=self.reset_view, height=28).grid(row=0, column=0, sticky="e")
+        view_buttons = ctk.CTkFrame(self.footer, fg_color="transparent")
+        view_buttons.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(view_buttons, text="XY", width=38, command=lambda: self._set_ortho_view("xy"), height=24).pack(side="left", padx=(0, 2))
+        ctk.CTkButton(view_buttons, text="XZ", width=38, command=lambda: self._set_ortho_view("xz"), height=24).pack(side="left", padx=2)
+        ctk.CTkButton(view_buttons, text="YZ", width=38, command=lambda: self._set_ortho_view("yz"), height=24).pack(side="left", padx=2)
 
     def destroy_plot(self) -> None:
         if self._resize_after_id is not None:
@@ -111,7 +118,109 @@ class Spatial3DView(ctk.CTkFrame):
         self.destroy_plot()
         self.meta_label.configure(text=reason)
 
-    def update_cloud(self, data: Spatial3DDataBundle, color_display_label: str) -> None:
+
+    def update_scene(self, scene: SceneState, color_display_label: str) -> None:
+        point_layer = next((layer for layer in scene.layers if layer.layer_type == "point_cloud" and layer.visible), None)
+        if point_layer is None or not isinstance(point_layer.payload, PointCloudGeometry):
+            self.show_unavailable("Escena sin capa de puntos visible para render 3D.")
+            return
+        payload = point_layer.payload
+        z_min = scene.clipping_state.z_min
+        z_max = scene.clipping_state.z_max
+        filtered_points: list[tuple[float, float, float]] = []
+        filtered_values: list[float] = []
+        for idx, point in enumerate(payload.points_xyz):
+            z_val = point[2]
+            if z_min is not None and z_val < z_min:
+                continue
+            if z_max is not None and z_val > z_max:
+                continue
+            filtered_points.append(point)
+            filtered_values.append(float(payload.color_values[idx]))
+        if not filtered_points:
+            self.show_unavailable("Filtro espacial dejó la escena sin puntos visibles.")
+            return
+        bundle = Spatial3DDataBundle(
+            x=[p[0] for p in filtered_points],
+            y=[p[1] for p in filtered_points],
+            z=[p[2] for p in filtered_points],
+            color_values=filtered_values,
+            point_count_original=int(payload.source_point_count or len(payload.points_xyz)),
+            point_count_rendered=int(len(filtered_points)),
+            downsampling_applied=bool((payload.source_point_count or len(payload.points_xyz)) > len(filtered_points)),
+            color_mode=payload.color_mode,
+            color_label=payload.color_label,
+            color_tick_positions=list(payload.color_tick_positions) if payload.color_tick_positions else None,
+            color_tick_labels=list(payload.color_tick_labels) if payload.color_tick_labels else None,
+        )
+        self.update_cloud(
+            bundle,
+            color_display_label,
+            point_size=float(point_layer.style.get("size", 7.0)),
+            point_alpha=float(point_layer.opacity),
+        )
+        if self._axis is None or self._canvas is None:
+            return
+        self._render_scene_overlays(scene)
+        diag = scene.diagnostics
+        mode_label = str(diag.get("view_profile", "Puntos"))
+        metrics = (
+            f"Perfil: {mode_label} · backend={diag.get('backend', 'n/a')} · "
+            f"prep={diag.get('geometry_ms', 0)} ms · draw={diag.get('render_ms', 0)} ms"
+        )
+        self.meta_label.configure(text=f"{self.meta_label.cget('text')}\n{metrics}")
+        self._canvas.draw_idle()
+
+    def _render_scene_overlays(self, scene: SceneState) -> None:
+        if self._axis is None:
+            return
+        z_min = scene.clipping_state.z_min
+        z_max = scene.clipping_state.z_max
+        for layer in scene.layers:
+            if not layer.visible:
+                continue
+            if layer.layer_type == "drillholes" and isinstance(layer.payload, tuple):
+                segments: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = []
+                for trajectory in layer.payload:
+                    if not isinstance(trajectory, DrillholeTrajectory):
+                        continue
+                    for idx in range(len(trajectory.points_xyz) - 1):
+                        p0 = trajectory.points_xyz[idx]
+                        p1 = trajectory.points_xyz[idx + 1]
+                        if z_min is not None and max(p0[2], p1[2]) < z_min:
+                            continue
+                        if z_max is not None and min(p0[2], p1[2]) > z_max:
+                            continue
+                        segments.append((p0, p1))
+                if segments:
+                    coll = Line3DCollection(segments, colors=layer.style.get("color", "#d9dde4"), linewidths=float(layer.style.get("line_width", 1.2)), alpha=float(layer.opacity))
+                    self._axis.add_collection3d(coll)
+            if layer.layer_type == "assay_intervals" and isinstance(layer.payload, tuple):
+                for intervals in layer.payload:
+                    if not isinstance(intervals, AssayIntervals3D):
+                        continue
+                    segments = []
+                    for seg in intervals.segments_xyz:
+                        p0, p1 = seg
+                        if z_min is not None and max(p0[2], p1[2]) < z_min:
+                            continue
+                        if z_max is not None and min(p0[2], p1[2]) > z_max:
+                            continue
+                        segments.append(seg)
+                    if segments:
+                        coll = Line3DCollection(segments, cmap=get_continuous_colormap(), linewidths=float(layer.style.get("line_width", 1.8)), alpha=float(layer.opacity))
+                        if intervals.values:
+                            coll.set_array(list(intervals.values[: len(segments)]))
+                        self._axis.add_collection3d(coll)
+
+    def update_cloud(
+        self,
+        data: Spatial3DDataBundle,
+        color_display_label: str,
+        *,
+        point_size: float | None = None,
+        point_alpha: float | None = None,
+    ) -> None:
         self._ensure_plot()
         if self._figure is None:
             return
@@ -124,8 +233,8 @@ class Spatial3DView(ctk.CTkFrame):
         self._axis.set_facecolor(CHART_BG)
         self._axis.grid(True, alpha=0.28, linewidth=0.7, color=CHART_GRID)
 
-        marker_size = 9 if data.point_count_rendered < 7000 else 7
-        marker_alpha = 0.78 if data.point_count_rendered < 22000 else 0.64
+        marker_size = float(point_size) if point_size is not None else (9 if data.point_count_rendered < 7000 else 7)
+        marker_alpha = float(point_alpha) if point_alpha is not None else (0.78 if data.point_count_rendered < 22000 else 0.64)
 
         cmap = "tab20" if data.color_mode == "categorical" else get_continuous_colormap()
         scatter = self._axis.scatter(
@@ -187,6 +296,17 @@ class Spatial3DView(ctk.CTkFrame):
         if self._axis is None or self._canvas is None:
             return
         self._axis.view_init(elev=26.0, azim=-54.0)
+        self._canvas.draw_idle()
+
+    def _set_ortho_view(self, mode: str) -> None:
+        if self._axis is None or self._canvas is None:
+            return
+        if mode == "xy":
+            self._axis.view_init(elev=90.0, azim=-90.0)
+        elif mode == "xz":
+            self._axis.view_init(elev=0.0, azim=-90.0)
+        else:
+            self._axis.view_init(elev=0.0, azim=0.0)
         self._canvas.draw_idle()
 
     def _ensure_plot(self) -> None:
