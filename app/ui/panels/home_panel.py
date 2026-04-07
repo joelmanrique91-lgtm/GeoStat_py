@@ -870,6 +870,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_apply_cutoff_primary(self) -> None:
         if self.service.workflow_state.current_step != "Cutoffs":
+            self._notify_stage_requirement(action_label="Aplicar capping/cutoff", required_step="Cutoffs")
             return
         if bool(self.dynamic_cutoff_enabled_var.get()):
             self._on_apply_dynamic_cutoff()
@@ -1296,6 +1297,7 @@ class HomePanel(ctk.CTkFrame):
 
         detail_body = ctk.CTkFrame(secondary_block, fg_color="transparent")
         detail_body.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        detail_body.grid_columnconfigure(0, weight=1)
 
         try:
             render_context = EDARenderContext(
@@ -1326,6 +1328,9 @@ class HomePanel(ctk.CTkFrame):
                 ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
                 return
 
+            evidence.grid_rowconfigure(2, weight=1)
+            secondary_block.grid_rowconfigure(1, weight=1)
+            detail_body.grid_rowconfigure(1, weight=1)
             checks = ctk.CTkFrame(detail_body, fg_color=BG_CARD, corner_radius=6)
             checks.grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 2))
             for col in range(3):
@@ -1350,7 +1355,7 @@ class HomePanel(ctk.CTkFrame):
                 return
 
             detail_plots = ctk.CTkFrame(detail_body, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-            detail_plots.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
+            detail_plots.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
             detail_plots.grid_columnconfigure((0, 1), weight=1)
             detail_plots.grid_rowconfigure((0, 1), weight=1)
             figure_specs = {
@@ -1676,6 +1681,9 @@ class HomePanel(ctk.CTkFrame):
     def _on_change_step(self, step_name: str) -> None:
         current_step = self.service.workflow_state.current_step
         if current_step == step_name:
+            same_step_message = f"Ya estás en la etapa {_display_step_name(step_name)}."
+            self.status_text.set(same_step_message)
+            self._append_activity(same_step_message)
             self._trace_ui_action("cambiar_vista", refresh_type="none", extra={"requested_step": step_name, "reason": "same_step_ignored"})
             return
         self.status_text.set(self.service.set_workflow_step(step_name))
@@ -2395,6 +2403,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_toggle_eda_capping(self) -> None:
         if self.service.workflow_state.current_step != "EDA":
+            self._notify_stage_requirement(action_label="EDA con capping confirmado", required_step="EDA")
             return
         self._invalidate_stage_cache("EDA")
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_capping_switch"})
@@ -2402,6 +2411,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_refresh_eda(self) -> None:
         if self.service.workflow_state.current_step != "EDA":
+            self._notify_stage_requirement(action_label="Actualizar EDA", required_step="EDA")
             return
         self._invalidate_stage_cache("EDA")
         self._trace_ui_action("actualizar_eda", refresh_type="dashboard_full", extra={"source": "eda_refresh_button"})
@@ -2412,12 +2422,15 @@ class HomePanel(ctk.CTkFrame):
             self.eda_plot_toggle_vars["histogram"].set(True)
             self.status_text.set("Debe haber al menos un gráfico activo en EDA.")
         if self.service.workflow_state.current_step != "EDA":
+            selected_label = dict(EDA_PLOT_TOGGLE_OPTIONS).get(selected_key, selected_key)
+            self._notify_stage_requirement(action_label=f"Gráfico EDA {selected_label}", required_step="EDA")
             return
         self._schedule_eda_toggle_refresh()
 
     def _on_toggle_eda_secondary(self) -> None:
         self.eda_secondary_visible_var.set(not bool(self.eda_secondary_visible_var.get()))
         if self.service.workflow_state.current_step != "EDA":
+            self._notify_stage_requirement(action_label="Diagnósticos secundarios EDA", required_step="EDA")
             return
         self._invalidate_stage_cache("EDA")
         self._refresh_dashboard(reason="eda_secondary_toggle", force=True)
@@ -2445,18 +2458,21 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_spatial_mode_changed(self, _value: str) -> None:
         if self.service.workflow_state.current_step != "Espacial":
+            self._notify_stage_requirement(action_label="Cambiar modo de vista espacial", required_step="Espacial")
             return
         self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_mode_changed", force=True)
 
     def _on_spatial_color_changed(self) -> None:
         if self.service.workflow_state.current_step != "Espacial":
+            self._notify_stage_requirement(action_label="Cambiar color espacial", required_step="Espacial")
             return
         self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_color_changed", force=True)
 
     def _on_spatial_style_changed(self) -> None:
         if self.service.workflow_state.current_step != "Espacial":
+            self._notify_stage_requirement(action_label="Ajustar estilo espacial", required_step="Espacial")
             return
         self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_style_changed", force=True)
@@ -2545,3 +2561,17 @@ class HomePanel(ctk.CTkFrame):
         if extra:
             details.update(extra)
         self.service.activity_log.log("ui_trace", "info", f"UI acción: {action}", details)
+
+    def _notify_stage_requirement(self, *, action_label: str, required_step: str) -> None:
+        current = self.service.workflow_state.current_step
+        message = (
+            f"La acción '{action_label}' aplica en la etapa {_display_step_name(required_step)}. "
+            f"Etapa actual: {_display_step_name(current)}."
+        )
+        self.status_text.set(message)
+        self._append_activity(message)
+        self._trace_ui_action(
+            "accion_restringida_por_etapa",
+            refresh_type="none",
+            extra={"action_label": action_label, "required_step": required_step, "current_step": current},
+        )

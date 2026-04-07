@@ -178,6 +178,13 @@ class HomePanelSemanticsTests(unittest.TestCase):
         self.assertFalse(available)
         self.assertIn("Backend 3D no disponible", reason)
 
+    def test_home_panel_has_explicit_feedback_for_same_step_navigation(self) -> None:
+        from pathlib import Path
+
+        source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
+        self.assertIn("Ya estás en la etapa", source)
+        self.assertIn("same_step_ignored", source)
+
 
 if __name__ == "__main__":
     unittest.main()
