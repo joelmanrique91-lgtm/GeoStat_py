@@ -9,6 +9,7 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
+from app.services.workflow_coordinator_service import WorkflowCoordinatorService
 from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
 from app.ui.controllers import SpatialViewerController, VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
@@ -271,6 +272,7 @@ class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
         self.service = service
+        self.workflow_coordinator = WorkflowCoordinatorService(service=service)
 
         self.dataset_label = ctk.StringVar(value="Dataset: No cargado")
         self.target_label = ctk.StringVar(value="Target: No definido")
@@ -1770,14 +1772,14 @@ class HomePanel(ctk.CTkFrame):
         self.variography_stage_view.mount(visual_host)
 
     def _on_change_step(self, step_name: str) -> None:
-        current_step = self.service.workflow_state.current_step
-        if current_step == step_name:
-            same_step_message = f"Ya estás en la etapa {_display_step_name(step_name)}."
+        transition = self.workflow_coordinator.change_step(step_name)
+        if not transition.changed:
+            same_step_message = transition.message.replace(step_name, _display_step_name(step_name))
             self.status_text.set(same_step_message)
             self._append_activity(same_step_message)
             self._trace_ui_action("cambiar_vista", refresh_type="none", extra={"requested_step": step_name, "reason": "same_step_ignored"})
             return
-        self.status_text.set(self.service.set_workflow_step(step_name))
+        self.status_text.set(transition.message)
         self.step_label.set(f"Paso actual: {_display_step_name(step_name)}")
         self._append_activity(self.status_text.get())
         self._trace_ui_action("cambiar_vista", refresh_type="dashboard_full", extra={"requested_step": step_name})
