@@ -9,8 +9,9 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
+from app.services.workflow_coordinator_service import WorkflowCoordinatorService
 from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
-from app.ui.controllers import SpatialViewerController, VariographyController
+from app.ui.controllers import SpatialViewerController, VariographyController, WorkflowActionsController
 from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.panels.stages import VariographyStageView
 from app.ui.renderers import (
@@ -271,6 +272,7 @@ class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
         self.service = service
+        self.workflow_coordinator = WorkflowCoordinatorService(service=service)
 
         self.dataset_label = ctk.StringVar(value="Dataset: No cargado")
         self.target_label = ctk.StringVar(value="Target: No definido")
@@ -369,6 +371,7 @@ class HomePanel(ctk.CTkFrame):
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
         self.spatial_viewer_controller = SpatialViewerController(service=self.service)
         self.variography_controller = VariographyController(service=self.service)
+        self.workflow_actions_controller = WorkflowActionsController(service=self.service)
         self.variography_stage_view = VariographyStageView(controller=self.variography_controller)
         self._spatial_3d_renderer_warning_cache: str = ""
         self._cutoff_preview_after_id: str | None = None
@@ -1770,14 +1773,14 @@ class HomePanel(ctk.CTkFrame):
         self.variography_stage_view.mount(visual_host)
 
     def _on_change_step(self, step_name: str) -> None:
-        current_step = self.service.workflow_state.current_step
-        if current_step == step_name:
-            same_step_message = f"Ya estás en la etapa {_display_step_name(step_name)}."
+        transition = self.workflow_coordinator.change_step(step_name)
+        if not transition.changed:
+            same_step_message = transition.message.replace(step_name, _display_step_name(step_name))
             self.status_text.set(same_step_message)
             self._append_activity(same_step_message)
             self._trace_ui_action("cambiar_vista", refresh_type="none", extra={"requested_step": step_name, "reason": "same_step_ignored"})
             return
-        self.status_text.set(self.service.set_workflow_step(step_name))
+        self.status_text.set(transition.message)
         self.step_label.set(f"Paso actual: {_display_step_name(step_name)}")
         self._append_activity(self.status_text.get())
         self._trace_ui_action("cambiar_vista", refresh_type="dashboard_full", extra={"requested_step": step_name})
@@ -2153,8 +2156,13 @@ class HomePanel(ctk.CTkFrame):
     def _on_apply_config(self) -> None:
         self._trace_ui_action("aplicar_configuracion", refresh_type="none")
         selected_domain = self.domain_var.get() if bool(self.use_domain_var.get()) and self.domain_var.get() else None
-        result = self.service.set_variable_config(
-            self.x_var.get(), self.y_var.get(), self.z_var.get(), self.target_var.get(), self.hole_var.get() or None, selected_domain
+        result = self.workflow_actions_controller.apply_variable_config(
+            x_column=self.x_var.get(),
+            y_column=self.y_var.get(),
+            z_column=self.z_var.get(),
+            target_column=self.target_var.get(),
+            hole_id_column=self.hole_var.get() or None,
+            selected_domain=selected_domain,
         )
         self.status_text.set(result.message)
         self._append_activity(result.message)
@@ -2456,7 +2464,7 @@ class HomePanel(ctk.CTkFrame):
         self._render_control_sections()
 
     def _on_apply_domain_filter(self) -> None:
-        result = self.service.set_active_domain(self.domain_filter_var.get())
+        result = self.workflow_actions_controller.apply_domain_filter(self.domain_filter_var.get())
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
@@ -2504,7 +2512,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_confirm_domain_assignment(self) -> None:
         selected = self.domain_confirm_var.get().strip() or self.domain_filter_var.get().strip()
-        result = self.service.confirm_domain_assignment(selected)
+        result = self.workflow_actions_controller.confirm_domain_assignment(selected)
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
@@ -2516,12 +2524,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_apply_domains(self) -> None:
         self._trace_ui_action("aplicar_dominios", refresh_type="none")
-        if not self.domain_definition_local:
-            self.status_text.set("Define al menos un dominio para comenzar")
-            self.domain_feedback_var.set("Define al menos un dominio para comenzar")
-            return
-        definition = {"variable_base": self.domain_base_var.get().strip(), "domains": dict(self.domain_definition_local)}
-        result = self.service.apply_domain_definition(definition)
+        result = self.workflow_actions_controller.apply_domains(variable_base=self.domain_base_var.get().strip(), domains=dict(self.domain_definition_local))
         if result.success:
             self.status_text.set("Dominios aplicados al dataset")
             self.domain_feedback_var.set("Dominios aplicados al dataset")
@@ -2562,7 +2565,7 @@ class HomePanel(ctk.CTkFrame):
     def _on_toggle_variography_without_domain(self) -> None:
         enabled = bool(self.allow_variography_without_domain_var.get())
         reason = "ui_manual_exception" if enabled else ""
-        result = self.service.set_variography_domain_bypass(enabled, reason=reason)
+        result = self.workflow_actions_controller.toggle_variography_bypass(enabled=enabled, reason=reason)
         self.status_text.set(result.message)
         self._append_activity(self.status_text.get())
         self._invalidate_stage_cache()

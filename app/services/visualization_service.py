@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import sys
 
-from app.services.variography_geometry import DirectionalConfig, pair_matches_direction
+from app.services.variography_geometry import DirectionalConfig
+from app.utils.paths import PROJECT_ROOT
 
 @dataclass
 class SpatialDataBundle:
@@ -52,6 +54,8 @@ class VariogramResult:
     source_points: int
     used_points: int
     downsampled: bool
+    backend_used: str = "numpy"
+    backend_warnings: list[str] | None = None
 
 
 def _downsample_dataframe(dataframe, max_points: int, random_state: int = 42):
@@ -211,6 +215,7 @@ def compute_experimental_variogram(
     max_points: int = 2500,
 ) -> VariogramResult:
     import pandas as pd
+    import numpy as np
 
     required = [x_col, y_col, z_col, target_col]
     missing = [column for column in required if column not in dataframe.columns]
@@ -229,10 +234,9 @@ def compute_experimental_variogram(
     source_points = len(clean)
     sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
-    records = [
-        (float(x), float(y), float(z), float(target))
-        for x, y, z, target in sampled[[x_col, y_col, z_col, target_col]].itertuples(index=False, name=None)
-    ]
+    coords = sampled[[x_col, y_col, z_col]].to_numpy(dtype=float)
+    values = sampled[target_col].to_numpy(dtype=float)
+    n_records = len(coords)
 
     lag_window = float(lag_tolerance) if lag_tolerance is not None else float(lag) * 0.5
     lag_window = max(1e-9, lag_window)
@@ -248,32 +252,27 @@ def compute_experimental_variogram(
     if errors:
         raise ValueError("Configuración direccional inválida: " + "; ".join(errors))
 
-    dist_acc: list[list[float]] = [[] for _ in range(n_lags)]
-    min_center = float(lag)
-    max_center = float(n_lags) * float(lag)
-    for i in range(len(records) - 1):
-        x0, y0, z0, v0 = records[i]
-        for j in range(i + 1, len(records)):
-            x1, y1, z1, v1 = records[j]
-            dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
-            if not pair_matches_direction(dx, dy, dz, direction):
-                continue
-            d = math.sqrt(dx**2 + dy**2 + dz**2)
-            if d > max_distance or d < (min_center - lag_window) or d > (max_center + lag_window):
-                continue
-            nearest_idx = int(round((d / float(lag)) - 1.0))
-            if nearest_idx < 0 or nearest_idx >= n_lags:
-                continue
-            center = (nearest_idx + 1) * float(lag)
-            if abs(d - center) <= lag_window:
-                dist_acc[nearest_idx].append(0.5 * (v1 - v0) ** 2)
+    src_path = PROJECT_ROOT / "src"
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+    from mining_geostat.variography_backend import compute_experimental_backend
 
-    lag_centers, gammas, pairs = [], [], []
-    for idx in range(n_lags):
-        lag_centers.append((idx + 1) * lag)
-        pair_count = len(dist_acc[idx])
-        pairs.append(pair_count)
-        gammas.append(sum(dist_acc[idx]) / pair_count if pair_count else math.nan)
+    backend = compute_experimental_backend(
+        coords=coords,
+        values=values,
+        lag=float(lag),
+        n_lags=int(n_lags),
+        max_distance=float(max_distance),
+        azimuth=float(azimuth),
+        dip=float(dip),
+        ang_tol_h=float(ang_tol_h),
+        ang_tol_v=float(ang_tol_v),
+        band_width=float(band_width),
+        band_height=float(band_height),
+    )
+    lag_centers = list(backend.lag_centers)
+    gammas = list(backend.gamma)
+    pairs = list(backend.npairs)
 
     if max(pairs, default=0) == 0:
         raise ValueError("No se encontraron pares dentro de max_distance para el variograma.")
@@ -285,4 +284,6 @@ def compute_experimental_variogram(
         source_points=source_points,
         used_points=len(sampled),
         downsampled=downsampled,
+        backend_used=str(backend.backend_used),
+        backend_warnings=list(backend.warnings),
     )

@@ -6,6 +6,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from .variography_backend import compute_experimental_backend
+
 
 @dataclass(frozen=True)
 class DirectionalConfig:
@@ -132,51 +134,22 @@ def experimental_variogram_3d(
     if errs:
         raise ValueError("; ".join(errs))
 
-    n_points = len(coords)
-    i_idx, j_idx = np.triu_indices(n_points, k=1)
-    deltas = coords[j_idx] - coords[i_idx]
-    dx = deltas[:, 0]
-    dy = deltas[:, 1]
-    dz = deltas[:, 2]
-
-    d = np.sqrt(dx * dx + dy * dy + dz * dz)
-    valid = (d > 0.0) & (d <= float(max_distance))
-
-    ux, uy, uz = _unit_direction(direction.azimuth_deg, direction.dip_deg)
-    dot = np.abs((dx * ux + dy * uy + dz * uz) / np.maximum(d, 1e-12))
-    dot = np.clip(dot, -1.0, 1.0)
-    ang = np.degrees(np.arccos(dot))
-    valid &= ang <= direction.azimuth_tolerance_deg
-
-    horizontal = np.sqrt(dx * dx + dy * dy)
-    pair_dip = np.degrees(np.arctan2(dz, horizontal))
-    dip_diff = np.minimum(np.abs(pair_dip - direction.dip_deg), np.abs(-pair_dip - direction.dip_deg))
-    valid &= dip_diff <= direction.dip_tolerance_deg
-
-    if direction.band_width > 0.0:
-        proj = dx * ux + dy * uy + dz * uz
-        perp = np.sqrt(np.maximum(0.0, d * d - proj * proj))
-        valid &= perp <= direction.band_width * 0.5
-    if direction.band_height > 0.0:
-        valid &= np.abs(dz) <= direction.band_height * 0.5
-
-    if not np.any(valid):
-        raise ValueError("No hay pares para el variograma con la configuración dada")
-
-    d_valid = d[valid]
-    semivar = 0.5 * np.square(vals[j_idx[valid]] - vals[i_idx[valid]])
-    bins = np.rint((d_valid / lag) - 1.0).astype(int)
-    in_range = (bins >= 0) & (bins < n_lags)
-
-    gamma_sum = np.bincount(bins[in_range], weights=semivar[in_range], minlength=n_lags)
-    npairs_arr = np.bincount(bins[in_range], minlength=n_lags)
-
-    lag_centers = [float((k + 1) * lag) for k in range(n_lags)]
-    npairs = npairs_arr.astype(int).tolist()
-    gamma = [
-        float(gamma_sum[k] / npairs_arr[k]) if npairs_arr[k] > 0 else math.nan
-        for k in range(n_lags)
-    ]
+    backend_result = compute_experimental_backend(
+        coords=coords,
+        values=vals,
+        lag=float(lag),
+        n_lags=int(n_lags),
+        max_distance=float(max_distance),
+        azimuth=float(azimuth),
+        dip=float(dip),
+        ang_tol_h=float(ang_tol_h),
+        ang_tol_v=float(ang_tol_v),
+        band_width=float(bandwidth),
+        band_height=float(bandwidth),
+    )
+    lag_centers = list(backend_result.lag_centers)
+    npairs = list(backend_result.npairs)
+    gamma = list(backend_result.gamma)
     if max(npairs) == 0:
         raise ValueError("No hay pares para el variograma con la configuración dada")
 
@@ -184,7 +157,13 @@ def experimental_variogram_3d(
         lag_centers=lag_centers,
         gamma=gamma,
         npairs=npairs,
-        metadata={"n_points": int(len(clean)), "downsampled": downsampled, "direction": asdict(direction)},
+        metadata={
+            "n_points": int(len(clean)),
+            "downsampled": downsampled,
+            "direction": asdict(direction),
+            "backend": backend_result.backend_used,
+            "backend_warnings": list(backend_result.warnings),
+        },
     )
 
 

@@ -6,6 +6,11 @@ import numpy as np
 
 from .variogram import VariogramModel
 
+try:
+    from pykrige.ok3d import OrdinaryKriging3D
+except Exception:  # pragma: no cover - optional backend
+    OrdinaryKriging3D = None
+
 
 @dataclass(frozen=True)
 class NeighborhoodConfig:
@@ -20,6 +25,7 @@ class KrigingResult:
     variance: float
     n_used: int
     weights: list[float]
+    backend_used: str = "numpy"
 
 
 def _select_neighbors(samples_xyz: np.ndarray, target_xyz: np.ndarray, cfg: NeighborhoodConfig) -> np.ndarray:
@@ -48,6 +54,27 @@ def ordinary_kriging(
     xyz = samples_xyz[idx]
     val = samples_val[idx]
     n = len(idx)
+    if OrdinaryKriging3D is not None:
+        variogram_parameters = [float(model.sill - model.nugget), float(model.range_), float(model.nugget)]
+        ok3d = OrdinaryKriging3D(
+            x=xyz[:, 0],
+            y=xyz[:, 1],
+            z=xyz[:, 2],
+            val=val,
+            variogram_model=model.model_type,
+            variogram_parameters=variogram_parameters,
+            enable_plotting=False,
+            exact_values=False,
+            verbose=False,
+        )
+        estimate, variance = ok3d.execute("points", np.array([target_xyz[0]]), np.array([target_xyz[1]]), np.array([target_xyz[2]]))
+        return KrigingResult(
+            estimate=float(estimate[0]),
+            variance=max(0.0, float(variance[0])),
+            n_used=n,
+            weights=[],
+            backend_used="pykrige",
+        )
 
     k = np.zeros((n + 1, n + 1), dtype=float)
     for i in range(n):
@@ -66,7 +93,7 @@ def ordinary_kriging(
     mu = sol[n]
     estimate = float(np.dot(w, val))
     variance = float(model.sill - np.dot(w, rhs[:n]) - mu)
-    return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist())
+    return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist(), backend_used="numpy")
 
 
 def simple_kriging(
@@ -92,7 +119,7 @@ def simple_kriging(
     w = np.linalg.solve(k, rhs)
     estimate = float(mean + np.dot(w, (val - mean)))
     variance = float(model.sill - np.dot(w, rhs))
-    return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist())
+    return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist(), backend_used="numpy")
 
 
 def block_kriging(
@@ -115,4 +142,10 @@ def block_kriging(
     per_point = [ordinary_kriging(samples_xyz, samples_val, p, model, cfg) for p in points]
     estimate = float(np.mean([r.estimate for r in per_point]))
     variance = float(np.mean([r.variance for r in per_point]))
-    return KrigingResult(estimate=estimate, variance=variance, n_used=per_point[0].n_used, weights=per_point[0].weights)
+    return KrigingResult(
+        estimate=estimate,
+        variance=variance,
+        n_used=per_point[0].n_used,
+        weights=per_point[0].weights,
+        backend_used=per_point[0].backend_used,
+    )

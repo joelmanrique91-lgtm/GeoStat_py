@@ -49,6 +49,7 @@ class TestMiningGeostatPipeline(unittest.TestCase):
         kr = ordinary_kriging(xyz, val, np.array([5.0, 5.0, 0.0]), model, NeighborhoodConfig(min_samples=4, max_samples=5))
         self.assertTrue(0.7 <= kr.estimate <= 1.3)
         self.assertGreaterEqual(kr.variance, 0.0)
+        self.assertIn(kr.backend_used, {"pykrige", "numpy"})
 
     def test_pipeline_reproducibility_seed(self):
         c = GeostatPipelineConfig(seed=22)

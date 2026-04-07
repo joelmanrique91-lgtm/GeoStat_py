@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import logging
@@ -35,6 +35,19 @@ from app.services.visualization_service import compute_experimental_variogram
 from app.services.variography_validation_service import assess_fit_reliability, classify_operational_reliability
 
 logger = logging.getLogger(__name__)
+MIN_ACTIVE_ROWS_FOR_VARIOGRAPHY = 3
+RECOMMENDED_ACTIVE_ROWS_FOR_VARIOGRAPHY = 30
+
+
+@dataclass(frozen=True)
+class VariographyPreconditionResult:
+    blockers: list[VariographyIssue]
+    warnings: list[VariographyIssue]
+    exploratory_mode: bool
+    support_mode: str
+    bypass_active: bool
+    bypass_reason: str
+    active_rows: int
 
 
 def _safe_float(value: object, default: float) -> float:
@@ -126,87 +139,13 @@ class VariographyApplicationService:
         self.session.band_width = request.direction.band_width
         self.session.band_height = request.direction.band_height
         self.session.estimator = request.estimator
-        blockers = self._validate_request(request)
-        warnings: list[VariographyIssue] = []
-        exploratory_mode = False
-        support_mode = str(self.host_service.workflow_state.support_mode or "none")
-        support_confirmed = bool(self.host_service.workflow_state.support_confirmed)
-        bypass_active = bool(self.host_service.workflow_state.allow_variography_without_domain) and not bool(request.context.active_domain_filter.strip())
-        bypass_reason = str(self.host_service.workflow_state.variography_domain_bypass_reason or "").strip()
-        if not support_confirmed:
-            if support_mode == "fallback_approx":
-                exploratory_mode = True
-                warnings.append(
-                    VariographyIssue(
-                        "SUPPORT_APPROXIMATE_FALLBACK",
-                        "Soporte aproximado activo: resultado variográfico restringido a uso exploratorio.",
-                        "warning",
-                    )
-                )
-            elif formal_mode:
-                blockers.append(
-                    VariographyIssue(
-                        "MISSING_SUPPORT_CONFIRMATION",
-                        "Debe confirmar soporte/compositado real antes de variografía formal.",
-                        "blocker",
-                    )
-                )
-            else:
-                exploratory_mode = True
-                warnings.append(
-                    VariographyIssue(
-                        "MISSING_SUPPORT_CONFIRMATION",
-                        "Sin soporte confirmado real: cálculo restringido a exploración.",
-                        "warning",
-                    )
-                )
-        if not request.context.active_domain_filter.strip():
-            if bypass_active:
-                exploratory_mode = True
-                if not bypass_reason:
-                    blockers.append(
-                        VariographyIssue(
-                            "INVALID_DOMAIN_BYPASS_CONFIGURATION",
-                            "Bypass de dominio activo sin motivo auditado. Reconfigura la excepción.",
-                            "blocker",
-                        )
-                    )
-                warnings.append(
-                    VariographyIssue(
-                        "DOMAIN_BYPASS_ACTIVE",
-                        "Variografía ejecutada sin dominio confirmado (modo excepcional).",
-                        "warning",
-                    )
-                )
-            elif formal_mode:
-                blockers.append(
-                    VariographyIssue(
-                        "MISSING_DOMAIN_CONFIRMATION",
-                        "Debe confirmar dominio activo antes de variografía formal.",
-                        "blocker",
-                    )
-                )
-            else:
-                exploratory_mode = True
-                warnings.append(
-                    VariographyIssue(
-                        "MISSING_DOMAIN_CONFIRMATION",
-                        "Sin dominio confirmado: cálculo restringido a exploración.",
-                        "warning",
-                    )
-                )
-        if request.direction.band_width < 0 or request.direction.band_height < 0:
-            blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
-        if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
-            warnings.append(
-                VariographyIssue(
-                    "NEAR_OMNIDIRECTIONAL_WINDOW",
-                    "Tolerancias angulares cercanas a 90°: análisis prácticamente omnidireccional.",
-                    "warning",
-                )
-            )
-        if request.estimator != "classical":
-            warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
+        precheck = self._evaluate_preconditions(request=request, formal_mode=formal_mode)
+        blockers = list(precheck.blockers)
+        warnings = list(precheck.warnings)
+        exploratory_mode = bool(precheck.exploratory_mode)
+        support_mode = str(precheck.support_mode)
+        bypass_active = bool(precheck.bypass_active)
+        bypass_reason = str(precheck.bypass_reason)
 
         if blockers:
             response = VariographyComputeResponse(
@@ -232,6 +171,7 @@ class VariographyApplicationService:
                     "exploratory_mode": exploratory_mode,
                     "warning_count": len(warnings),
                     "blocker_count": len(blockers),
+                    "active_rows": int(precheck.active_rows),
                 },
             )
             return response
@@ -296,7 +236,7 @@ class VariographyApplicationService:
             )
         except Exception as exc:
             message = str(exc)
-            blocker_code = "NO_PAIRS_IN_RANGE" if "No se encontraron pares dentro de max_distance" in message else "COMPUTE_FAILED"
+            blocker_code = "NO_PAIRS_IN_RANGE" if ("No se encontraron pares dentro de max_distance" in message or "No hay pares para el variograma" in message) else "COMPUTE_FAILED"
             response = VariographyComputeResponse(
                 schema_version=SCHEMA_VERSION,
                 ok=False,
@@ -382,6 +322,8 @@ class VariographyApplicationService:
             "estimator": request.estimator,
             "effective_rows": effective_rows,
             "total_pairs": int(sum(pair_counts)),
+            "backend_used": str(getattr(raw, "backend_used", "numpy")),
+            "backend_warnings": list(getattr(raw, "backend_warnings", []) or []),
             "dominant_blocker": dominant_blocker,
             "dominant_warning": dominant_warning,
             "spatial_extent": float(estimated_defaults.get("spatial_extent", 0.0)),
@@ -452,6 +394,10 @@ class VariographyApplicationService:
                 "max_pairs": max(pair_counts, default=0),
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),
+                "backend_used": str(getattr(raw, "backend_used", "numpy")),
+                "backend_warnings": list(getattr(raw, "backend_warnings", []) or []),
+                "warning_codes": sorted({item.code for item in warnings}),
+                "blocker_codes": sorted({item.code for item in blockers}),
             },
         )
         logger.info(
@@ -672,6 +618,71 @@ class VariographyApplicationService:
             if nugget_rel < 1.0:
                 warnings.append("Nugget extremadamente bajo puede subestimar variabilidad en simulación.")
         return warnings
+
+    def _evaluate_preconditions(self, *, request: ExperimentalVariogramRequest, formal_mode: bool) -> VariographyPreconditionResult:
+        blockers = self._validate_request(request)
+        warnings: list[VariographyIssue] = []
+        exploratory_mode = False
+        support_mode = str(self.host_service.workflow_state.support_mode or "none")
+        support_confirmed = bool(self.host_service.workflow_state.support_confirmed)
+        bypass_active = bool(self.host_service.workflow_state.allow_variography_without_domain) and not bool(request.context.active_domain_filter.strip())
+        bypass_reason = str(self.host_service.workflow_state.variography_domain_bypass_reason or "").strip()
+
+        if not support_confirmed:
+            if support_mode == "fallback_approx":
+                exploratory_mode = True
+                warnings.append(VariographyIssue("SUPPORT_APPROXIMATE_FALLBACK", "Soporte aproximado activo: resultado variográfico restringido a uso exploratorio.", "warning"))
+            elif formal_mode:
+                blockers.append(VariographyIssue("MISSING_SUPPORT_CONFIRMATION", "Debe confirmar soporte/compositado real antes de variografía formal.", "blocker"))
+            else:
+                exploratory_mode = True
+                warnings.append(VariographyIssue("MISSING_SUPPORT_CONFIRMATION", "Sin soporte confirmado real: cálculo restringido a exploración.", "warning"))
+
+        if not request.context.active_domain_filter.strip():
+            if bypass_active:
+                exploratory_mode = True
+                if not bypass_reason:
+                    blockers.append(VariographyIssue("INVALID_DOMAIN_BYPASS_CONFIGURATION", "Bypass de dominio activo sin motivo auditado. Reconfigura la excepción.", "blocker"))
+                warnings.append(VariographyIssue("DOMAIN_BYPASS_ACTIVE", "Variografía ejecutada sin dominio confirmado (modo excepcional).", "warning"))
+            elif formal_mode:
+                blockers.append(VariographyIssue("MISSING_DOMAIN_CONFIRMATION", "Debe confirmar dominio activo antes de variografía formal.", "blocker"))
+            else:
+                exploratory_mode = True
+                warnings.append(VariographyIssue("MISSING_DOMAIN_CONFIRMATION", "Sin dominio confirmado: cálculo restringido a exploración.", "warning"))
+
+        if request.direction.band_width < 0 or request.direction.band_height < 0:
+            blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
+        if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
+            warnings.append(VariographyIssue("NEAR_OMNIDIRECTIONAL_WINDOW", "Tolerancias angulares cercanas a 90°: análisis prácticamente omnidireccional.", "warning"))
+        if request.estimator != "classical":
+            warnings.append(VariographyIssue("ESTIMATOR_FALLBACK", "Estimator no soportado en este slice; se usa cálculo clásico.", "warning"))
+
+        active_rows = 0
+        dataframe = self.host_service._get_filtered_dataframe()
+        if dataframe is not None:
+            active_rows = int(len(dataframe))
+            if active_rows == 0:
+                blockers.append(VariographyIssue("NO_ACTIVE_ROWS", "El conjunto activo quedó vacío por filtros/contexto.", "blocker"))
+            elif active_rows < MIN_ACTIVE_ROWS_FOR_VARIOGRAPHY:
+                blockers.append(VariographyIssue("INSUFFICIENT_ACTIVE_ROWS", f"Filas activas insuficientes para variografía (mínimo: {MIN_ACTIVE_ROWS_FOR_VARIOGRAPHY}).", "blocker"))
+            elif active_rows < RECOMMENDED_ACTIVE_ROWS_FOR_VARIOGRAPHY:
+                warnings.append(
+                    VariographyIssue(
+                        "LOW_ACTIVE_ROWS",
+                        f"Filas activas por debajo del recomendado ({RECOMMENDED_ACTIVE_ROWS_FOR_VARIOGRAPHY}); interpretar en modo exploratorio.",
+                        "warning",
+                    )
+                )
+
+        return VariographyPreconditionResult(
+            blockers=blockers,
+            warnings=warnings,
+            exploratory_mode=exploratory_mode,
+            support_mode=support_mode,
+            bypass_active=bypass_active,
+            bypass_reason=bypass_reason,
+            active_rows=active_rows,
+        )
 
     def _validate_request(self, request: ExperimentalVariogramRequest) -> list[VariographyIssue]:
         issues: list[VariographyIssue] = []
