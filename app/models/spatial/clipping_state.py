@@ -11,3 +11,5 @@ class ClippingState:
     plane_origin: tuple[float, float, float] | None = None
     plane_normal: tuple[float, float, float] | None = None
     mode: str = "none"
+    z_min: float | None = None
+    z_max: float | None = None

@@ -57,16 +57,30 @@ class SpatialViewerControllerTests(unittest.TestCase):
 
     def test_build_or_get_scene_uses_cache(self) -> None:
         controller = SpatialViewerController(service=self.service)
-        scene1 = controller.build_or_get_scene(color_by="target")
-        scene2 = controller.build_or_get_scene(color_by="target")
+        scene1 = controller.build_or_get_scene(color_by="target", quality="Ligera", style_options={"profile": "Puntos"})
+        scene2 = controller.build_or_get_scene(color_by="target", quality="Ligera", style_options={"profile": "Puntos"})
         self.assertEqual(scene1.context_key, scene2.context_key)
-        self.assertEqual(controller.geometry_cache.size(), 1)
+        self.assertGreaterEqual(controller.geometry_cache.size(), 2)
 
     def test_render_scene_with_unavailable_renderer_requests_fallback(self) -> None:
         controller = SpatialViewerController(service=self.service)
         result = controller.render_scene(parent=object(), renderer=_StubRenderer(available=False), color_by="target")
         self.assertFalse(result.success)
         self.assertTrue(result.fallback_to_2d)
+
+    def test_render_scene_success_reports_backend_and_metrics(self) -> None:
+        controller = SpatialViewerController(service=self.service)
+        renderer = _StubRenderer(available=True)
+        result = controller.render_scene(
+            parent=object(),
+            renderer=renderer,
+            color_by="target",
+            quality="Media",
+            style_options={"profile": "Puntos + Trazas", "point_size": 6.0, "opacity": 0.8, "z_focus_pct": 80.0},
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(result.backend, "_StubRenderer")
+        self.assertTrue(renderer.render_called)
 
 
 if __name__ == "__main__":

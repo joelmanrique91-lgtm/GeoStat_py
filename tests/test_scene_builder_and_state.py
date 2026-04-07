@@ -28,6 +28,19 @@ class SceneBuilderStateTests(unittest.TestCase):
         self.assertGreaterEqual(len(scene.layers), 1)
         self.assertEqual(scene.layers[0].layer_type, "point_cloud")
 
+    def test_scene_builder_applies_profile_and_clipping(self) -> None:
+        builder = SceneBuilderService()
+        scene = builder.build_scene(
+            self._payload(),
+            active_variable="au",
+            active_domain="A",
+            context_key="ctx",
+            view_profile="Intervalos",
+            z_focus_pct=50.0,
+        )
+        self.assertTrue(scene.clipping_state.enabled)
+        self.assertEqual(scene.diagnostics["view_profile"], "Intervalos")
+
     def test_scene_state_json_roundtrip(self) -> None:
         builder = SceneBuilderService()
         scene = builder.build_scene(self._payload(), active_variable="au", active_domain="A", context_key="ctx")

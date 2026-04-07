@@ -22,6 +22,7 @@ class SceneState:
     render_mode: str = "3d"
     context_key: str = ""
     timestamp_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    diagnostics: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -62,6 +63,7 @@ class SceneState:
             render_mode=str(payload.get("render_mode", "3d")),
             context_key=str(payload.get("context_key", "")),
             timestamp_utc=str(payload.get("timestamp_utc", datetime.now(timezone.utc).isoformat())),
+            diagnostics=dict(payload.get("diagnostics", {})) if isinstance(payload.get("diagnostics", {}), dict) else {},
         )
 
     @staticmethod

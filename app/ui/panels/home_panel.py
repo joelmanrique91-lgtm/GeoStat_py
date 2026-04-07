@@ -286,6 +286,11 @@ class HomePanel(ctk.CTkFrame):
         self.domain_confirm_var = ctk.StringVar(value="")
         self.spatial_color_var = ctk.StringVar(value="")
         self.spatial_view_mode_var = ctk.StringVar(value="2D")
+        self.spatial_profile_var = ctk.StringVar(value="Puntos + Trazas")
+        self.spatial_quality_var = ctk.StringVar(value="Media")
+        self.spatial_point_size_var = ctk.DoubleVar(value=7.0)
+        self.spatial_opacity_var = ctk.DoubleVar(value=0.85)
+        self.spatial_z_focus_var = ctk.DoubleVar(value=100.0)
         self.domain_filter_var = ctk.StringVar(value="Todos")
         self.domain_filter_lithology_var = ctk.StringVar(value="Todos")
         self.domain_filter_alteration_var = ctk.StringVar(value="Todos")
@@ -655,6 +660,28 @@ class HomePanel(ctk.CTkFrame):
             **self._option_menu_style(),
         ).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(section, text="(Local) No cambia el target global del workflow.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 3))
+        ctk.CTkLabel(section, text="Perfil 3D", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkOptionMenu(
+            section,
+            variable=self.spatial_profile_var,
+            values=["Puntos", "Puntos + Trazas", "Intervalos", "Dominio foco"],
+            command=lambda _v: self._on_spatial_style_changed(),
+            **self._option_menu_style(),
+        ).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Calidad render", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkOptionMenu(
+            section,
+            variable=self.spatial_quality_var,
+            values=["Alta", "Media", "Ligera"],
+            command=lambda _v: self._on_spatial_style_changed(),
+            **self._option_menu_style(),
+        ).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text=f"Tamaño punto: {self.spatial_point_size_var.get():.1f}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 1))
+        ctk.CTkSlider(section, from_=2.0, to=16.0, variable=self.spatial_point_size_var, command=lambda _v: self._on_spatial_style_changed()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text=f"Opacidad principal: {self.spatial_opacity_var.get():.2f}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 1))
+        ctk.CTkSlider(section, from_=0.15, to=1.0, variable=self.spatial_opacity_var, command=lambda _v: self._on_spatial_style_changed()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, text="Foco Z (%)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 1))
+        ctk.CTkSlider(section, from_=20.0, to=100.0, variable=self.spatial_z_focus_var, command=lambda _v: self._on_spatial_style_changed()).pack(fill="x", padx=6, pady=(0, 4))
         domain_filters = self._get_domain_filter_menu_values()
         if self.domain_filter_var.get() not in domain_filters:
             self.domain_filter_var.set("Todos")
@@ -854,7 +881,7 @@ class HomePanel(ctk.CTkFrame):
     def _build_spatial_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
-        row.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        row.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
         color_options = self._get_spatial_color_options()
         if self.spatial_color_var.get() not in color_options:
             self.spatial_color_var.set(color_options[0] if color_options else "")
@@ -876,7 +903,21 @@ class HomePanel(ctk.CTkFrame):
         if self.domain_filter_var.get() not in domain_filters:
             self.domain_filter_var.set("Todos")
         ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=domain_filters, state="normal", **self._option_menu_style()).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
-        ctk.CTkButton(row, text="Aplicar filtro dominio", command=self._on_apply_domain_filter, **self._button_style("secondary")).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
+        ctk.CTkOptionMenu(
+            row,
+            variable=self.spatial_profile_var,
+            values=["Puntos", "Puntos + Trazas", "Intervalos", "Dominio foco"],
+            command=lambda _v: self._on_spatial_style_changed(),
+            **self._option_menu_style(),
+        ).grid(row=0, column=3, padx=3, pady=2, sticky="ew")
+        ctk.CTkOptionMenu(
+            row,
+            variable=self.spatial_quality_var,
+            values=["Alta", "Media", "Ligera"],
+            command=lambda _v: self._on_spatial_style_changed(),
+            **self._option_menu_style(),
+        ).grid(row=0, column=4, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Aplicar filtro dominio", command=self._on_apply_domain_filter, **self._button_style("secondary")).grid(row=0, column=5, padx=3, pady=2, sticky="ew")
 
     def _build_domains_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1400,6 +1441,11 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_view_mode_var.get(),
             self.spatial_color_var.get(),
             self.domain_filter_var.get(),
+            self.spatial_profile_var.get(),
+            round(float(self.spatial_point_size_var.get()), 2),
+            round(float(self.spatial_opacity_var.get()), 2),
+            round(float(self.spatial_z_focus_var.get()), 1),
+            self.spatial_quality_var.get(),
             self.service.get_analysis_context_state().active_domain_filter,
         )
         if not force_rebuild and self._rendered_stage_signatures.get("Espacial") == signature:
@@ -1512,6 +1558,13 @@ class HomePanel(ctk.CTkFrame):
             renderer=renderer,
             color_by=color_by,
             view_mode="3d",
+            quality=self.spatial_quality_var.get(),
+            style_options={
+                "profile": self.spatial_profile_var.get(),
+                "point_size": float(self.spatial_point_size_var.get()),
+                "opacity": float(self.spatial_opacity_var.get()),
+                "z_focus_pct": float(self.spatial_z_focus_var.get()),
+            },
         )
         self.spatial_3d_widget = visual_host.winfo_children()[-1] if visual_host.winfo_children() else None
         if not result.success and result.fallback_to_2d:
@@ -1529,11 +1582,15 @@ class HomePanel(ctk.CTkFrame):
             rendered = int(getattr(points_layer.payload, "rendered_point_count", 0))
             total = int(getattr(points_layer.payload, "source_point_count", 0))
 
+        diag = scene.diagnostics
         ctk.CTkLabel(
             visual_host,
             text=(
                 f"Estado render: {rendered:,}/{total:,} muestras"
                 f" · Dominio aplicado: {snapshot.get('active_domain_filter') or 'Todos'}"
+                f" · Perfil: {diag.get('view_profile', self.spatial_profile_var.get())}"
+                f" · Backend: {result.backend}"
+                f" · prep/render: {diag.get('geometry_ms', 0)} / {diag.get('render_ms', 0)} ms"
             ),
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
@@ -2384,6 +2441,12 @@ class HomePanel(ctk.CTkFrame):
             return
         self._invalidate_stage_cache("Espacial")
         self._refresh_dashboard(reason="spatial_color_changed", force=True)
+
+    def _on_spatial_style_changed(self) -> None:
+        if self.service.workflow_state.current_step != "Espacial":
+            return
+        self._invalidate_stage_cache("Espacial")
+        self._refresh_dashboard(reason="spatial_style_changed", force=True)
 
     def _refresh_summary_cards(self) -> None:
         stats_table = self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get()))
