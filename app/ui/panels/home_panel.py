@@ -1296,6 +1296,7 @@ class HomePanel(ctk.CTkFrame):
 
         detail_body = ctk.CTkFrame(secondary_block, fg_color="transparent")
         detail_body.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        detail_body.grid_columnconfigure(0, weight=1)
 
         try:
             render_context = EDARenderContext(
@@ -1326,6 +1327,9 @@ class HomePanel(ctk.CTkFrame):
                 ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
                 return
 
+            evidence.grid_rowconfigure(2, weight=1)
+            secondary_block.grid_rowconfigure(1, weight=1)
+            detail_body.grid_rowconfigure(1, weight=1)
             checks = ctk.CTkFrame(detail_body, fg_color=BG_CARD, corner_radius=6)
             checks.grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 2))
             for col in range(3):
@@ -1350,7 +1354,7 @@ class HomePanel(ctk.CTkFrame):
                 return
 
             detail_plots = ctk.CTkFrame(detail_body, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-            detail_plots.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
+            detail_plots.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
             detail_plots.grid_columnconfigure((0, 1), weight=1)
             detail_plots.grid_rowconfigure((0, 1), weight=1)
             figure_specs = {

@@ -106,7 +106,13 @@ class DashboardGrid:
             ratio = new_w / max(new_h, 1e-6)
             min_ratio = max(self._base_aspect_ratio * 0.55, 0.60)
             if ratio < min_ratio:
-                new_h = max(new_w / min_ratio, 1.6)
+                candidate_w = max(new_h * min_ratio, 2.0)
+                if candidate_w <= avail_w:
+                    new_w = candidate_w
+                else:
+                    new_h = max(new_w / min_ratio, 1.6)
+        new_w = min(new_w, avail_w)
+        new_h = min(new_h, avail_h)
         self.figure.set_size_inches(new_w, new_h, forward=True)
         override = getattr(self.figure, "_dashboard_layout_override", None)
         if isinstance(override, dict):
