@@ -18,7 +18,6 @@ from app.ui.renderers import (
     EDARenderContext,
     MatplotlibEDARenderer,
     MatplotlibSpatial2DRenderer,
-    MatplotlibSpatial3DRenderer,
     PyVistaSpatial3DRenderer,
     Spatial2DRenderContext,
 )
@@ -331,7 +330,6 @@ class HomePanel(ctk.CTkFrame):
         self.spatial_3d_widget: ctk.CTkFrame | None = None
         self.eda_renderer = MatplotlibEDARenderer()
         self.spatial_2d_renderer = MatplotlibSpatial2DRenderer()
-        self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
         self.spatial_viewer_controller = SpatialViewerController(service=self.service)
         self.variography_controller = VariographyController(service=self.service)
