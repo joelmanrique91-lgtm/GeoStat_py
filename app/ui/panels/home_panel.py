@@ -1293,6 +1293,9 @@ class HomePanel(ctk.CTkFrame):
             return
 
         if stage == "EDA":
+            if data_refresh and not force_rebuild:
+                logger.debug("UI_REFRESH stage=EDA mode=NOOP reason=data_refresh_not_incremental")
+                return
             self.workspace_title_var.set(narrative.get("title", "Diagnóstico de distribución"))
             self.workspace_subtitle_var.set(narrative.get("subtitle", "Determina si la variable está estable o si requiere intervención de capping."))
             self._render_eda_view(stage_host, force_rebuild=force_rebuild, data_refresh=data_refresh)
