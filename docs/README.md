@@ -2,8 +2,16 @@
 
 Este directorio contiene documentos operativos y reportes históricos. Esta guía define una estructura canónica sin mover archivos de forma riesgosa.
 
+## 0) Fuente canónica y vigencia (leer primero)
+
+- **Fuente canónica vigente del estado actual**: `STRUCTURE_SUMMARY_AUDIT_2026-04-07.md`
+- Convención de vigencia usada en `docs/`:
+  - **VIGENTE**: referencia primaria del estado actual.
+  - **HISTÓRICO**: trazabilidad; no usar como fuente primaria de estado actual.
+
 ## 1) Vigente (referencia activa)
 
+- `STRUCTURE_SUMMARY_AUDIT_2026-04-07.md` (**canónico**)
 - `PROJECT_AUDIT.md`
 - `SAFE_OPTIMIZATION_PLAN.md`
 - `VARIOGRAPHY_TEST_STRATEGY.md`
@@ -18,7 +26,7 @@ Este directorio contiene documentos operativos y reportes históricos. Esta guí
 
 - `GUI_UX_TECHNICAL_AUDIT.md`
 - `TECHNICAL_AUDIT_2026-03-22.md`
-- `CODEBASE_AUTOAUDIT.md`
+- `CODEBASE_AUTOAUDIT.md` (**histórico; usar solo como antecedente**)
 - `PROJECT_AUDIT.md`
 
 ## 4) Histórico (planes/reportes de ejecución)
@@ -34,4 +42,4 @@ Este directorio contiene documentos operativos y reportes históricos. Esta guí
 - `PYVISTA_PHASE2_PLAN.md`
 - `VARIOGRAPHY_*` restantes vinculados a planificación
 
-> Regla de lectura: si hay contradicción entre documentos, priorizar **Vigente** y luego el estado real del código.
+> Regla de lectura: si hay contradicción entre documentos, priorizar **STRUCTURE_SUMMARY_AUDIT_2026-04-07.md** y luego el estado real del código.
