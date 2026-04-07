@@ -20,6 +20,15 @@ from app.services.workflow_contracts import (
     resolve_active_domain_column,
 )
 
+CRITICAL_VARIOGRAPHY_WARNING_CODES = {
+    "MODEL_LOW_RELIABILITY",
+    "LOW_MODEL_RELIABILITY",
+    "MODEL_EXPLORATORY_ONLY",
+}
+CRITICAL_VARIOGRAPHY_BLOCKER_CODES = {
+    "MODEL_BLOCKED",
+}
+
 
 class OperationalStateService:
     """Centralizes snapshot/readiness/cutoff/domain typed-state construction."""
@@ -85,6 +94,8 @@ class OperationalStateService:
 
     def build_stage_hint(self, stage: StageReadiness) -> str:
         if stage.ready:
+            if stage.status in {"critical_warning", "not_exportable"}:
+                return "Advertencia crítica: salida no apta para modelado/exportación."
             if stage.warnings:
                 return "Advertencia: hay filtros activos que reducen resultados."
             return "Etapa lista."
@@ -99,17 +110,33 @@ class OperationalStateService:
         dataframe = self.host.current_dataset.dataframe if self.host.current_dataset is not None else None
         resolved_target_exists = bool(dataframe is not None and snapshot.resolved_target_column and snapshot.resolved_target_column in dataframe.columns)
 
+        def _derive_status(ready: bool, blocking_reasons: list[str], warnings: list[str]) -> str:
+            if blocking_reasons:
+                return "blocked"
+            if any(code in {"variography_not_exportable"} for code in warnings):
+                return "not_exportable"
+            if any(code in {"variography_low_operational_reliability"} for code in warnings):
+                return "critical_warning"
+            if warnings:
+                return "exploratory"
+            if ready:
+                return "ready"
+            return "incomplete"
+
         def _stage(ready: bool, blocking_reasons: list[str], warnings: list[str] | None = None) -> StageReadiness:
+            normalized_warnings = list(warnings or [])
             stage = StageReadiness(
                 ready=bool(ready),
                 blocking_reasons=tuple(blocking_reasons),
-                warnings=tuple(warnings or []),
+                warnings=tuple(normalized_warnings),
+                status=_derive_status(bool(ready), blocking_reasons, normalized_warnings),
             )
             return StageReadiness(
                 ready=stage.ready,
                 blocking_reasons=stage.blocking_reasons,
                 warnings=stage.warnings,
                 hint=self.build_stage_hint(stage),
+                status=stage.status,
             )
 
         data_reasons: list[str] = []
@@ -147,6 +174,10 @@ class OperationalStateService:
                 spatial_reasons.append("missing_spatial_columns")
         if has_dataset and has_variable_config and not resolved_target_exists:
             spatial_reasons.append("missing_resolved_target_column")
+        if has_dataset and has_variable_config and not snapshot.active_domain_column:
+            spatial_warnings = ["domain_not_defined_exploratory"]
+        else:
+            spatial_warnings = []
 
         domains_reasons: list[str] = []
         domain_warnings: list[str] = []
@@ -178,6 +209,16 @@ class OperationalStateService:
                     variography_warnings.append("insufficient_data")
                 if snapshot.active_domain_filter.strip() and active_rows < 50:
                     variography_warnings.append("low_data_after_domain_filter")
+            if not snapshot.active_domain_column:
+                variography_warnings.append("domain_not_defined_exploratory")
+
+        session = self.host.get_variography_session()
+        latest_warnings = set(session.latest_warning_codes if session is not None else [])
+        latest_blockers = set(session.latest_blocker_codes if session is not None else [])
+        if latest_warnings.intersection(CRITICAL_VARIOGRAPHY_WARNING_CODES):
+            variography_warnings.append("variography_low_operational_reliability")
+        if latest_blockers.intersection(CRITICAL_VARIOGRAPHY_BLOCKER_CODES):
+            variography_warnings.append("variography_not_exportable")
 
         return WorkflowReadinessState(
             current_step=self.host.workflow_state.current_step,
@@ -188,7 +229,7 @@ class OperationalStateService:
                 "data": _stage(not data_reasons, data_reasons),
                 "eda": _stage(not eda_reasons, eda_reasons),
                 "cutoffs": _stage(not cutoffs_reasons, cutoffs_reasons),
-                "spatial": _stage(not spatial_reasons, spatial_reasons),
+                "spatial": _stage(not spatial_reasons, spatial_reasons, warnings=spatial_warnings),
                 "domains": _stage(not domains_reasons, domains_reasons, warnings=domain_warnings),
                 "variography": _stage(not variography_reasons, variography_reasons, warnings=variography_warnings),
             },

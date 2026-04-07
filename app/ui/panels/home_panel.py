@@ -18,6 +18,7 @@ from app.ui.renderers import (
     EDARenderContext,
     MatplotlibEDARenderer,
     MatplotlibSpatial2DRenderer,
+    MatplotlibSpatial3DRenderer,
     PyVistaSpatial3DRenderer,
     Spatial2DRenderContext,
 )
@@ -144,8 +145,11 @@ def _build_workflow_stage_label(step_name: str, active_step: str, readiness: Wor
     stage_key = STEP_TO_READINESS_KEY.get(step_name, "")
     stage_state = readiness.stages.get(stage_key, None)
     is_ready = bool(stage_state.ready) if stage_state is not None else False
+    stage_status = str(stage_state.status) if stage_state is not None else "incomplete"
     has_warning = bool(stage_state.warnings) if stage_state is not None else False
-    if has_warning:
+    if stage_status in {"critical_warning", "not_exportable"}:
+        readiness_marker = "⚠ CRÍTICO"
+    elif has_warning:
         readiness_marker = "⚠ ALERTA"
     elif is_ready:
         readiness_marker = "✓ LISTO"
@@ -330,6 +334,7 @@ class HomePanel(ctk.CTkFrame):
         self.spatial_3d_widget: ctk.CTkFrame | None = None
         self.eda_renderer = MatplotlibEDARenderer()
         self.spatial_2d_renderer = MatplotlibSpatial2DRenderer()
+        self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
         self.spatial_viewer_controller = SpatialViewerController(service=self.service)
         self.variography_controller = VariographyController(service=self.service)
@@ -1187,14 +1192,6 @@ class HomePanel(ctk.CTkFrame):
 
         active_variable = str(state.effective_target_column if self.eda_use_capping_var.get() else self.target_var.get() or state.effective_target_column)
         capping_status = "capping confirmado" if state.dynamic_enabled else "sin capping confirmado"
-        snapshot_context = f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}"
-        wrapper, evidence = self._build_decision_layout(
-            parent,
-            decision_title="Decisión EDA",
-            decision_message="Evaluar si la variable es estable para continuar el flujo.",
-            context_message=snapshot_context,
-        )
-
         try:
             selected_domain_filter = self.domain_filter_var.get().strip()
             data = self.service.prepare_univariate_data(
@@ -1576,6 +1573,12 @@ class HomePanel(ctk.CTkFrame):
             return
         scene = result.scene
         if scene is None:
+            ctk.CTkLabel(
+                visual_host,
+                text="No hay escena 3D renderizable para el contexto actual. Usa 2D o ajusta filtros/perfil.",
+                text_color=SEM_ORANGE,
+                font=ui_font(FONT_SMALL),
+            ).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 3))
             return
 
         points_layer = next((layer for layer in scene.layers if layer.layer_id == "points"), None)
@@ -1584,6 +1587,14 @@ class HomePanel(ctk.CTkFrame):
         if points_layer is not None and hasattr(points_layer.payload, "rendered_point_count"):
             rendered = int(getattr(points_layer.payload, "rendered_point_count", 0))
             total = int(getattr(points_layer.payload, "source_point_count", 0))
+        if total <= 0 or rendered <= 0:
+            ctk.CTkLabel(
+                visual_host,
+                text="Vista 3D sin puntos visibles para el filtro actual. Cambia a 2D o amplía el dominio activo.",
+                text_color=SEM_ORANGE,
+                font=ui_font(FONT_SMALL),
+            ).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 3))
+            return
 
         diag = scene.diagnostics
         ctk.CTkLabel(
