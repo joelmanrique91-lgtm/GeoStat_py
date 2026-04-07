@@ -18,7 +18,6 @@ from app.ui.renderers import (
     EDARenderContext,
     MatplotlibEDARenderer,
     MatplotlibSpatial2DRenderer,
-    MatplotlibSpatial3DRenderer,
     PyVistaSpatial3DRenderer,
     Spatial2DRenderContext,
 )
@@ -331,7 +330,6 @@ class HomePanel(ctk.CTkFrame):
         self.spatial_3d_widget: ctk.CTkFrame | None = None
         self.eda_renderer = MatplotlibEDARenderer()
         self.spatial_2d_renderer = MatplotlibSpatial2DRenderer()
-        self.spatial_3d_renderer = MatplotlibSpatial3DRenderer()
         self.pyvista_spatial_3d_renderer = PyVistaSpatial3DRenderer()
         self.spatial_viewer_controller = SpatialViewerController(service=self.service)
         self.variography_controller = VariographyController(service=self.service)
@@ -1548,7 +1546,7 @@ class HomePanel(ctk.CTkFrame):
             self.service.activity_log.log(
                 "spatial_3d_backend_fallback",
                 "warning",
-                "Fallback al renderer 3D Matplotlib.",
+                "Viewer 3D dedicado no disponible, fallback a 2D.",
                 {"reason": fallback_reason},
             )
 
@@ -1600,7 +1598,7 @@ class HomePanel(ctk.CTkFrame):
         available, reason = self.pyvista_spatial_3d_renderer.is_available()
         if available:
             return self.pyvista_spatial_3d_renderer, ""
-        return self.spatial_3d_renderer, reason
+        return self.pyvista_spatial_3d_renderer, reason
 
     def _render_domains_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         state = self.service.get_operational_state()
