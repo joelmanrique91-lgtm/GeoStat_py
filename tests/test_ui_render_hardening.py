@@ -39,6 +39,8 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("def force_resize_under", source)
         self.assertIn("width = int(parent_width)", source)
         self.assertNotIn("max(widget.winfo_width(), parent_width)", source)
+        self.assertIn("new_w = min(new_w, avail_w)", source)
+        self.assertIn("new_h = min(new_h, avail_h)", source)
 
     def test_eda_view_uses_typed_cutoff_state_access(self) -> None:
         source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
@@ -61,6 +63,8 @@ class UIRenderHardeningTests(unittest.TestCase):
         self.assertIn("max_aspect_ratio=2.25", source)
         self.assertIn("max_aspect_ratio=1.65", source)
         self.assertIn("DashboardGrid.force_resize_under(active_host)", source)
+        self.assertIn("secondary_block.grid_rowconfigure(1, weight=1)", source)
+        self.assertIn('detail_plots.grid(row=1, column=0, sticky="nsew"', source)
 
     def test_outlier_preview_uses_modern_boxplot_api_and_visible_fallback(self) -> None:
         source = Path("app/ui/panels/home_panel.py").read_text(encoding="utf-8")
