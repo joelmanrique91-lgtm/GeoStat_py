@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import customtkinter as ctk
+import time
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -30,6 +31,7 @@ class DashboardGrid:
         self._resize_after_id: str | None = None
         self._configure_bound = False
         self._destroyed = False
+        self._last_resize_draw_at = 0.0
         self._configured_figsize = figsize
         self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
         self._base_aspect_ratio = (figsize[0] / max(figsize[1], 1e-6)) if figsize is not None else None
@@ -64,7 +66,6 @@ class DashboardGrid:
             widget.pack(fill="both", expand=True, padx=0, pady=0)
         if not self._configure_bound:
             widget.bind("<Configure>", self._on_parent_configure, add="+")
-            self.parent.bind("<Configure>", self._on_parent_configure, add="+")
             self._configure_bound = True
         self._resize_to_parent(force=True)
 
@@ -87,7 +88,6 @@ class DashboardGrid:
         width = int(parent_width)
         height = int(parent_height)
         if width <= 16 or height <= 16:
-            self.parent.after(50, self._resize_to_parent)
             return
         size = (width, height)
         if not force and self._last_parent_size == size:
@@ -119,7 +119,10 @@ class DashboardGrid:
             apply_dashboard_layout(self.figure, **override)
         else:
             apply_dashboard_layout(self.figure)
-        self.canvas.draw_idle()
+        now = time.perf_counter()
+        if force or (now - self._last_resize_draw_at) >= 0.08:
+            self.canvas.draw_idle()
+            self._last_resize_draw_at = now
 
     def destroy(self) -> None:
         self._destroyed = True

@@ -56,9 +56,11 @@ class VariographyStageView:
         self._auto_compute_done = False
         self._auto_compute_context_signature: tuple[object, ...] | None = None
         self._pending_async_error: str = ""
+        self._text_wrap = VARIOGRAPHY_TEXT_WRAP
         self._bind_dirty_traces()
 
     def mount(self, parent: ctk.CTkFrame) -> None:
+        self._text_wrap = max(420, min(int(parent.winfo_width() or 1200) - 180, 1400))
         snapshot = self.controller.service.get_analysis_context_snapshot()
         context_signature = (
             self.controller.service.current_dataset.file_name if self.controller.service.current_dataset is not None else "",
@@ -117,8 +119,8 @@ class VariographyStageView:
         results.grid_rowconfigure(3, weight=1)
 
         ctk.CTkLabel(results, text="Pantalla hero · Continuidad y anisotropía", text_color=TEXT_MAIN, font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 1))
-        ctk.CTkLabel(results, text="Pregunta de decisión: ¿el modelo variográfico es estable y defendible para estimación/simulación?", text_color=SEM_BLUE_SOFT, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=1, column=0, sticky="w", pady=(0, 1))
-        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).grid(row=2, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(results, text="Pregunta de decisión: ¿el modelo variográfico es estable y defendible para estimación/simulación?", text_color=SEM_BLUE_SOFT, justify="left", wraplength=self._text_wrap).grid(row=1, column=0, sticky="w", pady=(0, 1))
+        ctk.CTkLabel(results, textvariable=self.status_var, text_color=TEXT_MUTED, justify="left", wraplength=self._text_wrap).grid(row=2, column=0, sticky="w", pady=(0, 4))
 
         self._plot_host = ctk.CTkFrame(results, fg_color=BG_CARD)
         self._plot_host.grid(row=3, column=0, sticky="nsew")
@@ -139,9 +141,9 @@ class VariographyStageView:
 
         alerts = ctk.CTkFrame(results, fg_color="transparent")
         alerts.grid(row=4, column=0, sticky="ew", pady=(4, 0))
-        ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
-        ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
-        ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=VARIOGRAPHY_TEXT_WRAP).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.warning_var, text_color=SEM_ORANGE, justify="left", wraplength=self._text_wrap).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.usage_warning_var, text_color=SEM_ORANGE, justify="left", wraplength=self._text_wrap).pack(anchor="w")
+        ctk.CTkLabel(alerts, textvariable=self.blocker_var, text_color=SEM_RED, justify="left", wraplength=self._text_wrap).pack(anchor="w")
         self._build_leapfrog_export_panel(results)
 
         cached = self._session.last_response
@@ -517,7 +519,14 @@ class VariographyStageView:
             if not lag_values or not gamma_values:
                 raise ValueError("Resultado variográfico sin datos de lags/gamma.")
             DashboardGrid.clear(self._plot_host)
-            grid = DashboardGrid(self._plot_host, 2, 2, figsize=(15.2, 8.2), width_ratios=[1.7, 1.0], height_ratios=[1.0, 1.0])
+            grid = DashboardGrid(
+                self._plot_host,
+                2,
+                2,
+                figsize=self._responsive_figsize(),
+                width_ratios=[1.7, 1.0],
+                height_ratios=[1.0, 1.0],
+            )
             info = "Resultado válido para lectura experimental." if ok else "Resultado generado con bloqueos de calidad."
             self.renderer.render(
                 grid,
@@ -542,6 +551,16 @@ class VariographyStageView:
                 suggestion="Recalcule ajustando max_distance o n_lags.",
                 severity="error",
             )
+
+    def _responsive_figsize(self) -> tuple[float, float]:
+        if self._plot_host is None:
+            return (11.8, 7.2)
+        width = max(int(self._plot_host.winfo_width()), 900)
+        height = max(int(self._plot_host.winfo_height()), 540)
+        dpi = 100.0
+        usable_w = max(width / dpi, 9.0)
+        usable_h = max(height / dpi, 5.4)
+        return (usable_w, usable_h)
 
     @staticmethod
     def _parse_float(value: str) -> float:

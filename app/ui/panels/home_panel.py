@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from tkinter import filedialog, messagebox
+from concurrent.futures import Future, ThreadPoolExecutor
 import threading
+import time
 
 import customtkinter as ctk
 
@@ -267,6 +269,102 @@ def _should_expand_stage_actions(step_name: str, readiness: WorkflowReadinessSta
     return "missing_dataset" in blocking
 
 
+class StageHostManager:
+    def __init__(self, view_body: ctk.CTkFrame) -> None:
+        self.view_body = view_body
+        self._hosts: dict[str, ctk.CTkFrame] = {}
+        self._signatures: dict[str, tuple[object, ...]] = {}
+
+    def get_host(self, stage: str) -> ctk.CTkFrame:
+        host = self._hosts.get(stage)
+        if host is not None and host.winfo_exists():
+            return host
+        host = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+        host.grid(row=0, column=0, sticky="nsew")
+        host.grid_remove()
+        self._hosts[stage] = host
+        return host
+
+    def show_only(self, stage: str) -> ctk.CTkFrame:
+        for name, host in self._hosts.items():
+            if not host.winfo_exists():
+                continue
+            if name == stage:
+                host.grid()
+            else:
+                host.grid_remove()
+        return self.get_host(stage)
+
+    def invalidate(self, stage: str | None = None) -> None:
+        if stage is None:
+            self._signatures.clear()
+            return
+        self._signatures.pop(stage, None)
+
+    def signature(self, stage: str) -> tuple[object, ...] | None:
+        return self._signatures.get(stage)
+
+    def set_signature(self, stage: str, signature: tuple[object, ...]) -> None:
+        self._signatures[stage] = signature
+
+    def has_signature(self, stage: str) -> bool:
+        return stage in self._signatures
+
+    def active_hosts(self) -> dict[str, ctk.CTkFrame]:
+        return self._hosts
+
+
+class VisualRefreshCoordinator:
+    def __init__(self, host: ctk.CTkFrame) -> None:
+        self.host = host
+        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ui_visual")
+        self._versions: dict[str, int] = {}
+        self._latest_future: dict[str, Future] = {}
+
+    def next_version(self, key: str) -> int:
+        version = int(self._versions.get(key, 0)) + 1
+        self._versions[key] = version
+        return version
+
+    def is_latest(self, key: str, version: int) -> bool:
+        return int(self._versions.get(key, 0)) == int(version)
+
+    def submit(
+        self,
+        key: str,
+        worker,
+        on_success,
+        on_error,
+    ) -> int:
+        version = self.next_version(key)
+        future = self.executor.submit(worker)
+        self._latest_future[key] = future
+
+        def _finish(fut: Future) -> None:
+            try:
+                result = fut.result()
+                self.host.after(0, lambda: on_success(result, version))
+            except Exception as exc:  # noqa: BLE001
+                self.host.after(0, lambda: on_error(exc, version))
+
+        future.add_done_callback(_finish)
+        return version
+
+    def shutdown(self) -> None:
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+
+class InteractionStateController:
+    def __init__(self) -> None:
+        self._last_action_at = time.perf_counter()
+
+    def touch(self) -> None:
+        self._last_action_at = time.perf_counter()
+
+    def idle_seconds(self) -> float:
+        return max(0.0, time.perf_counter() - self._last_action_at)
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -377,6 +475,11 @@ class HomePanel(ctk.CTkFrame):
         self._last_cutoff_preview_signature: tuple[object, ...] | None = None
         self._stage_hosts: dict[str, ctk.CTkFrame] = {}
         self._rendered_stage_signatures: dict[str, tuple[object, ...]] = {}
+        self._host_manager: StageHostManager | None = None
+        self._refresh_coordinator = VisualRefreshCoordinator(self)
+        self._interaction_state = InteractionStateController()
+        self._eda_payload_cache: dict[tuple[object, ...], tuple[dict[str, object], dict[str, str]]] = {}
+        self._spatial_payload_cache: dict[tuple[object, ...], object] = {}
         self._resize_after_id: str | None = None
         self._eda_toggle_after_id: str | None = None
         self._last_view_body_size: tuple[int, int] = (0, 0)
@@ -384,6 +487,10 @@ class HomePanel(ctk.CTkFrame):
 
         self._build_layout()
         self._render_step("Datos")
+
+    def destroy(self) -> None:
+        self._refresh_coordinator.shutdown()
+        super().destroy()
 
     def _button_style(self, role: str = "secondary") -> dict[str, object]:
         if role == "primary":
@@ -462,6 +569,7 @@ class HomePanel(ctk.CTkFrame):
         self.view_body.grid_columnconfigure(0, weight=1)
         self.view_body.grid_rowconfigure(0, weight=1)
         self.view_body.bind("<Configure>", self._on_view_body_configure, add="+")
+        self._host_manager = StageHostManager(self.view_body)
 
         self.aux_controls_host = self._build_control_panel(self.content_panel)
         self.aux_controls_host.grid(row=4, column=0, sticky="ew", padx=PAD_MAIN_X, pady=(2, 4))
@@ -540,7 +648,8 @@ class HomePanel(ctk.CTkFrame):
         return frame
 
     def _build_control_panel(self, parent: ctk.CTkFrame) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(parent, width=SIDEBAR_WIDTH, fg_color=BG_PANEL, corner_radius=9, border_width=1, border_color=BORDER_SOFT)
+        width_hint = max(260, min(int((self.winfo_width() or 1280) * 0.24), 420))
+        frame = ctk.CTkFrame(parent, width=width_hint, fg_color=BG_PANEL, corner_radius=9, border_width=1, border_color=BORDER_SOFT)
         frame.grid_propagate(False)
 
         head = ctk.CTkFrame(frame, fg_color="transparent")
@@ -1086,34 +1195,47 @@ class HomePanel(ctk.CTkFrame):
         active_host = self._stage_hosts.get(current_step)
         if active_host is not None and active_host.winfo_exists():
             DashboardGrid.force_resize_under(active_host)
-        if current_step not in self._rendered_stage_signatures:
+        if self._get_stage_signature(current_step) is None:
             self._show_stage_view(current_step, force_rebuild=False)
 
     def _get_stage_host(self, stage: str) -> ctk.CTkFrame:
-        host = self._stage_hosts.get(stage)
-        if host is not None and host.winfo_exists():
+        if self._host_manager is None:
+            host = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
+            host.grid(row=0, column=0, sticky="nsew")
             return host
-        host = ctk.CTkFrame(self.view_body, fg_color=BG_PANEL)
-        host.grid(row=0, column=0, sticky="nsew")
-        host.grid_remove()
-        self._stage_hosts[stage] = host
+        host = self._host_manager.get_host(stage)
+        self._stage_hosts = self._host_manager.active_hosts()
         return host
 
     def _show_only_stage_host(self, stage: str) -> ctk.CTkFrame:
-        for name, host in self._stage_hosts.items():
-            if not host.winfo_exists():
-                continue
-            if name == stage:
-                host.grid()
-            else:
-                host.grid_remove()
-        return self._get_stage_host(stage)
+        if self._host_manager is None:
+            return self._get_stage_host(stage)
+        host = self._host_manager.show_only(stage)
+        self._stage_hosts = self._host_manager.active_hosts()
+        return host
 
     def _invalidate_stage_cache(self, stage: str | None = None) -> None:
+        if stage is None:
+            self._eda_payload_cache.clear()
+            self._spatial_payload_cache.clear()
+        if self._host_manager is not None:
+            self._host_manager.invalidate(stage)
+            return
         if stage is None:
             self._rendered_stage_signatures.clear()
             return
         self._rendered_stage_signatures.pop(stage, None)
+
+    def _get_stage_signature(self, stage: str) -> tuple[object, ...] | None:
+        if self._host_manager is not None:
+            return self._host_manager.signature(stage)
+        return self._rendered_stage_signatures.get(stage)
+
+    def _set_stage_signature(self, stage: str, signature: tuple[object, ...]) -> None:
+        if self._host_manager is not None:
+            self._host_manager.set_signature(stage, signature)
+            return
+        self._rendered_stage_signatures[stage] = signature
 
     def _show_stage_view(self, stage: str, *, force_rebuild: bool = False) -> None:
         stage_host = self._show_only_stage_host(stage)
@@ -1127,14 +1249,14 @@ class HomePanel(ctk.CTkFrame):
             self.workspace_subtitle_var.set("Completa la configuración indicada para habilitar esta vista.")
             DashboardGrid.clear(stage_host)
             self._render_blocked_stage_view(stage, stage_host)
-            self._rendered_stage_signatures[stage] = ("blocked",)
+            self._set_stage_signature(stage, ("blocked",))
             return
         self._render_stage_ready_view(stage, stage_host, force_rebuild=force_rebuild)
 
     def _render_stage_ready_view(self, stage: str, stage_host: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         narrative = STAGE_DECISION_NARRATIVE.get(stage, {})
         if stage == "Datos":
-            if not force_rebuild and self._rendered_stage_signatures.get(stage) == ("ready",):
+            if not force_rebuild and self._get_stage_signature(stage) == ("ready",):
                 return
             DashboardGrid.clear(stage_host)
             self.workspace_title_var.set(narrative.get("title", "Preparación de datos – habilitación del flujo"))
@@ -1150,7 +1272,7 @@ class HomePanel(ctk.CTkFrame):
             ctk.CTkLabel(summary, textvariable=self.dataset_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=(6, 2))
             ctk.CTkLabel(summary, textvariable=self.target_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=2)
             ctk.CTkLabel(summary, textvariable=self.domain_label, text_color=TXT_MAIN, font=ui_font(FONT_BODY)).pack(anchor="w", padx=8, pady=(2, 6))
-            self._rendered_stage_signatures[stage] = ("ready",)
+            self._set_stage_signature(stage, ("ready",))
             return
 
         if stage == "EDA":
@@ -1216,18 +1338,19 @@ class HomePanel(ctk.CTkFrame):
         return layout_map
 
     def _render_blocked_stage_view(self, stage: str, parent: ctk.CTkFrame) -> None:
+        wrap = self._dynamic_wraplength()
         card = ctk.CTkFrame(parent, fg_color=BG_SOFT, corner_radius=8)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(card, text=f"Etapa {_display_step_name(stage)} bloqueada", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
         hint = _build_active_step_hint(stage, self.service.get_operational_state())
-        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_BLOCKED, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
+        ctk.CTkLabel(card, text=hint, text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=wrap, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
         ctk.CTkLabel(
             card,
             text="Usa la barra de acciones superior para completar la etapa requerida y desbloquear esta vista.",
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
-            wraplength=WRAP_STAGE_BLOCKED,
+            wraplength=wrap,
             justify="left",
         ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
@@ -1236,31 +1359,50 @@ class HomePanel(ctk.CTkFrame):
         state = operational.cutoff
         snapshot = operational.analysis
         signature = self._build_eda_render_signature(operational)
-        if not force_rebuild and self._rendered_stage_signatures.get("EDA") == signature:
+        if not force_rebuild and self._get_stage_signature("EDA") == signature:
             return
-        DashboardGrid.clear(parent)
-        self._rendered_stage_signatures["EDA"] = signature
+        self._set_stage_signature("EDA", signature)
 
         active_variable = str(state.effective_target_column if self.eda_use_capping_var.get() else self.target_var.get() or state.effective_target_column)
         capping_status = "capping confirmado" if state.dynamic_enabled else "sin capping confirmado"
-        try:
-            selected_domain_filter = self.domain_filter_var.get().strip()
-            data = self.service.prepare_univariate_data(
-                max_domain_categories=10,
-                use_effective_target=bool(self.eda_use_capping_var.get()),
-                domain_filter=selected_domain_filter if selected_domain_filter and selected_domain_filter != "Todos" else None,
-            )
-        except Exception as exc:
+        payload_cached = self._eda_payload_cache.get(signature)
+        if payload_cached is None:
+            DashboardGrid.clear(parent)
             _wrapper, evidence = self._build_decision_layout(
                 parent,
                 decision_title="Decisión EDA",
-                decision_message="No fue posible evaluar estabilidad de la variable con la configuración actual.",
+                decision_message="Preparando evidencia EDA...",
                 context_message=f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · {capping_status}",
             )
-            ctk.CTkLabel(evidence, text=f"Sin EDA disponible: {exc}", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+            ctk.CTkLabel(evidence, text="Procesando datos en segundo plano.", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+            selected_domain_filter = self.domain_filter_var.get().strip()
+
+            def _worker():
+                data = self.service.prepare_univariate_data(
+                    max_domain_categories=10,
+                    use_effective_target=bool(self.eda_use_capping_var.get()),
+                    domain_filter=selected_domain_filter if selected_domain_filter and selected_domain_filter != "Todos" else None,
+                )
+                stats = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
+                return data, stats
+
+            def _ok(result, version: int) -> None:
+                if not self._refresh_coordinator.is_latest("eda_data", version):
+                    return
+                self._eda_payload_cache[signature] = result
+                if self.service.workflow_state.current_step == "EDA":
+                    self._refresh_dashboard(reason="eda_async_ready", force=True)
+
+            def _err(exc: Exception, version: int) -> None:
+                if not self._refresh_coordinator.is_latest("eda_data", version):
+                    return
+                self.status_text.set(f"EDA no disponible: {exc}")
+                self._append_activity(self.status_text.get())
+
+            self._refresh_coordinator.submit("eda_data", _worker, _ok, _err)
             return
 
-        stats_table = dict(self.service.get_target_statistics_table(use_effective_target=bool(self.eda_use_capping_var.get())))
+        data, stats_table = payload_cached
         cv_text = str(stats_table.get("cv", "-"))
         skewness_text = str(stats_table.get("skewness", "-"))
         diagnostics = data.get("diagnostics", {})
@@ -1462,11 +1604,11 @@ class HomePanel(ctk.CTkFrame):
             float(self.dynamic_slider_var.get()),
             bool(self.dynamic_cutoff_enabled_var.get()),
         )
-        if not force_rebuild and self._rendered_stage_signatures.get("Cutoffs") == signature:
+        if not force_rebuild and self._get_stage_signature("Cutoffs") == signature:
             self._refresh_cutoff_preview()
             return
         DashboardGrid.clear(parent)
-        self._rendered_stage_signatures["Cutoffs"] = signature
+        self._set_stage_signature("Cutoffs", signature)
         snapshot = self.service.get_analysis_context_state()
         wrapper, container = self._build_decision_layout(
             parent,
@@ -1503,10 +1645,10 @@ class HomePanel(ctk.CTkFrame):
             self.spatial_quality_var.get(),
             self.service.get_analysis_context_state().active_domain_filter,
         )
-        if not force_rebuild and self._rendered_stage_signatures.get("Espacial") == signature:
+        if not force_rebuild and self._get_stage_signature("Espacial") == signature:
             return
         DashboardGrid.clear(parent)
-        self._rendered_stage_signatures["Espacial"] = signature
+        self._set_stage_signature("Espacial", signature)
         if self.spatial_view_mode_var.get() == "3D":
             self._render_spatial_3d_view(parent)
             return
@@ -1516,9 +1658,46 @@ class HomePanel(ctk.CTkFrame):
 
     def _render_spatial_2d_view(self, parent: ctk.CTkFrame) -> None:
         snapshot = self.service.get_analysis_context_snapshot()
+        signature = (
+            "spatial2d",
+            self.spatial_color_var.get(),
+            str(snapshot.get("active_domain_filter") or ""),
+            str(snapshot.get("resolved_target_column") or ""),
+        )
+        cached = self._spatial_payload_cache.get(signature)
+        if cached is None:
+            wrapper, visual_host = self._build_decision_layout(
+                parent,
+                decision_title="Decisión espacial (2D)",
+                decision_message="Preparando evidencia espacial...",
+                context_message=f"{_build_visual_context_line(snapshot, local_override=self.spatial_color_var.get() or None)}",
+            )
+            _ = wrapper
+            ctk.CTkLabel(visual_host, text="Procesando geometría en segundo plano.", text_color=TXT_MAIN).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+            def _worker():
+                color_by = self.spatial_color_var.get() or None
+                return self.service.prepare_visual_data(color_by=color_by)
+
+            def _ok(result, version: int) -> None:
+                if not self._refresh_coordinator.is_latest("spatial2d_data", version):
+                    return
+                self._spatial_payload_cache[signature] = result
+                if self.service.workflow_state.current_step == "Espacial" and self.spatial_view_mode_var.get() == "2D":
+                    self._refresh_dashboard(reason="spatial2d_async_ready", force=True)
+
+            def _err(exc: Exception, version: int) -> None:
+                if not self._refresh_coordinator.is_latest("spatial2d_data", version):
+                    return
+                self.status_text.set(f"Render espacial no disponible: {exc}")
+                self._append_activity(self.status_text.get())
+
+            self._refresh_coordinator.submit("spatial2d_data", _worker, _ok, _err)
+            return
+
         try:
             color_by = self.spatial_color_var.get() or None
-            result = self.service.prepare_visual_data(color_by=color_by)
+            result = cached
             if not result.success or result.spatial_data is None:
                 raise ValueError(result.message)
             spatial = result.spatial_data
@@ -1615,6 +1794,7 @@ class HomePanel(ctk.CTkFrame):
         result = self.spatial_viewer_controller.render_scene(
             parent=visual_host,
             renderer=renderer,
+            existing_widget=self.spatial_3d_widget,
             color_by=color_by,
             view_mode="3d",
             quality=self.spatial_quality_var.get(),
@@ -1625,7 +1805,8 @@ class HomePanel(ctk.CTkFrame):
                 "z_focus_pct": float(self.spatial_z_focus_var.get()),
             },
         )
-        self.spatial_3d_widget = visual_host.winfo_children()[-1] if visual_host.winfo_children() else None
+        if self.spatial_3d_widget is None or not self.spatial_3d_widget.winfo_exists():
+            self.spatial_3d_widget = visual_host.winfo_children()[-1] if visual_host.winfo_children() else None
         if not result.success and result.fallback_to_2d:
             self.spatial_view_mode_var.set("2D")
             self.after(10, lambda: self._render_spatial_view(parent, force_rebuild=True))
@@ -1700,10 +1881,10 @@ class HomePanel(ctk.CTkFrame):
             bool(self.allow_variography_without_domain_var.get()),
             bool(self.service.workflow_state.support_confirmed),
         )
-        if not force_rebuild and self._rendered_stage_signatures.get("Dominios") == signature:
+        if not force_rebuild and self._get_stage_signature("Dominios") == signature:
             return
         DashboardGrid.clear(parent)
-        self._rendered_stage_signatures["Dominios"] = signature
+        self._set_stage_signature("Dominios", signature)
         _wrapper, visual_host = self._build_decision_layout(
             parent,
             decision_title="Dominios · definición y confirmación",
@@ -1757,10 +1938,10 @@ class HomePanel(ctk.CTkFrame):
             tuple(session.latest_blocker_codes),
             tuple(session.latest_warning_codes),
         )
-        if not force_rebuild and self._rendered_stage_signatures.get("Variografía") == signature:
+        if not force_rebuild and self._get_stage_signature("Variografía") == signature:
             return
         DashboardGrid.clear(parent)
-        self._rendered_stage_signatures["Variografía"] = signature
+        self._set_stage_signature("Variografía", signature)
         _wrapper, visual_host = self._build_decision_layout(
             parent,
             decision_title="Decisión variográfica",
@@ -1900,6 +2081,7 @@ class HomePanel(ctk.CTkFrame):
         interpretation: str = "",
         next_action: str = "",
     ) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
+        wrap = self._dynamic_wraplength()
         wrapper = ctk.CTkFrame(parent, fg_color=BG_PANEL)
         wrapper.grid(row=0, column=0, sticky="nsew")
         wrapper.grid_columnconfigure(0, weight=1)
@@ -1914,7 +2096,7 @@ class HomePanel(ctk.CTkFrame):
             text=decision_message,
             text_color=TXT_MAIN,
             font=ui_font(FONT_BODY),
-            wraplength=WRAP_STAGE_SUMMARY,
+            wraplength=wrap,
             justify="left",
         ).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 6))
         if context_message:
@@ -1923,7 +2105,7 @@ class HomePanel(ctk.CTkFrame):
                 text=context_message,
                 text_color=TXT_MUTED,
                 font=ui_font(FONT_MICRO),
-                wraplength=WRAP_STAGE_SUMMARY,
+                wraplength=wrap,
                 justify="left",
             ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
         if interpretation:
@@ -1932,7 +2114,7 @@ class HomePanel(ctk.CTkFrame):
                 text=f"Interpretación: {interpretation}",
                 text_color=TXT_MAIN,
                 font=ui_font(FONT_SMALL),
-                wraplength=WRAP_STAGE_SUMMARY,
+                wraplength=wrap,
                 justify="left",
             ).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 4))
         if next_action:
@@ -1941,7 +2123,7 @@ class HomePanel(ctk.CTkFrame):
                 text=f"Siguiente acción sugerida: {next_action}",
                 text_color=SEM_BLUE_SOFT,
                 font=ui_font(FONT_SMALL),
-                wraplength=WRAP_STAGE_SUMMARY,
+                wraplength=wrap,
                 justify="left",
             ).grid(row=4, column=0, sticky="w", padx=10, pady=(0, 8))
 
@@ -1950,6 +2132,10 @@ class HomePanel(ctk.CTkFrame):
         visual_host.grid_columnconfigure(0, weight=1)
         visual_host.grid_rowconfigure(0, weight=1)
         return wrapper, visual_host
+
+    def _dynamic_wraplength(self) -> int:
+        width = int(self.view_body.winfo_width() or self.winfo_width() or 1200)
+        return max(360, min(width - 60, 1400))
 
     def _refresh_context_chips(self) -> None:
         state = self.service.get_operational_state()
