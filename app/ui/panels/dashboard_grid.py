@@ -11,6 +11,39 @@ from matplotlib.figure import Figure
 from app.ui.theme import CHART_BG, apply_axis_style, apply_dashboard_layout, apply_figure_theme
 
 
+def compute_responsive_figure_size(
+    *,
+    container_width: int,
+    container_height: int,
+    dpi: float,
+    min_width_inches: float = 2.0,
+    min_height_inches: float = 1.6,
+    max_aspect_ratio: float | None = None,
+    base_aspect_ratio: float | None = None,
+) -> tuple[float, float]:
+    """Compute a host-bounded responsive figure size in inches."""
+    avail_w = max(float(container_width) / max(dpi, 1e-6), min_width_inches)
+    avail_h = max(float(container_height) / max(dpi, 1e-6), min_height_inches)
+    new_w = avail_w
+    new_h = avail_h
+    if max_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        if ratio > max_aspect_ratio:
+            new_w = max(new_h * max_aspect_ratio, min_width_inches)
+    if base_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        min_ratio = max(base_aspect_ratio * 0.55, 0.60)
+        if ratio < min_ratio:
+            candidate_w = max(new_h * min_ratio, min_width_inches)
+            if candidate_w <= avail_w:
+                new_w = candidate_w
+            else:
+                new_h = max(new_w / min_ratio, min_height_inches)
+    new_w = min(new_w, avail_w)
+    new_h = min(new_h, avail_h)
+    return new_w, new_h
+
+
 class DashboardGrid:
     """Simple reusable figure grid wrapper (1x1, 1x2, 2x2, 3x1)."""
     _instances_by_parent: dict[int, list["DashboardGrid"]] = {}
@@ -32,6 +65,7 @@ class DashboardGrid:
         self._configure_bound = False
         self._destroyed = False
         self._last_resize_draw_at = 0.0
+        self._last_size_inches: tuple[float, float] | None = None
         self._configured_figsize = figsize
         self._max_aspect_ratio = max_aspect_ratio if (max_aspect_ratio is None or max_aspect_ratio > 0) else None
         self._base_aspect_ratio = (figsize[0] / max(figsize[1], 1e-6)) if figsize is not None else None
@@ -94,25 +128,18 @@ class DashboardGrid:
             return
         self._last_parent_size = size
         dpi = float(self.figure.get_dpi())
-        avail_w = max(width / dpi, 2.0)
-        avail_h = max(height / dpi, 1.6)
-        new_w = avail_w
-        new_h = avail_h
-        if self._max_aspect_ratio is not None:
-            ratio = avail_w / max(avail_h, 1e-6)
-            if ratio > self._max_aspect_ratio:
-                new_w = max(avail_h * self._max_aspect_ratio, 2.0)
-        if self._base_aspect_ratio is not None:
-            ratio = new_w / max(new_h, 1e-6)
-            min_ratio = max(self._base_aspect_ratio * 0.55, 0.60)
-            if ratio < min_ratio:
-                candidate_w = max(new_h * min_ratio, 2.0)
-                if candidate_w <= avail_w:
-                    new_w = candidate_w
-                else:
-                    new_h = max(new_w / min_ratio, 1.6)
-        new_w = min(new_w, avail_w)
-        new_h = min(new_h, avail_h)
+        new_w, new_h = compute_responsive_figure_size(
+            container_width=width,
+            container_height=height,
+            dpi=dpi,
+            min_width_inches=2.0,
+            min_height_inches=1.6,
+            max_aspect_ratio=self._max_aspect_ratio,
+            base_aspect_ratio=self._base_aspect_ratio,
+        )
+        size_inches = (round(new_w, 4), round(new_h, 4))
+        size_changed = self._last_size_inches != size_inches
+        self._last_size_inches = size_inches
         self.figure.set_size_inches(new_w, new_h, forward=True)
         override = getattr(self.figure, "_dashboard_layout_override", None)
         if isinstance(override, dict):
@@ -120,7 +147,7 @@ class DashboardGrid:
         else:
             apply_dashboard_layout(self.figure)
         now = time.perf_counter()
-        if force or (now - self._last_resize_draw_at) >= 0.08:
+        if force or size_changed or (now - self._last_resize_draw_at) >= 0.08:
             self.canvas.draw_idle()
             self._last_resize_draw_at = now
 

@@ -125,7 +125,8 @@ class SpatialViewerController:
     ) -> SpatialRenderResult:
         available, reason = renderer.is_available()
         widget = existing_widget
-        if widget is None or not getattr(widget, "winfo_exists", lambda: False)():
+        same_parent = bool(getattr(widget, "master", None) is parent) if widget is not None else False
+        if widget is None or not getattr(widget, "winfo_exists", lambda: False)() or not same_parent:
             widget = renderer.create_widget(parent)
             widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
         backend_name = renderer.__class__.__name__

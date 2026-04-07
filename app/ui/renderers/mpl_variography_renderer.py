@@ -145,7 +145,6 @@ class MatplotlibVariographyRenderer(VariographyRenderer):
                 lines.append(f"usage_warnings: {len(usage_warnings)}")
         ax_meta.text(0.03, 0.96, "\n".join(lines), va="top", ha="left", fontsize=context.chart_label_size, color=context.chart_text_color)
         grid.render()
-        grid.canvas.draw_idle()
         logger.debug(
             "Variography renderer completed | valid_points=%s pair_bars=%s",
             len(finite_points),
