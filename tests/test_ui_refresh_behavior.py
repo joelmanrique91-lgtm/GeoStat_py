@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from app.models.spatial import PointCloudGeometry, SceneLayer, SceneState
 from app.ui.controllers.spatial_viewer_controller import SpatialViewerController
+from app.ui.panels.dashboard_grid import DashboardGrid
 from app.ui.panels.home_panel import HomePanel
 from app.ui.panels.spatial_3d_view import Spatial3DView
 from app.ui.renderers.mpl_variography_renderer import MatplotlibVariographyRenderer
@@ -138,6 +139,16 @@ class _StubRenderer:
 
 
 class UIRefreshBehaviorTests(unittest.TestCase):
+    class _Var:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self):
+            return self._value
+
+        def set(self, value):
+            self._value = value
+
     def test_variography_single_draw(self) -> None:
         renderer = MatplotlibVariographyRenderer()
         grid = _FakeGrid()
@@ -233,6 +244,84 @@ class UIRefreshBehaviorTests(unittest.TestCase):
         self.assertFalse(plan_data.requires_rebuild)
         self.assertTrue(plan_data.requires_data_refresh)
         self.assertTrue(plan_structure.requires_rebuild)
+
+    def test_eda_data_refresh_reuses_grid(self) -> None:
+        panel = HomePanel.__new__(HomePanel)
+        signature = ("sig",)
+        panel._build_eda_render_signature = lambda _op: signature  # type: ignore[method-assign]
+        panel._get_stage_signature = lambda _stage: None  # type: ignore[method-assign]
+        panel._set_stage_signature = lambda _stage, _sig: None  # type: ignore[method-assign]
+        panel.eda_use_capping_var = self._Var(False)
+        panel.target_var = self._Var("target")
+        panel.eda_secondary_visible_var = self._Var(False)
+        panel._get_active_eda_plots = lambda: ["histogram"]  # type: ignore[method-assign]
+        panel._eda_payload_cache = {signature: ({"target_values": [1.0, 2.0], "diagnostics": {}}, {"skewness": "0.1"})}
+        calls: list[tuple[str, object]] = []
+        panel.eda_renderer = type("R", (), {"render_panel": lambda _self, **kwargs: calls.append(("render", kwargs["grid"]))})()
+        grid = DashboardGrid.__new__(DashboardGrid)
+        parent = type("P", (), {"winfo_children": lambda _self: []})()
+        panel._eda_incremental_state = {id(parent): {"structure_signature": (False, ("histogram",)), "primary_grid": grid, "secondary_grids": {}}}
+        panel.service = type(
+            "Svc",
+            (),
+            {
+                "get_operational_state": lambda _self: type(
+                    "Op",
+                    (),
+                    {
+                        "cutoff": type("Cut", (), {"effective_target_column": "target", "dynamic_enabled": False, "dynamic_cutoff_value": 0.0})(),
+                        "analysis": type("An", (), {"active_domain_column": "", "active_domain_filter": ""})(),
+                    },
+                )(),
+            },
+        )()
+        panel._parse_cv_ratio = lambda _raw: 0.1  # type: ignore[method-assign]
+        panel._dynamic_wraplength = lambda: 800  # type: ignore[method-assign]
+        panel._button_style = lambda _role="aux": {}  # type: ignore[method-assign]
+        clear_calls: list[int] = []
+        with patch("app.ui.panels.home_panel.DashboardGrid.clear", lambda _p: clear_calls.append(1)):
+            HomePanel._render_eda_view(panel, parent, force_rebuild=False, data_refresh=True)
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0][1], grid)
+        self.assertEqual(clear_calls, [])
+
+    def test_spatial2d_data_refresh_reuses_grid(self) -> None:
+        panel = HomePanel.__new__(HomePanel)
+        panel.spatial_color_var = self._Var("target")
+        panel._spatial_payload_cache = {
+            ("spatial2d", "target", "", "target"): type("Res", (), {"success": True, "spatial_data": object(), "message": ""})()
+        }
+        parent = type("P", (), {})()
+        panel._spatial2d_incremental_state = {id(parent): {"signature": ("spatial2d", "target", "", "target"), "grid": DashboardGrid.__new__(DashboardGrid)}}
+        rendered: list[object] = []
+        panel.spatial_2d_renderer = type("R", (), {"render": lambda _self, grid, spatial, context: rendered.append(grid)})()
+        panel.service = type("Svc", (), {"get_analysis_context_snapshot": lambda _self: {"active_domain_filter": "", "resolved_target_column": "target"}, "get_cutoff_state": lambda _self: {}})()
+        HomePanel._render_spatial_2d_view(panel, parent, data_refresh=True)
+        self.assertEqual(len(rendered), 1)
+        self.assertIs(rendered[0], panel._spatial2d_incremental_state[id(parent)]["grid"])
+
+    def test_refresh_plan_not_decorative(self) -> None:
+        panel = HomePanel.__new__(HomePanel)
+        panel.workspace_title_var = self._Var("")
+        panel.workspace_subtitle_var = self._Var("")
+        panel._display_step_name = lambda x: x  # type: ignore[attr-defined]
+        panel.service = type("Svc", (), {"get_workflow_readiness_state": lambda _self: type("R", (), {"stages": {"eda": type("S", (), {"ready": True})(), "spatial": type("S", (), {"ready": True})(), "variography": type("S", (), {"ready": True})(), "cutoffs": type("S", (), {"ready": True})(), "domains": type("S", (), {"ready": True})(), "data": type("S", (), {"ready": True})()}})()})()
+        panel._render_eda_view_called = False
+        panel._render_spatial_view_called = False
+        panel._render_variography_view_called = False
+        panel._invalidate_stage_cache_called = False
+        panel._render_eda_view = lambda *_args, **kwargs: setattr(panel, "_render_eda_view_called", kwargs.get("data_refresh", False))  # type: ignore[method-assign]
+        panel._render_spatial_view = lambda *_args, **kwargs: setattr(panel, "_render_spatial_view_called", kwargs.get("data_refresh", False))  # type: ignore[method-assign]
+        panel._render_variography_view = lambda *_args, **_kwargs: setattr(panel, "_render_variography_view_called", True)  # type: ignore[method-assign]
+        panel._invalidate_stage_cache = lambda *_args, **_kwargs: setattr(panel, "_invalidate_stage_cache_called", True)  # type: ignore[method-assign]
+        stage_host = type("H", (), {})()
+        HomePanel._render_stage_ready_view(panel, "EDA", stage_host, force_rebuild=False, data_refresh=True)
+        HomePanel._render_stage_ready_view(panel, "Espacial", stage_host, force_rebuild=False, data_refresh=True)
+        HomePanel._render_stage_ready_view(panel, "Variografía", stage_host, force_rebuild=False, data_refresh=True)
+        self.assertTrue(panel._render_eda_view_called)
+        self.assertTrue(panel._render_spatial_view_called)
+        self.assertTrue(panel._render_variography_view_called)
+        self.assertTrue(panel._invalidate_stage_cache_called)
 
 
 if __name__ == "__main__":

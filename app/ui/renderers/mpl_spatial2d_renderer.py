@@ -25,6 +25,7 @@ class MatplotlibSpatial2DRenderer(Spatial2DRenderer):
         ax_info = grid.axis(1, 1)
 
         for axis in (ax_xy, ax_xz, ax_yz, ax_info):
+            axis.clear()
             apply_axis_style(axis)
         cmap = "tab20" if spatial.target_tick_labels else get_continuous_colormap()
         point_kwargs = {"s": 12, "alpha": 0.66, "edgecolors": "white", "linewidths": 0.15}

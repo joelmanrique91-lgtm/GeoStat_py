@@ -117,6 +117,7 @@ class MatplotlibEDARenderer(EDARenderer):
         context: EDARenderContext,
     ) -> None:
         ax = grid.axis(0, 0)
+        ax.clear()
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.085,
             "right": 0.975,
@@ -165,6 +166,7 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_qq(self, grid, *, data: dict[str, object], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        ax.clear()
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.15,
             "right": 0.97,
@@ -204,6 +206,7 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_boxplot(self, grid, *, data: dict[str, object], values: list[float], context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        ax.clear()
         domain_data = data.get("domain_boxplot", {})
         domain_enabled = bool(domain_data.get("enabled"))
         label_count = len(domain_data.get("labels", [])) if domain_enabled else 0
@@ -271,6 +274,7 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_iqr(self, grid, *, sorted_values: list[float], p50: float, p90: float, mean_val: float, context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        ax.clear()
         grid.figure._dashboard_layout_override = {  # type: ignore[attr-defined]
             "left": 0.10,
             "right": 0.98,
@@ -319,6 +323,7 @@ class MatplotlibEDARenderer(EDARenderer):
 
     def _render_unavailable(self, grid, *, message: str, context: EDARenderContext) -> None:
         ax = grid.axis(0, 0)
+        ax.clear()
         apply_axis_style(ax)
         ax.axis("off")
         ax.text(0.5, 0.5, message, ha="center", va="center", color=context.chart_text_color)
