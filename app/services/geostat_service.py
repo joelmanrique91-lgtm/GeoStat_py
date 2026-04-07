@@ -27,7 +27,6 @@ from app.services.repository_update_service import RepoUpdateResult, RepositoryU
 from app.services.variography_application_service import VariographyApplicationService
 from app.services.workflow_contracts import (
     DOMAIN_ESTIMATION_COLUMN,
-    DOMAINS_MODULE_DISABLED_MESSAGE,
     default_domain_ui_filters,
     resolve_active_domain_column,
 )
@@ -51,7 +50,7 @@ STEP_EVENT_MAP = {
     "Variografía": "workflow_step_variography_opened",
 }
 STEP_DISPLAY_NAMES = {
-    "Cutoffs": "Control de Outliers",
+    "Cutoffs": "Soporte/Compositado",
 }
 
 
@@ -225,7 +224,7 @@ class GeostatService:
         self.dataset_context_service = DatasetContextService(host_service=self)
         self.repository_update_service = RepositoryUpdateService(host_service=self)
         self._domain_filter_context_enabled = True
-        self._domains_module_enabled = False
+        self._domains_module_enabled = True
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -347,13 +346,57 @@ class GeostatService:
 
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
         del ordered_layers, active_layers, min_samples, include_missing
-        self._domain_filter_context_enabled = False
-        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
+        if self.current_dataset is None or self.variable_config is None:
+            return CutoffResult(False, "Configura datos antes de Dominios.")
+        self._domains_module_enabled = True
+        return CutoffResult(True, "Dominios habilitado para configuración.")
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
-        del domain_definition
-        self._domain_filter_context_enabled = False
-        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
+        if self.current_dataset is None:
+            return CutoffResult(False, "No hay dataset cargado.")
+        if self.variable_config is None:
+            return CutoffResult(False, "Configura X/Y/Z/target antes de Dominios.")
+        if not bool(self.workflow_state.support_confirmed):
+            return CutoffResult(False, "Confirma soporte/compositado antes de definir dominios.")
+        variable_base = str(domain_definition.get("variable_base", "")).strip()
+        domains = domain_definition.get("domains", {})
+        if not variable_base or variable_base not in self.current_dataset.dataframe.columns:
+            return CutoffResult(False, "Selecciona una columna base válida para construir dominios.")
+        if not isinstance(domains, dict) or not domains:
+            return CutoffResult(False, "Define al menos un dominio antes de aplicar.")
+        df = self.current_dataset.dataframe
+        mapped: dict[str, str] = {}
+        for domain_name, categories in domains.items():
+            normalized_name = str(domain_name).strip()
+            if not normalized_name:
+                continue
+            if not isinstance(categories, list):
+                continue
+            for category in categories:
+                cat = str(category).strip()
+                if cat:
+                    mapped[cat] = normalized_name
+        if not mapped:
+            return CutoffResult(False, "No hay categorías válidas para asignar a dominios.")
+        source = df[variable_base].astype(str).str.strip()
+        df[DOMAIN_ESTIMATION_COLUMN] = source.map(mapped).fillna("Sin dominio")
+        if DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.columns:
+            self.current_dataset.columns.append(DOMAIN_ESTIMATION_COLUMN)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+        self.workflow_state.domain_definition = {
+            "variable_base": variable_base,
+            "domains": {str(k): list(v) for k, v in domains.items()},
+        }
+        self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.active_domain = "Columna: domain_estimation"
+        self.workflow_state.support_confirmed = bool(self.workflow_state.support_confirmed)
+        self.activity_log.log(
+            "domain_definition_applied",
+            "success",
+            "Definición de dominios aplicada.",
+            {"variable_base": variable_base, "domain_count": len(domains)},
+        )
+        return CutoffResult(True, "Dominios aplicados al dataset.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
         if self.current_dataset is None:
@@ -367,12 +410,14 @@ class GeostatService:
         selected = str(domain_name or "").strip()
         if not selected or selected.lower() == "todos":
             self.workflow_state.active_domain_filter = ""
+            self.workflow_state.allow_variography_without_domain = True
             self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio limpiado.", {"column": active_domain_column})
             return CutoffResult(True, "Filtro de dominio limpiado.")
         options = set(self.get_domain_estimation_values())
         if selected not in options:
             return CutoffResult(False, f"Dominio no válido: '{selected}'.")
         self.workflow_state.active_domain_filter = selected
+        self.workflow_state.allow_variography_without_domain = False
         self.activity_log.log(
             "domain_filter_applied",
             "success",
@@ -416,12 +461,44 @@ class GeostatService:
         return filtered, filters, columns
 
     def prepare_iterative_domain_data(self) -> dict[str, object]:
-        return {"ready": False, "message": "Módulo temporalmente deshabilitado"}
+        if self.current_dataset is None:
+            return {"ready": False, "message": "No hay dataset cargado."}
+        candidates = self.get_domain_candidate_columns()
+        return {
+            "ready": bool(candidates),
+            "message": "Dominios listos para configuración." if candidates else "No hay columnas categóricas para dominios.",
+            "candidate_columns": candidates,
+            "active_domain_column": self.get_analysis_context_snapshot().get("active_domain_column", ""),
+            "active_domain_filter": self.workflow_state.active_domain_filter or "Todos",
+        }
 
     def confirm_domain_assignment(self, domain_name: str) -> CutoffResult:
-        del domain_name
-        self._domain_filter_context_enabled = False
-        return CutoffResult(False, DOMAINS_MODULE_DISABLED_MESSAGE)
+        if self.current_dataset is None or self.variable_config is None:
+            return CutoffResult(False, "Configura datos antes de confirmar dominios.")
+        snapshot = self.get_analysis_context_snapshot()
+        active_domain_column = str(snapshot.get("active_domain_column") or "").strip()
+        if not active_domain_column:
+            return CutoffResult(False, "No hay columna de dominio activa.")
+        selected = str(domain_name or "").strip()
+        if not selected:
+            return CutoffResult(False, "Selecciona un dominio para confirmar.")
+        values = set(self.get_domain_estimation_values())
+        if selected not in values:
+            return CutoffResult(False, f"Dominio no válido: '{selected}'.")
+        self.workflow_state.active_domain_filter = selected
+        self.workflow_state.active_domain = f"{active_domain_column}: {selected}"
+        self.workflow_state.allow_variography_without_domain = False
+        self.workflow_state.domain_assignment_sequence += 1
+        self.workflow_state.domain_assignment_history.append(
+            {"sequence": self.workflow_state.domain_assignment_sequence, "domain": selected, "column": active_domain_column}
+        )
+        self.activity_log.log(
+            "domain_assignment_confirmed",
+            "success",
+            "Dominio confirmado para continuidad y variografía.",
+            {"domain_column": active_domain_column, "domain_value": selected},
+        )
+        return CutoffResult(True, f"Dominio confirmado: {selected}")
 
     def prepare_domain_statistics(self) -> dict[str, object]:
         return {"items": [], "selection_column": "", "active_layers": []}
@@ -567,8 +644,92 @@ class GeostatService:
         self.workflow_state.domain_filter_columns = default_domain_ui_filters()
         self.workflow_state.domain_assignment_history = []
         self.workflow_state.domain_assignment_sequence = 0
+        self.workflow_state.allow_variography_without_domain = False
         if self.variable_config is not None and self.variable_config.domain_column == DOMAIN_ESTIMATION_COLUMN:
             self.variable_config.domain_column = None
+
+    def clear_support_state(self) -> None:
+        self.workflow_state.support_composite_enabled = False
+        self.workflow_state.support_composite_length = 0.0
+        self.workflow_state.support_source_target_column = ""
+        self.workflow_state.support_output_target_column = ""
+        self.workflow_state.support_pre_count = 0
+        self.workflow_state.support_post_count = 0
+        self.workflow_state.support_confirmed = False
+
+    def get_support_state(self) -> dict[str, object]:
+        return {
+            "enabled": bool(self.workflow_state.support_composite_enabled),
+            "composite_length": float(self.workflow_state.support_composite_length),
+            "source_target": str(self.workflow_state.support_source_target_column),
+            "output_target": str(self.workflow_state.support_output_target_column),
+            "pre_count": int(self.workflow_state.support_pre_count),
+            "post_count": int(self.workflow_state.support_post_count),
+            "confirmed": bool(self.workflow_state.support_confirmed),
+        }
+
+    def apply_basic_compositing(self, *, composite_length: float, target_column: str, output_column: str | None = None) -> CutoffResult:
+        if self.current_dataset is None or self.variable_config is None:
+            return CutoffResult(False, "Configura datos antes de compositar.")
+        if composite_length <= 0:
+            return CutoffResult(False, "La longitud de composite debe ser mayor a 0.")
+        if target_column not in self.current_dataset.dataframe.columns:
+            return CutoffResult(False, "La variable objetivo para composite no existe.")
+        df = self.current_dataset.dataframe
+        out_col = str(output_column or f"{target_column}_comp").strip()
+        if not out_col:
+            return CutoffResult(False, "Nombre de salida de composite inválido.")
+        if out_col in {self.variable_config.x_column, self.variable_config.y_column, self.variable_config.z_column}:
+            return CutoffResult(False, "El nombre de salida de composite no puede sobrescribir X/Y/Z.")
+        if out_col in df.columns and out_col != self.workflow_state.support_output_target_column:
+            return CutoffResult(False, f"La columna '{out_col}' ya existe.")
+
+        numeric = _to_numeric(df[target_column])
+        x_num = _to_numeric(df[self.variable_config.x_column])
+        y_num = _to_numeric(df[self.variable_config.y_column])
+        z_num = _to_numeric(df[self.variable_config.z_column])
+        valid = numeric.notna() & x_num.notna() & y_num.notna() & z_num.notna()
+        if int(valid.sum()) < 2:
+            return CutoffResult(False, "No hay suficientes muestras válidas para compositado básico.")
+        work = df.loc[valid, :].copy()
+        work["_target_num"] = numeric.loc[valid].astype(float)
+        work["_z_num"] = z_num.loc[valid].astype(float)
+        hole_col = self.variable_config.hole_id_column if self.variable_config.hole_id_column and self.variable_config.hole_id_column in work.columns else None
+        if hole_col:
+            work["_hole_group"] = work[hole_col].astype(str).fillna("NA")
+        else:
+            work["_hole_group"] = "__global__"
+        work = work.sort_values(["_hole_group", "_z_num"], kind="mergesort")
+        group_size = max(1, int(round(float(composite_length))))
+        work["_composite_group"] = work.groupby("_hole_group").cumcount() // group_size
+        composite_values = work.groupby(["_hole_group", "_composite_group"])["_target_num"].transform("mean")
+        df[out_col] = df[target_column]
+        df.loc[work.index, out_col] = composite_values.values
+
+        if out_col not in self.current_dataset.columns:
+            self.current_dataset.columns.append(out_col)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+        self.workflow_state.support_composite_enabled = True
+        self.workflow_state.support_composite_length = float(composite_length)
+        self.workflow_state.support_source_target_column = target_column
+        self.workflow_state.support_output_target_column = out_col
+        self.workflow_state.support_pre_count = int(len(work))
+        self.workflow_state.support_post_count = int(work[["_hole_group", "_composite_group"]].drop_duplicates().shape[0])
+        self.workflow_state.support_confirmed = True
+        self.workflow_state.effective_target_column = out_col
+        self.activity_log.log(
+            "support_composite_applied",
+            "success",
+            "Compositado básico aplicado.",
+            {
+                "composite_length": float(composite_length),
+                "source_target": target_column,
+                "output_target": out_col,
+                "samples_before": self.workflow_state.support_pre_count,
+                "samples_after_groups": self.workflow_state.support_post_count,
+            },
+        )
+        return CutoffResult(True, f"Compositado básico aplicado. Target efectivo: {out_col}")
 
     def _get_effective_target_column(self) -> str:
         """Resolve effective target with legacy precedence.
@@ -583,6 +744,8 @@ class GeostatService:
             return self.workflow_state.dynamic_cutoff_output_column
         if self.workflow_state.cutoffs_enabled and self.workflow_state.cutoff_output_column:
             return self.workflow_state.cutoff_output_column
+        if self.workflow_state.support_composite_enabled and self.workflow_state.support_output_target_column:
+            return self.workflow_state.support_output_target_column
         if self.variable_config is None:
             return ""
         return self.variable_config.target_column

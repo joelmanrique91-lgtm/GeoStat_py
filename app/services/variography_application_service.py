@@ -334,6 +334,11 @@ class VariographyApplicationService:
             {
                 "target": request.target_col,
                 "n_lags": request.lag.n_lags,
+                "lag_distance": request.lag.lag_distance,
+                "max_distance": request.lag.max_distance,
+                "lag_tolerance": request.lag.lag_tolerance,
+                "azimuth": request.direction.azimuth,
+                "dip": request.direction.dip,
                 "max_pairs": max(pair_counts, default=0),
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),
