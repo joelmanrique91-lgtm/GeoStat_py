@@ -1546,7 +1546,7 @@ class HomePanel(ctk.CTkFrame):
             self.service.activity_log.log(
                 "spatial_3d_backend_fallback",
                 "warning",
-                "Viewer 3D dedicado no disponible, fallback a 2D.",
+                "Backend 3D embebido no disponible, fallback a 2D.",
                 {"reason": fallback_reason},
             )
 
@@ -1593,12 +1593,27 @@ class HomePanel(ctk.CTkFrame):
             text_color=TXT_MUTED,
             font=ui_font(FONT_SMALL),
         ).grid(row=0, column=0, sticky="w", padx=6, pady=(0, 3))
+        ctk.CTkButton(
+            visual_host,
+            text="Abrir viewer externo (opcional)",
+            command=lambda: self._open_external_spatial_viewer(scene, color_by or scene.active_variable),
+            **self._button_style("aux"),
+        ).grid(row=0, column=0, sticky="e", padx=6, pady=(0, 3))
 
     def _select_spatial_3d_renderer(self):
-        available, reason = self.pyvista_spatial_3d_renderer.is_available()
+        # Embedded 3D remains primary to preserve in-app workflow.
+        available, reason = self.spatial_3d_renderer.is_available()
         if available:
-            return self.pyvista_spatial_3d_renderer, ""
-        return self.pyvista_spatial_3d_renderer, reason
+            return self.spatial_3d_renderer, ""
+        return self.spatial_3d_renderer, reason
+
+    def _open_external_spatial_viewer(self, scene, color_display_label: str) -> None:
+        available, reason = self.pyvista_spatial_3d_renderer.is_available()
+        if not available:
+            self.status_text.set(f"Viewer externo no disponible: {reason}")
+            return
+        self.pyvista_spatial_3d_renderer.launch_external(scene, color_display_label)
+        self.status_text.set("Viewer 3D externo abierto (modo secundario).")
 
     def _render_domains_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         state = self.service.get_operational_state()

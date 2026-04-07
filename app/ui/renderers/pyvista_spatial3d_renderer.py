@@ -83,6 +83,13 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
             return
         threading.Thread(target=self._open_plotly, args=(self._latest_scene,), daemon=True).start()
 
+    def launch_external(self, scene: SceneState, color_display_label: str = "") -> None:
+        """Open external 3D viewer explicitly (secondary action)."""
+        _ = color_display_label
+        self._latest_scene = scene
+        self._last_state = self._resolve_backend()
+        self._open_external_viewer()
+
     def _open_pyvista(self, scene: SceneState) -> None:
         import pyvista as pv
 
