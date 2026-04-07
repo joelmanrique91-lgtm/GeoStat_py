@@ -120,3 +120,23 @@ python -m app.main
 - Preferir pruebas unitarias o de contrato cuando se toquen servicios.
 - Evitar acoplar lógica de negocio dentro de componentes UI.
 - Si se modifica un flujo, actualizar README y documentación técnica relacionada.
+
+## 9) Pipeline geoestadístico reproducible (v1)
+
+Se agregó una primera versión funcional y modular en `src/mining_geostat/` con:
+
+- QA/QC y compositado básico.
+- variograma experimental 3D omnidireccional/direccional.
+- ajuste reproducible de modelo de variograma.
+- kriging ordinario y simple, con base para block kriging.
+- base estructurada para simulación secuencial gaussiana (SGS).
+- validación mínima con leave-one-out cross validation.
+- trazabilidad de parámetros/semilla en salida JSON.
+
+CLI mínima:
+
+```bash
+python cli/geostat_cli.py variogram --seed 7 --out datasets/trace_variogram.json
+python cli/geostat_cli.py kriging --seed 7 --out datasets/trace_kriging.json
+python cli/geostat_cli.py validate --seed 7 --out datasets/trace_validate.json
+```
