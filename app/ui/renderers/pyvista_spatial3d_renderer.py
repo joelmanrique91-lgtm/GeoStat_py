@@ -13,7 +13,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from app.services.visualization_service import Spatial3DDataBundle
+from app.models.spatial import SceneState
 from app.ui.renderers.base import Spatial3DRenderer
 
 
@@ -58,7 +58,7 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
         host.grid_columnconfigure(0, weight=1)
         return host
 
-    def render(self, widget: Any, data: Spatial3DDataBundle, color_display_label: str) -> None:
+    def render(self, widget: Any, scene: SceneState, color_display_label: str) -> None:
         # Embedded interactive PyVista is still experimental in Tk host.
         # Keep UX explicit to avoid blank panels if feature-toggle is enabled.
         self.show_unavailable(
@@ -68,7 +68,7 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
                 "aún no implementado de forma estable. Se recomienda usar fallback 2D/3D matplotlib."
             ),
         )
-        _ = (data, color_display_label)
+        _ = (scene, color_display_label)
 
     def show_unavailable(self, widget: Any, reason: str) -> None:
         if isinstance(widget, ctk.CTkFrame):
