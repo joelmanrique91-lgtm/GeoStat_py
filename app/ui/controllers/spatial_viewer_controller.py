@@ -117,14 +117,17 @@ class SpatialViewerController:
         *,
         parent,
         renderer,
+        existing_widget=None,
         color_by: str | None,
         view_mode: str = "3d",
         quality: str = "Media",
         style_options: dict[str, object] | None = None,
     ) -> SpatialRenderResult:
         available, reason = renderer.is_available()
-        widget = renderer.create_widget(parent)
-        widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
+        widget = existing_widget
+        if widget is None or not getattr(widget, "winfo_exists", lambda: False)():
+            widget = renderer.create_widget(parent)
+            widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
         backend_name = renderer.__class__.__name__
 
         if not available:

@@ -28,12 +28,11 @@ class MainWindow:
 
     def _configure_startup_geometry(self) -> None:
         visible = self._screen_area()
+        target_width = max(900, int(visible.width * 0.90))
+        target_height = max(620, int(visible.height * 0.90))
 
-        target_width = min(1360, max(980, visible.width - 80))
-        target_height = min(860, max(680, visible.height - 80))
-
-        min_width = min(1180, max(900, visible.width - 160))
-        min_height = min(760, max(620, visible.height - 160))
+        min_width = 860
+        min_height = 560
         self.root.minsize(min_width, min_height)
 
         centered = Rect(
