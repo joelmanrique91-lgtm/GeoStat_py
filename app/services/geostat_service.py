@@ -400,11 +400,80 @@ class GeostatService:
         return bool(self._domains_module_enabled)
 
     def configure_domains(self, ordered_layers: list[str], active_layers: list[str], min_samples: int = 1, include_missing: bool = False) -> CutoffResult:
-        del ordered_layers, active_layers, min_samples, include_missing
         if self.current_dataset is None or self.variable_config is None:
             return CutoffResult(False, "Configura datos antes de Dominios.")
-        self._domains_module_enabled = False
-        return CutoffResult(False, "Configuración avanzada de dominios aún no habilitada en este modo.")
+        dataframe = self.current_dataset.dataframe
+        ordered = [str(col).strip() for col in ordered_layers if str(col).strip()]
+        active = [str(col).strip() for col in active_layers if str(col).strip()]
+        if not ordered:
+            return CutoffResult(False, "Selecciona al menos una capa de dominio.")
+        missing = [column for column in ordered if column not in dataframe.columns]
+        if missing:
+            return CutoffResult(False, f"Capas de dominio inválidas: {', '.join(missing)}")
+        if not active:
+            active = list(ordered)
+        invalid_active = [column for column in active if column not in ordered]
+        if invalid_active:
+            return CutoffResult(False, f"Capas activas fuera del orden configurado: {', '.join(invalid_active)}")
+        if min_samples < 1:
+            return CutoffResult(False, "min_samples debe ser >= 1.")
+
+        keys = [column for column in ordered if column in active]
+        if not keys:
+            return CutoffResult(False, "No hay capas activas válidas para construir dominio.")
+        frame = dataframe[keys].copy()
+        for column in keys:
+            frame[column] = frame[column].astype(str).str.strip()
+            if not include_missing:
+                frame[column] = frame[column].replace({"": None, "nan": None, "None": None})
+        if include_missing:
+            composite = frame.fillna("NA").agg(" | ".join, axis=1)
+        else:
+            valid_mask = frame.notna().all(axis=1)
+            composite = frame.fillna("").agg(" | ".join, axis=1)
+            composite = composite.where(valid_mask, "Sin dominio")
+
+        counts = composite.value_counts(dropna=False)
+        if min_samples > 1:
+            keep = {name for name, count in counts.items() if int(count) >= int(min_samples)}
+            composite = composite.map(lambda value: value if value in keep else "Sin dominio")
+
+        dataframe[DOMAIN_ESTIMATION_COLUMN] = composite.astype(str)
+        if DOMAIN_ESTIMATION_COLUMN not in self.current_dataset.columns:
+            self.current_dataset.columns.append(DOMAIN_ESTIMATION_COLUMN)
+            self.current_dataset.column_count = len(self.current_dataset.columns)
+        self.workflow_state.domain_layers_order = list(ordered)
+        self.workflow_state.domain_active_layers = list(active)
+        self.workflow_state.domain_min_samples = int(min_samples)
+        self.workflow_state.domain_include_missing = bool(include_missing)
+        self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.domain_definition = {
+            "mode": "composite_layers",
+            "ordered_layers": list(ordered),
+            "active_layers": list(active),
+            "min_samples": int(min_samples),
+            "include_missing": bool(include_missing),
+            "domain_count": int(dataframe[DOMAIN_ESTIMATION_COLUMN].nunique(dropna=True)),
+        }
+        self._domains_module_enabled = True
+        self.variable_config.domain_column = DOMAIN_ESTIMATION_COLUMN
+        self.workflow_state.active_domain = f"Columna: {DOMAIN_ESTIMATION_COLUMN}"
+        if self.workflow_state.active_domain_filter and self.workflow_state.active_domain_filter not in self.get_domain_estimation_values():
+            self.workflow_state.active_domain_filter = ""
+        self.bump_dataset_revision("domains_configured")
+        self.bump_context_revision("domains_configured")
+        self.activity_log.log(
+            "domains_configured",
+            "success",
+            "Configuración avanzada de dominios aplicada.",
+            {
+                "ordered_layers": list(ordered),
+                "active_layers": list(active),
+                "min_samples": int(min_samples),
+                "include_missing": bool(include_missing),
+            },
+        )
+        return CutoffResult(True, "Dominios configurados en columna domain_estimation.")
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
         if self.current_dataset is None:
@@ -597,7 +666,40 @@ class GeostatService:
         return CutoffResult(True, message)
 
     def prepare_domain_statistics(self) -> dict[str, object]:
-        return {"items": [], "selection_column": "", "active_layers": []}
+        context, error = self._resolve_domain_statistics_context()
+        if error:
+            return {"items": [], "selection_column": str(context.get("selection_column") or ""), "active_layers": list(context.get("active_layers") or [])}
+        dataframe = context.get("dataframe")
+        if dataframe is None:
+            return {"items": [], "selection_column": "", "active_layers": []}
+        selection_column = str(context.get("selection_column") or "")
+        target_column = str(context.get("target_column") or "")
+        if not selection_column or not target_column:
+            return {"items": [], "selection_column": selection_column, "active_layers": list(context.get("active_layers") or [])}
+        work = dataframe[[selection_column, target_column]].copy()
+        work[target_column] = _to_numeric(work[target_column])
+        work = work.dropna(subset=[target_column])
+        if work.empty:
+            return {"items": [], "selection_column": selection_column, "active_layers": list(context.get("active_layers") or [])}
+        grouped = work.groupby(selection_column)[target_column]
+        items: list[dict[str, object]] = []
+        for domain_name, values in grouped:
+            numeric_values = values.astype(float)
+            items.append(
+                {
+                    "domain": str(domain_name),
+                    "count": int(len(numeric_values)),
+                    "mean": float(numeric_values.mean()),
+                    "p50": float(numeric_values.quantile(0.5)),
+                    "p90": float(numeric_values.quantile(0.9)),
+                }
+            )
+        items.sort(key=lambda item: item["count"], reverse=True)
+        return {
+            "items": items,
+            "selection_column": selection_column,
+            "active_layers": list(context.get("active_layers") or []),
+        }
 
     def _resolve_domain_statistics_context(self) -> tuple[dict[str, object], str]:
         base_context: dict[str, object] = {

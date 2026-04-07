@@ -6,6 +6,11 @@ import math
 import numpy as np
 import pandas as pd
 
+try:
+    from skgstat import Variogram as SKGVariogram
+except Exception:  # pragma: no cover - optional backend
+    SKGVariogram = None
+
 
 @dataclass(frozen=True)
 class DirectionalConfig:
@@ -132,6 +137,35 @@ def experimental_variogram_3d(
     if errs:
         raise ValueError("; ".join(errs))
 
+    omnidirectional = (
+        abs(float(azimuth)) < 1e-9
+        and abs(float(dip)) < 1e-9
+        and float(ang_tol_h) >= 89.9
+        and float(ang_tol_v) >= 89.9
+        and float(bandwidth) <= 1e-9
+    )
+    if omnidirectional and SKGVariogram is not None:
+        estimator = SKGVariogram(
+            coords,
+            vals,
+            n_lags=n_lags,
+            maxlag=float(max_distance),
+            bin_func="even",
+            normalize=False,
+            use_nugget=True,
+        )
+        lag_centers = [float(v) for v in estimator.bins.tolist()]
+        gamma = [float(v) for v in estimator.experimental.tolist()]
+        npairs = [int(v) for v in estimator.bin_count.tolist()]
+        if max(npairs, default=0) == 0:
+            raise ValueError("No hay pares para el variograma con la configuración dada")
+        return ExperimentalVariogram(
+            lag_centers=lag_centers,
+            gamma=gamma,
+            npairs=npairs,
+            metadata={"n_points": int(len(clean)), "downsampled": downsampled, "direction": asdict(direction), "backend": "scikit-gstat"},
+        )
+
     n_points = len(coords)
     i_idx, j_idx = np.triu_indices(n_points, k=1)
     deltas = coords[j_idx] - coords[i_idx]
@@ -184,7 +218,7 @@ def experimental_variogram_3d(
         lag_centers=lag_centers,
         gamma=gamma,
         npairs=npairs,
-        metadata={"n_points": int(len(clean)), "downsampled": downsampled, "direction": asdict(direction)},
+        metadata={"n_points": int(len(clean)), "downsampled": downsampled, "direction": asdict(direction), "backend": "numpy"},
     )
 
 

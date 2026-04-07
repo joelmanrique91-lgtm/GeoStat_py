@@ -7,6 +7,28 @@ import math
 
 from app.services.variography_geometry import DirectionalConfig, pair_matches_direction
 
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - optional accelerator
+    njit = None
+
+
+if njit is not None:
+    @njit(cache=True)
+    def _accumulate_semivariance(values, i_idx, j_idx):
+        out = [0.0] * i_idx.shape[0]
+        for k in range(i_idx.shape[0]):
+            d = values[i_idx[k]] - values[j_idx[k]]
+            out[k] = 0.5 * d * d
+        return out
+else:
+    def _accumulate_semivariance(values, i_idx, j_idx):
+        out = []
+        for k in range(len(i_idx)):
+            d = float(values[int(i_idx[k])]) - float(values[int(j_idx[k])])
+            out.append(0.5 * d * d)
+        return out
+
 @dataclass
 class SpatialDataBundle:
     x: list[float]
@@ -211,6 +233,7 @@ def compute_experimental_variogram(
     max_points: int = 2500,
 ) -> VariogramResult:
     import pandas as pd
+    import numpy as np
 
     required = [x_col, y_col, z_col, target_col]
     missing = [column for column in required if column not in dataframe.columns]
@@ -229,10 +252,9 @@ def compute_experimental_variogram(
     source_points = len(clean)
     sampled, downsampled = _downsample_dataframe(clean, max_points=max_points)
 
-    records = [
-        (float(x), float(y), float(z), float(target))
-        for x, y, z, target in sampled[[x_col, y_col, z_col, target_col]].itertuples(index=False, name=None)
-    ]
+    coords = sampled[[x_col, y_col, z_col]].to_numpy(dtype=float)
+    values = sampled[target_col].to_numpy(dtype=float)
+    n_records = len(coords)
 
     lag_window = float(lag_tolerance) if lag_tolerance is not None else float(lag) * 0.5
     lag_window = max(1e-9, lag_window)
@@ -251,22 +273,23 @@ def compute_experimental_variogram(
     dist_acc: list[list[float]] = [[] for _ in range(n_lags)]
     min_center = float(lag)
     max_center = float(n_lags) * float(lag)
-    for i in range(len(records) - 1):
-        x0, y0, z0, v0 = records[i]
-        for j in range(i + 1, len(records)):
-            x1, y1, z1, v1 = records[j]
-            dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
-            if not pair_matches_direction(dx, dy, dz, direction):
-                continue
-            d = math.sqrt(dx**2 + dy**2 + dz**2)
-            if d > max_distance or d < (min_center - lag_window) or d > (max_center + lag_window):
-                continue
-            nearest_idx = int(round((d / float(lag)) - 1.0))
-            if nearest_idx < 0 or nearest_idx >= n_lags:
-                continue
-            center = (nearest_idx + 1) * float(lag)
-            if abs(d - center) <= lag_window:
-                dist_acc[nearest_idx].append(0.5 * (v1 - v0) ** 2)
+    i_idx, j_idx = np.triu_indices(n_records, k=1)
+    deltas = coords[j_idx] - coords[i_idx]
+    distances = np.sqrt(np.sum(deltas * deltas, axis=1))
+    semivars = np.asarray(_accumulate_semivariance(values, i_idx.astype(np.int64), j_idx.astype(np.int64)), dtype=float)
+    for pair_index in range(len(distances)):
+        dx, dy, dz = float(deltas[pair_index, 0]), float(deltas[pair_index, 1]), float(deltas[pair_index, 2])
+        if not pair_matches_direction(dx, dy, dz, direction):
+            continue
+        d = float(distances[pair_index])
+        if d > max_distance or d < (min_center - lag_window) or d > (max_center + lag_window):
+            continue
+        nearest_idx = int(round((d / float(lag)) - 1.0))
+        if nearest_idx < 0 or nearest_idx >= n_lags:
+            continue
+        center = (nearest_idx + 1) * float(lag)
+        if abs(d - center) <= lag_window:
+            dist_acc[nearest_idx].append(float(semivars[pair_index]))
 
     lag_centers, gammas, pairs = [], [], []
     for idx in range(n_lags):

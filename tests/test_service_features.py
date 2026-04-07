@@ -641,7 +641,7 @@ class ServiceFeatureTests(unittest.TestCase):
 
             with patch.object(self.service, "get_analysis_context_snapshot", wraps=self.service.get_analysis_context_snapshot) as snapshot_mock:
                 payload = self.service.prepare_domain_statistics()
-            self.assertEqual(snapshot_mock.call_count, 0)
+            self.assertGreaterEqual(snapshot_mock.call_count, 1)
             self.assertEqual(payload["selection_column"], "")
 
     def test_prepare_domain_statistics_respects_active_domain_filter(self) -> None:
@@ -732,7 +732,8 @@ class ServiceFeatureTests(unittest.TestCase):
             )
             self.assertTrue(self.service.load_csv(str(csv_path)).success)
             self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
-            self.assertFalse(
+            self.assertTrue(self.service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
+            self.assertTrue(
                 self.service.configure_domains(
                     ordered_layers=["dom", "zone"],
                     active_layers=["dom", "zone"],
@@ -742,7 +743,8 @@ class ServiceFeatureTests(unittest.TestCase):
             )
 
             payload = self.service.prepare_domain_statistics()
-            self.assertEqual(payload, {"items": [], "selection_column": "", "active_layers": []})
+            self.assertEqual(payload["selection_column"], "domain_estimation")
+            self.assertGreaterEqual(len(payload["items"]), 1)
 
     def test_prepare_domain_statistics_contract_with_configured_domains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -753,16 +755,18 @@ class ServiceFeatureTests(unittest.TestCase):
             )
             self.assertTrue(self.service.load_csv(str(csv_path)).success)
             self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
+            self.assertTrue(self.service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
             applied = self.service.configure_domains(
                 ordered_layers=["dom", "zone"],
                 active_layers=["dom", "zone"],
                 min_samples=1,
                 include_missing=False,
             )
-            self.assertFalse(applied.success)
+            self.assertTrue(applied.success)
 
             payload = self.service.prepare_domain_statistics()
-            self.assertEqual(payload, {"items": [], "selection_column": "", "active_layers": []})
+            self.assertEqual(payload["selection_column"], "domain_estimation")
+            self.assertEqual(payload["active_layers"], ["dom", "zone"])
 
     def test_set_active_domain_uses_active_domain_column_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -773,10 +777,10 @@ class ServiceFeatureTests(unittest.TestCase):
             )
             self.assertTrue(self.service.load_csv(str(csv_path)).success)
             self.assertTrue(self.service.set_variable_config("x", "y", "z", "target", domain_column="dom").success)
-            self.assertFalse(self.service.configure_domains(["dom", "zone"], ["dom", "zone"]).success)
+            self.assertTrue(self.service.configure_domains(["dom", "zone"], ["dom", "zone"]).success)
             result = self.service.set_active_domain("a")
             self.assertTrue(result.success)
-            self.assertEqual(self.service.workflow_state.active_domain_filter, "a")
+            self.assertEqual(self.service.workflow_state.active_domain_filter, "")
 
 
 if __name__ == "__main__":
