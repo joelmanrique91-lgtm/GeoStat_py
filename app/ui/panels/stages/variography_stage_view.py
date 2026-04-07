@@ -7,7 +7,7 @@ import threading
 import customtkinter as ctk
 
 from app.ui.controllers.variography_controller import VariographyController
-from app.ui.panels.dashboard_grid import DashboardGrid
+from app.ui.panels.dashboard_grid import DashboardGrid, compute_responsive_figure_size
 from app.ui.renderers import MatplotlibVariographyRenderer, VariographyRenderContext
 from app.ui.theme import BG_CARD, BG_PANEL, CHART_FONT_SIZE_LABEL, CHART_FONT_SIZE_LEGEND, CHART_TEXT, SEM_BLUE_SOFT, SEM_ORANGE, SEM_RED, TEXT_MAIN, TEXT_MUTED
 
@@ -555,11 +555,17 @@ class VariographyStageView:
     def _responsive_figsize(self) -> tuple[float, float]:
         if self._plot_host is None:
             return (11.8, 7.2)
-        width = max(int(self._plot_host.winfo_width()), 900)
-        height = max(int(self._plot_host.winfo_height()), 540)
-        dpi = 100.0
-        usable_w = max(width / dpi, 9.0)
-        usable_h = max(height / dpi, 5.4)
+        width = max(int(self._plot_host.winfo_width()), 320)
+        height = max(int(self._plot_host.winfo_height()), 240)
+        usable_w, usable_h = compute_responsive_figure_size(
+            container_width=width,
+            container_height=height,
+            dpi=100.0,
+            min_width_inches=3.2,
+            min_height_inches=2.4,
+            max_aspect_ratio=2.6,
+            base_aspect_ratio=1.64,
+        )
         return (usable_w, usable_h)
 
     @staticmethod
