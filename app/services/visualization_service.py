@@ -9,6 +9,28 @@ import sys
 from app.services.variography_geometry import DirectionalConfig
 from app.utils.paths import PROJECT_ROOT
 
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - optional accelerator
+    njit = None
+
+
+if njit is not None:
+    @njit(cache=True)
+    def _accumulate_semivariance(values, i_idx, j_idx):
+        out = [0.0] * i_idx.shape[0]
+        for k in range(i_idx.shape[0]):
+            d = values[i_idx[k]] - values[j_idx[k]]
+            out[k] = 0.5 * d * d
+        return out
+else:
+    def _accumulate_semivariance(values, i_idx, j_idx):
+        out = []
+        for k in range(len(i_idx)):
+            d = float(values[int(i_idx[k])]) - float(values[int(j_idx[k])])
+            out.append(0.5 * d * d)
+        return out
+
 @dataclass
 class SpatialDataBundle:
     x: list[float]
