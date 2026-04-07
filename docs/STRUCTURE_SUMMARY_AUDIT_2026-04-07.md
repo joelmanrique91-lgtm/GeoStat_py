@@ -1,6 +1,22 @@
 # Auditoría técnica de estructura y summary vigente (GeoStat_py)
 
+> Estado documental: **VIGENTE (FUENTE CANÓNICA)**
+> Fecha de corte: **2026-04-07**
+> Propósito: referencia única del estado actual as-built para onboarding, auditoría y toma de decisiones.
+
 Fecha: 2026-04-07
+
+## Convención de vigencia usada
+- **VIGENTE**: describe estado actual verificable del repo y se usa como fuente primaria.
+- **HISTÓRICO**: documento válido como trazabilidad, no como fuente primaria del estado actual.
+
+## Matriz breve de features (estado real)
+| Área | Estado | Evidencia principal |
+|---|---|---|
+| Datos/EDA/Cutoffs/Espacial | Implementado | `app/services/geostat_service.py`, `app/ui/panels/home_panel.py` |
+| Dominios | Parcial (módulo deshabilitado en operaciones clave) | `is_domains_module_enabled=False`, `configure_domains/apply_domain_definition` retornan mensaje de módulo deshabilitado |
+| Variografía experimental + modelado inicial | Implementado (slice funcional activo) | `compute_experimental_variography`, `VariographyApplicationService`, `VariographyController`, `VariographyStageView`, tests variográficos |
+| Backend 3D dedicado | Parcial/dinámico (pyvista o plotly según disponibilidad) | `PyVistaSpatial3DRenderer._resolve_backend/is_available` |
 
 ## 1) Resumen ejecutivo breve
 

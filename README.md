@@ -18,7 +18,7 @@ Entrypoint principal:
 python -m app.main
 ```
 
-## 2) Estructura real del repositorio
+## 2) Estructura versionada actual del repositorio
 
 ```text
 GeoStat_py/
@@ -34,14 +34,17 @@ GeoStat_py/
 ├─ scripts/         # Helpers operativos (update/launcher)
 ├─ docs/            # Auditorías y documentación técnica
 ├─ workflows/       # Notas de workflows
-├─ data/            # Datos locales del usuario (si aplica)
-├─ notebooks/       # Notebooks locales (si aplica)
-├─ logs/            # Logs de ejecución
-├─ geostatspy/      # Submódulo aguas abajo
 ├─ environment.yml
 ├─ requirements.txt
 └─ README.md
 ```
+
+### Estructura opcional/local (no necesariamente versionada)
+
+- `data/` (datasets locales del usuario)
+- `notebooks/` (exploración local)
+- `logs/` (salida runtime)
+- `geostatspy/` (submódulo aguas abajo, si fue inicializado)
 
 ## 3) Instalación
 
@@ -108,6 +111,7 @@ python -m app.main
 ## 7) Documentación técnica
 
 - Punto de entrada recomendado: `docs/README.md`.
+- Fuente canónica del estado actual: `docs/STRUCTURE_SUMMARY_AUDIT_2026-04-07.md`.
 - Auditorías y reportes históricos se mantienen en `docs/` para trazabilidad.
 
 ## 8) Mantenimiento / contribución

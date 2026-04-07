@@ -1,5 +1,10 @@
 # CODEBASE AUTO-AUDIT (GeoStat_py)
 
+> Estado documental: **HISTÓRICO (NO CANÓNICO)**
+> Fecha original: 2026-03-22
+> Este documento se conserva para trazabilidad histórica.
+> Para estado actual vigente usar: `docs/STRUCTURE_SUMMARY_AUDIT_2026-04-07.md`.
+
 ## 1. Executive Summary
 - **Qué es la aplicación:** una app desktop local en Python con **CustomTkinter + Matplotlib** para flujo secuencial geoestadístico: `Datos -> EDA -> Cutoffs -> Espacial -> Dominios -> Variografía` (entrypoint `app/main.py`, shell `app/ui/main_window.py`, panel único `app/ui/panels/home_panel.py`).
 - **Madurez actual:** **prototipo funcional intermedio** en Datos/EDA/Cutoffs/Espacial; Dominios y Variografía están mayormente en placeholder.
