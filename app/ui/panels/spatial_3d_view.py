@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import customtkinter as ctk
+import logging
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -25,6 +26,8 @@ from app.ui.theme import (
     apply_dashboard_layout,
     get_continuous_colormap,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _ui_font(token: dict[str, object]) -> ctk.CTkFont:
@@ -173,6 +176,7 @@ class Spatial3DView(ctk.CTkFrame):
             f"prep={diag.get('geometry_ms', 0)} ms · draw={diag.get('render_ms', 0)} ms"
         )
         self.meta_label.configure(text=f"{self.meta_label.cget('text')}\n{metrics}")
+        logger.debug("UI_DRAW event=DRAW_REQUEST source=Spatial3DView reason=scene_update")
         self._canvas.draw_idle()
 
     def _render_scene_overlays(self, scene: SceneState) -> None:
@@ -289,6 +293,7 @@ class Spatial3DView(ctk.CTkFrame):
         apply_dashboard_layout(self._figure, left=0.03, right=0.88, bottom=0.07, top=0.95, wspace=0.10, hspace=0.10)
         self._sync_figure_to_host(force=True)
         if finalize_draw and self._canvas is not None:
+            logger.debug("UI_DRAW event=DRAW_REQUEST source=Spatial3DView reason=update_cloud_finalize")
             self._canvas.draw_idle()
 
         rendered_info = f"{data.point_count_rendered:,}/{data.point_count_original:,} puntos"
@@ -320,8 +325,11 @@ class Spatial3DView(ctk.CTkFrame):
         if self._canvas is None:
             self._canvas = FigureCanvasTkAgg(self._figure, master=self.plot_host)
             self._canvas.get_tk_widget().pack(fill="both", expand=True)
+            logger.debug("UI_CANVAS event=CANVAS_CREATED parent_id=%s canvas_id=%s", id(self.plot_host), id(self._canvas))
             self._scroll_cid = self._canvas.mpl_connect("scroll_event", self._on_mouse_wheel_zoom)
             self._draw_cid = self._canvas.mpl_connect("draw_event", self._on_draw)
+        else:
+            logger.debug("UI_CANVAS event=CANVAS_REUSED parent_id=%s canvas_id=%s", id(self.plot_host), id(self._canvas))
         if self._toolbar is None:
             self._toolbar = NavigationToolbar2Tk(self._canvas, self.toolbar_host, pack_toolbar=False)
             self._toolbar.update()
@@ -370,6 +378,7 @@ class Spatial3DView(ctk.CTkFrame):
             return
         size = (width, height)
         if not force and self._last_plot_size == size:
+            logger.debug("UI_RESIZE source=Spatial3DView changed=False width=%s height=%s", width, height)
             return
         self._last_plot_size = size
         dpi = float(self._figure.get_dpi())
@@ -382,7 +391,10 @@ class Spatial3DView(ctk.CTkFrame):
         )
         size_inches = (round(new_w, 4), round(new_h, 4))
         if not force and self._last_size_inches == size_inches:
+            logger.debug("UI_RESIZE source=Spatial3DView changed=False width=%s height=%s", width, height)
             return
         self._last_size_inches = size_inches
         self._figure.set_size_inches(new_w, new_h, forward=force)
+        logger.debug("UI_RESIZE source=Spatial3DView changed=True width=%s height=%s", width, height)
+        logger.debug("UI_DRAW event=DRAW_REQUEST source=Spatial3DView reason=resize")
         self._canvas.draw_idle()

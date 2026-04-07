@@ -3,12 +3,48 @@
 from __future__ import annotations
 
 import customtkinter as ctk
+import logging
 import time
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from app.ui.theme import CHART_BG, apply_axis_style, apply_dashboard_layout, apply_figure_theme
+
+logger = logging.getLogger(__name__)
+
+
+def compute_responsive_figure_size(
+    *,
+    container_width: int,
+    container_height: int,
+    dpi: float,
+    min_width_inches: float = 2.0,
+    min_height_inches: float = 1.6,
+    max_aspect_ratio: float | None = None,
+    base_aspect_ratio: float | None = None,
+) -> tuple[float, float]:
+    """Compute a host-bounded responsive figure size in inches."""
+    avail_w = max(float(container_width) / max(dpi, 1e-6), min_width_inches)
+    avail_h = max(float(container_height) / max(dpi, 1e-6), min_height_inches)
+    new_w = avail_w
+    new_h = avail_h
+    if max_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        if ratio > max_aspect_ratio:
+            new_w = max(new_h * max_aspect_ratio, min_width_inches)
+    if base_aspect_ratio is not None:
+        ratio = new_w / max(new_h, 1e-6)
+        min_ratio = max(base_aspect_ratio * 0.55, 0.60)
+        if ratio < min_ratio:
+            candidate_w = max(new_h * min_ratio, min_width_inches)
+            if candidate_w <= avail_w:
+                new_w = candidate_w
+            else:
+                new_h = max(new_w / min_ratio, min_height_inches)
+    new_w = min(new_w, avail_w)
+    new_h = min(new_h, avail_h)
+    return new_w, new_h
 
 
 def compute_responsive_figure_size(
@@ -98,6 +134,9 @@ class DashboardGrid:
         widget = self.canvas.get_tk_widget()
         if not widget.winfo_manager():
             widget.pack(fill="both", expand=True, padx=0, pady=0)
+            logger.debug("UI_CANVAS event=CANVAS_CREATED parent_id=%s canvas_id=%s", id(self.parent), id(widget))
+        else:
+            logger.debug("UI_CANVAS event=CANVAS_REUSED parent_id=%s canvas_id=%s", id(self.parent), id(widget))
         if not self._configure_bound:
             widget.bind("<Configure>", self._on_parent_configure, add="+")
             self._configure_bound = True
@@ -125,6 +164,7 @@ class DashboardGrid:
             return
         size = (width, height)
         if not force and self._last_parent_size == size:
+            logger.debug("UI_RESIZE source=DashboardGrid changed=False width=%s height=%s", width, height)
             return
         self._last_parent_size = size
         dpi = float(self.figure.get_dpi())
@@ -148,8 +188,16 @@ class DashboardGrid:
             apply_dashboard_layout(self.figure)
         now = time.perf_counter()
         if force or size_changed or (now - self._last_resize_draw_at) >= 0.08:
+            logger.debug(
+                "UI_DRAW event=DRAW_REQUEST source=DashboardGrid reason=resize force=%s size_changed=%s width=%s height=%s",
+                force,
+                size_changed,
+                width,
+                height,
+            )
             self.canvas.draw_idle()
             self._last_resize_draw_at = now
+            logger.debug("UI_RESIZE source=DashboardGrid changed=True width=%s height=%s", width, height)
 
     def destroy(self) -> None:
         self._destroyed = True

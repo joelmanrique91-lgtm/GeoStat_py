@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
+import logging
 import time
 
 from app.models.spatial import SceneState
 from app.services.geometry_cache_service import GeometryCacheService
 from app.services.scene_builder_service import SceneBuilderService
 from app.services.spatial_geometry_service import SpatialGeometryService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -126,9 +129,19 @@ class SpatialViewerController:
         available, reason = renderer.is_available()
         widget = existing_widget
         same_parent = bool(getattr(widget, "master", None) is parent) if widget is not None else False
-        if widget is None or not getattr(widget, "winfo_exists", lambda: False)() or not same_parent:
+        if widget is not None and not same_parent and getattr(widget, "winfo_exists", lambda: False)():
+            logger.debug("UI_HOST event=HOST_DESTROYED reason=parent_changed widget_id=%s", id(widget))
+            try:
+                widget.destroy()
+            except Exception:
+                pass
+            widget = None
+        if widget is None or not getattr(widget, "winfo_exists", lambda: False)():
             widget = renderer.create_widget(parent)
             widget.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
+            logger.debug("UI_HOST event=HOST_CREATED widget_id=%s", id(widget))
+        else:
+            logger.debug("UI_HOST event=HOST_REUSED widget_id=%s", id(widget))
         backend_name = renderer.__class__.__name__
 
         if not available:
