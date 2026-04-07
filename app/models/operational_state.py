@@ -14,6 +14,7 @@ class StageReadiness:
     blocking_reasons: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     hint: str = ""
+    status: str = "incomplete"
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -21,6 +22,7 @@ class StageReadiness:
             "blocking_reasons": list(self.blocking_reasons),
             "warnings": list(self.warnings),
             "hint": self.hint,
+            "status": self.status,
         }
 
 
