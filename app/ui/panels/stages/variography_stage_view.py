@@ -126,6 +126,8 @@ class VariographyStageView:
         bypass_active = bool(self.controller.service.workflow_state.allow_variography_without_domain)
         if bypass_active:
             self.usage_warning_var.set("⚠ Excepción técnica activa: variografía sin dominio confirmado.")
+        else:
+            self.usage_warning_var.set("")
         if self._pending_async_error:
             self._render_plot_feedback(
                 title="Error de actualización UI",

@@ -735,7 +735,7 @@ class GeostatService:
             from_num = _to_numeric(work[from_col])
             if to_col:
                 to_num = _to_numeric(work[to_col])
-                sample_len = (to_num - from_num).abs()
+                sample_len = (to_num - from_num)
             else:
                 sample_len = _to_numeric(work[length_col]).abs()
                 to_num = from_num + sample_len
@@ -854,6 +854,28 @@ class GeostatService:
 
     def get_operational_state(self) -> GeostatOperationalState:
         return self.operational_state_service.build_operational_state()
+
+    def get_effective_workflow_context(self) -> dict[str, object]:
+        snapshot = self.get_analysis_context_snapshot()
+        support = self.get_support_state()
+        domain_column = str(snapshot.get("active_domain_column", ""))
+        active_domain = str(snapshot.get("active_domain_filter", ""))
+        domain_confirmed = bool(domain_column and active_domain)
+        return {
+            "target_base": str(snapshot.get("base_target_column", "")),
+            "target_effective": str(snapshot.get("resolved_target_column", "")),
+            "domain_effective_column": domain_column,
+            "active_domain": active_domain,
+            "domain_confirmed": domain_confirmed,
+            "support_mode": str(support.get("mode", "none")),
+            "support_details": str(support.get("details", "")),
+            "support_warning": str(support.get("warning", "")),
+            "domain_bypass_active": bool(self.workflow_state.allow_variography_without_domain),
+            # backward-compat aliases
+            "domain_column": domain_column,
+            "domain_filter": active_domain,
+            "bypass_domain": bool(self.workflow_state.allow_variography_without_domain),
+        }
 
     def _get_filtered_dataframe(self, context_snapshot: dict[str, object] | None = None):
         if self.current_dataset is None:

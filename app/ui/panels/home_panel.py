@@ -224,13 +224,14 @@ def _build_domains_blocked_payload(state: GeostatOperationalState) -> tuple[str,
 
 def _build_context_chip_texts(state: GeostatOperationalState) -> dict[str, str]:
     resolved_target = str(state.analysis.resolved_target_column or "No definido")
+    base_target = str(state.analysis.base_target_column or "No definido")
     domain_col = str(state.analysis.active_domain_column or "No definido")
     domain_filter = str(state.analysis.active_domain_filter or "Todos")
     blocked = [name for name, stage in state.readiness.stages.items() if not bool(stage.ready)]
     status = "Listo" if not blocked else f"Bloqueos: {len(blocked)}"
     return {
         "dataset": f"Dataset: {state.analysis.dataset_name}",
-        "target": f"Target activo: {resolved_target}",
+        "target": f"Target base/activo: {base_target} → {resolved_target}",
         "domain": f"Dominio/filtro: {domain_col} · {domain_filter}",
         "status": f"Workflow: {status}",
     }
@@ -1954,13 +1955,22 @@ class HomePanel(ctk.CTkFrame):
         else:
             capping_text = "Capping inactivo"
         support = self.service.get_support_state()
+        effective = self.service.get_effective_workflow_context()
         if bool(support.get("confirmed")):
-            mode = str(support.get("mode"))
+            mode = str(effective.get("support_mode"))
             mode_text = "real" if mode == "interval_real" else "fallback"
             support_text = f"Soporte {mode_text} L{float(support['composite_length']):.1f}"
         else:
             support_text = "Soporte no confirmado"
-        self.unified_context_var.set(_build_unified_context_text(state, f"{support_text} · {capping_text}"))
+        fallback_warning = f"⚠ {effective.get('support_warning')}" if str(effective.get("support_warning") or "").strip() else ""
+        domain_status = "Dominio confirmado" if bool(effective.get("domain_confirmed")) else "Dominio no confirmado"
+        bypass_text = "Bypass dominio ACTIVO" if bool(effective.get("domain_bypass_active")) else "Bypass dominio OFF"
+        self.unified_context_var.set(
+            _build_unified_context_text(
+                state,
+                f"{support_text} · {capping_text} · {domain_status} · {bypass_text} {fallback_warning}".strip(),
+            )
+        )
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, key: str | None = None) -> None:
         ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=col, sticky="w", padx=4)
