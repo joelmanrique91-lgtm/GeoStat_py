@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.visualization_service import Spatial3DDataBundle, SpatialDataBundle
+from app.models.spatial import SceneState
+from app.services.visualization_service import SpatialDataBundle
 
 
 @dataclass
@@ -52,8 +53,8 @@ class Spatial3DRenderer(ABC):
         """Create renderer host widget attached to parent."""
 
     @abstractmethod
-    def render(self, widget: Any, data: Spatial3DDataBundle, color_display_label: str) -> None:
-        """Render 3D payload in the provided widget."""
+    def render(self, widget: Any, scene: SceneState, color_display_label: str) -> None:
+        """Render logical 3D scene payload in the provided widget."""
 
     @abstractmethod
     def show_unavailable(self, widget: Any, reason: str) -> None:
