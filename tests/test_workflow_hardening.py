@@ -61,6 +61,8 @@ class WorkflowHardeningTests(unittest.TestCase):
         support = service.get_support_state()
         self.assertEqual("fallback_approx", support["mode"])
         self.assertIn("aproximado", support["warning"])
+        self.assertFalse(bool(support["confirmed"]))
+        self.assertEqual("approx_exploratory", support["quality"])
 
     def test_variography_blocked_without_domain_confirmation_when_bypass_off(self) -> None:
         service = self._load_service(_build_dataset(with_intervals=True))
@@ -75,7 +77,7 @@ class WorkflowHardeningTests(unittest.TestCase):
         service = self._load_service(_build_dataset(with_intervals=True))
         self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
         self.assertTrue(service.apply_domain_definition({"variable_base": "dom", "domains": {"DomA": ["A"], "DomB": ["B"]}}).success)
-        service.workflow_state.allow_variography_without_domain = True
+        self.assertTrue(service.set_variography_domain_bypass(True, reason="test_exception").success)
         params = {
             "target_col": "target",
             "x_col": "x",
@@ -101,7 +103,7 @@ class WorkflowHardeningTests(unittest.TestCase):
         service = self._load_service(_build_dataset(with_intervals=True))
         self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
         self.assertTrue(service.apply_domain_definition({"variable_base": "dom", "domains": {"DomA": ["A"], "DomB": ["B"]}}).success)
-        service.workflow_state.allow_variography_without_domain = True
+        self.assertTrue(service.set_variography_domain_bypass(True, reason="test_exception").success)
         params = {
             "target_col": "target",
             "x_col": "x",
@@ -121,7 +123,7 @@ class WorkflowHardeningTests(unittest.TestCase):
         }
         with_bypass = service.compute_experimental_variography(params)
         self.assertIn("DOMAIN_BYPASS_ACTIVE", [item.code for item in with_bypass.warnings])
-        service.workflow_state.allow_variography_without_domain = False
+        self.assertTrue(service.set_variography_domain_bypass(False).success)
         without_bypass = service.compute_experimental_variography(params)
         self.assertNotIn("DOMAIN_BYPASS_ACTIVE", [item.code for item in without_bypass.warnings])
 
@@ -168,7 +170,7 @@ class WorkflowHardeningTests(unittest.TestCase):
         effective_domain = service.get_effective_workflow_context()
         self.assertTrue(effective_domain["domain_confirmed"])
         self.assertTrue(service.set_active_domain("Todos").success)
-        service.workflow_state.allow_variography_without_domain = True
+        self.assertTrue(service.set_variography_domain_bypass(True, reason="test_exception").success)
         effective_after_bypass = service.get_effective_workflow_context()
         self.assertTrue(effective_after_bypass["domain_bypass_active"])
         _ = service.compute_experimental_variography(
@@ -195,7 +197,9 @@ class WorkflowHardeningTests(unittest.TestCase):
         support_event = next(item for item in events if item["event"] == "support_composite_applied")
         self.assertIn("support_mode", support_event["details"])
         self.assertIn("domain_assignment_confirmed", [item["event"] for item in events])
-        variography_event = next(item for item in events if item["event"] == "variography_compute")
+        variography_events = [item for item in events if item["event"] == "variography_compute"]
+        self.assertTrue(variography_events)
+        variography_event = variography_events[-1]
         self.assertTrue(variography_event["details"].get("domain_bypass_active"))
 
 

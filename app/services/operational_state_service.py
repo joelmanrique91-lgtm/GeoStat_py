@@ -205,6 +205,10 @@ class OperationalStateService:
                 variography_reasons.append("missing_spatial_columns")
         if has_dataset and has_variable_config and not resolved_target_exists:
             variography_reasons.append("missing_target")
+        support_mode = str(self.host.workflow_state.support_mode or "none")
+        if support_mode == "fallback_approx":
+            variography_warnings.append("support_fallback_exploratory")
+            variography_warnings.append("variography_not_exportable")
         if has_dataset and has_variable_config:
             if not str(snapshot.active_domain_column).strip():
                 variography_reasons.append("missing_domain_confirmation")
@@ -212,6 +216,7 @@ class OperationalStateService:
                 variography_reasons.append("missing_domain_confirmation")
             elif not str(snapshot.active_domain_filter).strip() and bool(self.host.workflow_state.allow_variography_without_domain):
                 variography_warnings.append("domain_bypass_active")
+                variography_warnings.append("variography_not_exportable")
         if has_dataset and has_variable_config and resolved_target_exists:
             filtered_for_variography = self.host._get_filtered_dataframe(snapshot.as_dict())
             if filtered_for_variography is None:

@@ -21,6 +21,7 @@ BLOCKING_REASON_HINTS = {
     "insufficient_data": "Datos insuficientes para variografía. Amplía muestra o ajusta filtros/dominio.",
     "low_data_after_domain_filter": "El filtro de dominio deja pocos datos; revisa la selección activa.",
     "domain_not_defined_exploratory": "No hay dominio estacionario activo: la lectura es exploratoria.",
+    "support_fallback_exploratory": "Soporte fallback aproximado: resultado útil para exploración, no para exportación formal.",
     "variography_low_operational_reliability": "Variografía con baja confiabilidad operativa para modelado.",
     "variography_not_exportable": "Variografía no exportable para kriging por advertencias críticas.",
     DOMAINS_MODULE_DISABLED_REASON: "Etapa Dominios no disponible en el estado actual.",

@@ -40,7 +40,6 @@ from app.services.visualization_service import (
 )
 
 WORKFLOW_STEPS = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]
-FUNCTIONAL_STATUS = {step: "funcional" for step in WORKFLOW_STEPS}
 STEP_EVENT_MAP = {
     "Datos": "workflow_step_data_opened",
     "EDA": "workflow_step_eda_opened",
@@ -241,7 +240,23 @@ class GeostatService:
         self.dataset_context_service = DatasetContextService(host_service=self)
         self.repository_update_service = RepositoryUpdateService(host_service=self)
         self._domain_filter_context_enabled = True
-        self._domains_module_enabled = True
+        self._domains_module_enabled = False
+        self._dataset_revision = 0
+        self._context_revision = 0
+
+    def bump_dataset_revision(self, reason: str) -> None:
+        self._dataset_revision += 1
+        self.activity_log.log("dataset_revision_bumped", "info", "Dataset revisado por mutación de estado.", {"revision": self._dataset_revision, "reason": reason})
+
+    def bump_context_revision(self, reason: str) -> None:
+        self._context_revision += 1
+        self.activity_log.log("context_revision_bumped", "info", "Contexto operativo revisado.", {"revision": self._context_revision, "reason": reason})
+
+    def get_dataset_revision(self) -> int:
+        return int(self._dataset_revision)
+
+    def get_context_revision(self) -> int:
+        return int(self._context_revision)
 
     def set_workflow_step(self, step_name: str) -> str:
         if step_name not in WORKFLOW_STEPS:
@@ -250,11 +265,34 @@ class GeostatService:
         step_display_name = STEP_DISPLAY_NAMES.get(step_name, step_name)
         self.activity_log.log("workflow_step_changed", "info", f"Paso activo: {step_display_name}", {"step": step_name, "step_display": step_display_name})
         self.activity_log.log(STEP_EVENT_MAP[step_name], "info", f"Se abrió el paso {step_display_name}.", {"step": step_name, "step_display": step_display_name})
-        return f"Paso activo: {step_display_name} (funcional)."
+        stage_status = dict(self.get_workflow_step_status()).get(step_name, "incompleta")
+        return f"Paso activo: {step_display_name} ({stage_status})."
 
     def get_workflow_step_status(self) -> list[tuple[str, str]]:
         self.activity_log.log("workflow_simplified_view_loaded", "info", "Workflow simplificado cargado.", {"steps": WORKFLOW_STEPS})
-        return [(step, FUNCTIONAL_STATUS[step]) for step in WORKFLOW_STEPS]
+        readiness = self.get_workflow_readiness_state()
+        labels = {
+            "ready": "operativa",
+            "exploratory": "exploratoria",
+            "critical_warning": "crítica",
+            "not_exportable": "no_exportable",
+            "blocked": "bloqueada",
+            "incomplete": "incompleta",
+        }
+        status: list[tuple[str, str]] = []
+        for step in WORKFLOW_STEPS:
+            stage_key = {
+                "Datos": "data",
+                "EDA": "eda",
+                "Cutoffs": "cutoffs",
+                "Espacial": "spatial",
+                "Dominios": "domains",
+                "Variografía": "variography",
+            }.get(step, "")
+            stage = readiness.stages.get(stage_key, None)
+            stage_status = str(stage.status) if stage is not None else "incomplete"
+            status.append((step, labels.get(stage_status, stage_status)))
+        return status
 
     def get_available_columns(self) -> list[str]:
         return self.dataset_context_service.get_available_columns()
@@ -365,15 +403,15 @@ class GeostatService:
         del ordered_layers, active_layers, min_samples, include_missing
         if self.current_dataset is None or self.variable_config is None:
             return CutoffResult(False, "Configura datos antes de Dominios.")
-        self._domains_module_enabled = True
-        return CutoffResult(True, "Dominios habilitado para configuración.")
+        self._domains_module_enabled = False
+        return CutoffResult(False, "Configuración avanzada de dominios aún no habilitada en este modo.")
 
     def apply_domain_definition(self, domain_definition: dict) -> CutoffResult:
         if self.current_dataset is None:
             return CutoffResult(False, "No hay dataset cargado.")
         if self.variable_config is None:
             return CutoffResult(False, "Configura X/Y/Z/target antes de Dominios.")
-        if not bool(self.workflow_state.support_confirmed):
+        if not bool(self.workflow_state.support_confirmed) and str(self.workflow_state.support_mode or "") != "fallback_approx":
             return CutoffResult(False, "Confirma soporte/compositado antes de definir dominios.")
         variable_base = str(domain_definition.get("variable_base", "")).strip()
         domains = domain_definition.get("domains", {})
@@ -404,6 +442,7 @@ class GeostatService:
             "variable_base": variable_base,
             "domains": {str(k): list(v) for k, v in domains.items()},
         }
+        self._domains_module_enabled = True
         self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
         if self.variable_config is not None:
             self.variable_config.domain_column = DOMAIN_ESTIMATION_COLUMN
@@ -416,6 +455,8 @@ class GeostatService:
             {"variable_base": variable_base, "domain_count": len(domains)},
         )
         self.get_variography_session().mark_dirty()
+        self.bump_dataset_revision("domain_definition_applied")
+        self.bump_context_revision("domain_definition_applied")
         return CutoffResult(True, "Dominios aplicados al dataset.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
@@ -430,16 +471,22 @@ class GeostatService:
         selected = str(domain_name or "").strip()
         if not selected or selected.lower() == "todos":
             self.workflow_state.active_domain_filter = ""
-            self.workflow_state.allow_variography_without_domain = True
+            self.workflow_state.allow_variography_without_domain = False
+            self.workflow_state.variography_domain_bypass_reason = ""
             self.get_variography_session().mark_dirty()
+            self.bump_context_revision("domain_filter_cleared")
             self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio limpiado.", {"column": active_domain_column})
             return CutoffResult(True, "Filtro de dominio limpiado.")
         options = set(self.get_domain_estimation_values())
         if selected not in options:
-            return CutoffResult(False, f"Dominio no válido: '{selected}'.")
+            self.workflow_state.active_domain_filter = ""
+            self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio ignorado: valor no encontrado.", {"value": selected})
+            return CutoffResult(True, f"Filtro de dominio ignorado: '{selected}' no existe en el contexto activo.")
         self.workflow_state.active_domain_filter = selected
         self.workflow_state.allow_variography_without_domain = False
+        self.workflow_state.variography_domain_bypass_reason = ""
         self.get_variography_session().mark_dirty()
+        self.bump_context_revision("domain_filter_applied")
         self.activity_log.log(
             "domain_filter_applied",
             "success",
@@ -510,6 +557,7 @@ class GeostatService:
         self.workflow_state.active_domain_filter = selected
         self.workflow_state.active_domain = f"{active_domain_column}: {selected}"
         self.workflow_state.allow_variography_without_domain = False
+        self.workflow_state.variography_domain_bypass_reason = ""
         self.workflow_state.domain_assignment_sequence += 1
         self.workflow_state.domain_assignment_history.append(
             {"sequence": self.workflow_state.domain_assignment_sequence, "domain": selected, "column": active_domain_column}
@@ -521,7 +569,32 @@ class GeostatService:
             {"domain_column": active_domain_column, "domain_value": selected},
         )
         self.get_variography_session().mark_dirty()
+        self.bump_context_revision("domain_assignment_confirmed")
         return CutoffResult(True, f"Dominio confirmado: {selected}")
+
+    def set_variography_domain_bypass(self, enabled: bool, reason: str = "") -> CutoffResult:
+        enabled_flag = bool(enabled)
+        normalized_reason = str(reason).strip()
+        if enabled_flag and not normalized_reason:
+            normalized_reason = "manual_exception"
+        if enabled_flag:
+            self.workflow_state.allow_variography_without_domain = True
+            self.workflow_state.variography_domain_bypass_reason = normalized_reason
+            message = "Excepción activa: variografía exploratoria sin dominio confirmado."
+            self.activity_log.log(
+                "variography_domain_bypass_enabled",
+                "warning",
+                message,
+                {"reason": normalized_reason},
+            )
+        else:
+            self.workflow_state.allow_variography_without_domain = False
+            self.workflow_state.variography_domain_bypass_reason = ""
+            message = "Excepción desactivada: variografía requiere dominio confirmado."
+            self.activity_log.log("variography_domain_bypass_disabled", "info", message, {})
+        self.get_variography_session().mark_dirty()
+        self.bump_context_revision("domain_bypass_toggled")
+        return CutoffResult(True, message)
 
     def prepare_domain_statistics(self) -> dict[str, object]:
         return {"items": [], "selection_column": "", "active_layers": []}
@@ -668,6 +741,7 @@ class GeostatService:
         self.workflow_state.domain_assignment_history = []
         self.workflow_state.domain_assignment_sequence = 0
         self.workflow_state.allow_variography_without_domain = False
+        self.workflow_state.variography_domain_bypass_reason = ""
         if self.variable_config is not None and self.variable_config.domain_column == DOMAIN_ESTIMATION_COLUMN:
             self.variable_config.domain_column = None
 
@@ -680,6 +754,7 @@ class GeostatService:
         self.workflow_state.support_post_count = 0
         self.workflow_state.support_confirmed = False
         self.workflow_state.support_mode = "none"
+        self.workflow_state.support_quality = "unconfirmed"
         self.workflow_state.support_details = ""
         self.workflow_state.support_warning = ""
 
@@ -693,6 +768,7 @@ class GeostatService:
             "post_count": int(self.workflow_state.support_post_count),
             "confirmed": bool(self.workflow_state.support_confirmed),
             "mode": str(self.workflow_state.support_mode),
+            "quality": str(self.workflow_state.support_quality),
             "details": str(self.workflow_state.support_details),
             "warning": str(self.workflow_state.support_warning),
         }
@@ -794,14 +870,15 @@ class GeostatService:
         self.workflow_state.support_output_target_column = out_col
         self.workflow_state.support_pre_count = int(len(work))
         self.workflow_state.support_post_count = int(work[["_hole_group", "_composite_group"]].drop_duplicates().shape[0])
-        self.workflow_state.support_confirmed = True
+        self.workflow_state.support_confirmed = bool(mode == "interval_real")
         self.workflow_state.support_mode = mode
+        self.workflow_state.support_quality = "real_confirmed" if mode == "interval_real" else "approx_exploratory"
         self.workflow_state.support_details = details
         self.workflow_state.support_warning = warning
         self.workflow_state.effective_target_column = out_col
         self.activity_log.log(
             "support_composite_applied",
-            "success",
+            "success" if mode == "interval_real" else "warning",
             "Compositado básico aplicado.",
             {
                 "composite_length": float(composite_length),
@@ -810,11 +887,15 @@ class GeostatService:
                 "samples_before": self.workflow_state.support_pre_count,
                 "samples_after_groups": self.workflow_state.support_post_count,
                 "support_mode": mode,
+                "support_quality": self.workflow_state.support_quality,
                 "support_details": details,
                 "support_warning": warning,
                 "discarded_samples": discarded,
             },
         )
+        self.get_variography_session().mark_dirty()
+        self.bump_dataset_revision("support_composite_applied")
+        self.bump_context_revision("support_composite_applied")
         label = "Compositado real por intervalos aplicado." if mode == "interval_real" else "Compositado fallback aproximado aplicado."
         return CutoffResult(True, f"{label} Target efectivo: {out_col}")
 
@@ -868,9 +949,11 @@ class GeostatService:
             "active_domain": active_domain,
             "domain_confirmed": domain_confirmed,
             "support_mode": str(support.get("mode", "none")),
+            "support_quality": str(support.get("quality", "unconfirmed")),
             "support_details": str(support.get("details", "")),
             "support_warning": str(support.get("warning", "")),
             "domain_bypass_active": bool(self.workflow_state.allow_variography_without_domain),
+            "domain_bypass_reason": str(self.workflow_state.variography_domain_bypass_reason or ""),
             # backward-compat aliases
             "domain_column": domain_column,
             "domain_filter": active_domain,
@@ -1170,7 +1253,7 @@ class GeostatService:
             raise ValueError("No hay dataset/configuración suficiente para swath.")
 
         dataframe = self.current_dataset.dataframe
-        target_col = self.variable_config.target_column
+        target_col = self._get_effective_target_column() or self.variable_config.target_column
         if not target_col or target_col not in dataframe.columns:
             raise ValueError(f"Target no válido para swath: '{target_col}'.")
 

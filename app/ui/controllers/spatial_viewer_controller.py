@@ -156,5 +156,10 @@ class SpatialViewerController:
         dataset = self.service.current_dataset
         if dataset is None:
             return "no-dataset"
-        raw = f"{dataset.file_path}:{dataset.row_count}:{dataset.column_count}"
+        snapshot = self.service.get_analysis_context_snapshot()
+        raw = (
+            f"{dataset.file_path}:{dataset.row_count}:{dataset.column_count}:"
+            f"dr={self.service.get_dataset_revision()}:cr={self.service.get_context_revision()}:"
+            f"target={snapshot.get('resolved_target_column', '')}:domain={snapshot.get('active_domain_filter', '')}"
+        )
         return sha1(raw.encode("utf-8")).hexdigest()

@@ -231,7 +231,7 @@ def _build_context_chip_texts(state: GeostatOperationalState) -> dict[str, str]:
     status = "Listo" if not blocked else f"Bloqueos: {len(blocked)}"
     return {
         "dataset": f"Dataset: {state.analysis.dataset_name}",
-        "target": f"Target base/activo: {base_target} → {resolved_target}",
+        "target": f"Target activo: {resolved_target} (base: {base_target})",
         "domain": f"Dominio/filtro: {domain_col} · {domain_filter}",
         "status": f"Workflow: {status}",
     }
@@ -825,8 +825,11 @@ class HomePanel(ctk.CTkFrame):
         readiness = self.service.get_workflow_readiness_state()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.stages.get(stage_key, None)
-        if not bool(stage_state.ready) if stage_state is not None else True:
+        stage_blocked = not bool(stage_state.ready) if stage_state is not None else True
+        if stage_blocked:
             self._build_blocked_message_card(self.action_bar_body, stage)
+            if stage != "Datos":
+                return
 
         if stage == "Datos":
             self._build_data_actions_inline(self.action_bar_body)
@@ -2558,12 +2561,9 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_toggle_variography_without_domain(self) -> None:
         enabled = bool(self.allow_variography_without_domain_var.get())
-        self.service.workflow_state.allow_variography_without_domain = enabled
-        self.status_text.set(
-            "Excepción activa: variografía sin dominio confirmado."
-            if enabled
-            else "Excepción desactivada: variografía requiere dominio confirmado."
-        )
+        reason = "ui_manual_exception" if enabled else ""
+        result = self.service.set_variography_domain_bypass(enabled, reason=reason)
+        self.status_text.set(result.message)
         self._append_activity(self.status_text.get())
         self._invalidate_stage_cache()
         self._refresh_dashboard(reason="variography_domain_bypass_toggled")

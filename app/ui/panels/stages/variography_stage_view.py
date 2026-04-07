@@ -145,7 +145,7 @@ class VariographyStageView:
         self._build_leapfrog_export_panel(results)
 
         cached = self._session.last_response
-        if cached is not None and cached.result is not None:
+        if cached is not None and cached.result is not None and self._cached_response_matches_context(snapshot):
             self.status_var.set(str(cached.message))
             self.warning_var.set(self._join_sorted_issue_lines(cached.warnings))
             self.blocker_var.set(self._join_sorted_issue_lines(cached.blockers))
@@ -161,6 +161,9 @@ class VariographyStageView:
             self._update_leapfrog_from_result(result_payload, bool(cached.ok))
             self._render_result_plot(result_payload, bool(cached.ok))
             return
+        if cached is not None and cached.result is not None:
+            self.warning_var.set("[STALE_CONTEXT] Resultado previo invalidado por cambio de contexto. Recalcule variografía.")
+            self.controller.mark_dirty(self.target_var.get().strip())
 
         if self._is_ready_for_compute() and not self._auto_compute_done:
             self._auto_compute_done = True
@@ -648,6 +651,8 @@ class VariographyStageView:
             self.status_var.set(status)
 
     def _build_leapfrog_text(self, model: dict[str, object], *, direction_applied: bool, ok: bool, domain_bypass_active: bool) -> tuple[str, str]:
+        reliability = model.get("reliability", {}) if isinstance(model.get("reliability", {}), dict) else {}
+        reliability_classification = str(reliability.get("classification", "")).upper()
         nugget_obj = model.get("nugget", {}) if isinstance(model.get("nugget", {}), dict) else {}
         nugget_val = self._as_float_or_none(nugget_obj.get("value"))
         sill_val = self._as_float_or_none(model.get("sill"))
@@ -688,8 +693,10 @@ class VariographyStageView:
         ]
         have_global = nugget_val is not None or sill_val is not None
         have_structure = isinstance(selected, dict)
-        if have_global and have_structure and direction_applied and ok:
+        if reliability_classification in {"READY", "HIGH_RELIABILITY", "READY_FOR_EXPORT"} and have_global and have_structure and direction_applied and ok:
             status = "Salida Leapfrog utilizable: parámetros globales y estructura principal disponibles."
+        elif reliability_classification in {"EXPLORATORY_ONLY", "LOW_RELIABILITY"} and have_global and have_structure:
+            status = "Salida exploratoria disponible: no defendible para exportación formal."
         elif have_global and have_structure:
             status = "Salida parcial disponible: estructura principal y parámetros globales; direccionalidad pendiente."
         elif have_global:
@@ -699,6 +706,20 @@ class VariographyStageView:
         if domain_bypass_active:
             status = f"{status} ⚠ Generada bajo bypass sin dominio confirmado."
         return "\n".join(lines), status
+
+    def _cached_response_matches_context(self, snapshot: dict[str, object]) -> bool:
+        cached = self._session.last_response
+        if cached is None or cached.request is None:
+            return False
+        request_context = cached.request.context
+        current_target = str(snapshot.get("resolved_target_column", "") or "")
+        if str(cached.request.target_col or "") != str(self.target_var.get() or current_target):
+            return False
+        if str(request_context.active_domain_column or "") != str(snapshot.get("active_domain_column", "") or ""):
+            return False
+        if str(request_context.active_domain_filter or "") != str(snapshot.get("active_domain_filter", "") or ""):
+            return False
+        return True
 
     def _set_leapfrog_output(self, *, text: str, status: str) -> None:
         self.leapfrog_output_var.set(text)
