@@ -206,6 +206,9 @@ class CutoffService:
         self.host.workflow_state.dynamic_cutoff_category_column = category_col
         self.host.workflow_state.dynamic_cutoff_source_column = target_column
         self.host.workflow_state.effective_target_column = out_col
+        self.host.get_variography_session().mark_dirty()
+        self.host.bump_dataset_revision("dynamic_cutoff_applied")
+        self.host.bump_context_revision("dynamic_cutoff_applied")
         self.host.activity_log.log(
             "dynamic_cutoff_applied",
             "success",
@@ -270,6 +273,9 @@ class CutoffService:
         self.host.workflow_state.effective_target_column = output_name
 
         self.clear_dynamic_cutoff_state()
+        self.host.get_variography_session().mark_dirty()
+        self.host.bump_dataset_revision("manual_cutoff_applied")
+        self.host.bump_context_revision("manual_cutoff_applied")
         self.host.activity_log.log(
             "cutoff_applied",
             "success",

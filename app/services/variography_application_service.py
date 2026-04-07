@@ -110,6 +110,8 @@ class VariographyApplicationService:
 
     def compute(self, params: dict[str, object]) -> VariographyComputeResponse:
         request = self.build_request(params)
+        analysis_mode = str(params.get("analysis_mode", "exploratory")).strip().lower()
+        formal_mode = analysis_mode == "formal"
         self.session.selected_target = request.target_col
         self.session.selected_domain_filter = request.context.active_domain_filter
         self.session.selected_support = request.context.support
@@ -126,15 +128,73 @@ class VariographyApplicationService:
         self.session.estimator = request.estimator
         blockers = self._validate_request(request)
         warnings: list[VariographyIssue] = []
+        exploratory_mode = False
+        support_mode = str(self.host_service.workflow_state.support_mode or "none")
+        support_confirmed = bool(self.host_service.workflow_state.support_confirmed)
         bypass_active = bool(self.host_service.workflow_state.allow_variography_without_domain) and not bool(request.context.active_domain_filter.strip())
-        if bypass_active:
-            warnings.append(
-                VariographyIssue(
-                    "DOMAIN_BYPASS_ACTIVE",
-                    "Variografía ejecutada sin dominio confirmado (modo excepcional).",
-                    "warning",
+        bypass_reason = str(self.host_service.workflow_state.variography_domain_bypass_reason or "").strip()
+        if not support_confirmed:
+            if support_mode == "fallback_approx":
+                exploratory_mode = True
+                warnings.append(
+                    VariographyIssue(
+                        "SUPPORT_APPROXIMATE_FALLBACK",
+                        "Soporte aproximado activo: resultado variográfico restringido a uso exploratorio.",
+                        "warning",
+                    )
                 )
-            )
+            elif formal_mode:
+                blockers.append(
+                    VariographyIssue(
+                        "MISSING_SUPPORT_CONFIRMATION",
+                        "Debe confirmar soporte/compositado real antes de variografía formal.",
+                        "blocker",
+                    )
+                )
+            else:
+                exploratory_mode = True
+                warnings.append(
+                    VariographyIssue(
+                        "MISSING_SUPPORT_CONFIRMATION",
+                        "Sin soporte confirmado real: cálculo restringido a exploración.",
+                        "warning",
+                    )
+                )
+        if not request.context.active_domain_filter.strip():
+            if bypass_active:
+                exploratory_mode = True
+                if not bypass_reason:
+                    blockers.append(
+                        VariographyIssue(
+                            "INVALID_DOMAIN_BYPASS_CONFIGURATION",
+                            "Bypass de dominio activo sin motivo auditado. Reconfigura la excepción.",
+                            "blocker",
+                        )
+                    )
+                warnings.append(
+                    VariographyIssue(
+                        "DOMAIN_BYPASS_ACTIVE",
+                        "Variografía ejecutada sin dominio confirmado (modo excepcional).",
+                        "warning",
+                    )
+                )
+            elif formal_mode:
+                blockers.append(
+                    VariographyIssue(
+                        "MISSING_DOMAIN_CONFIRMATION",
+                        "Debe confirmar dominio activo antes de variografía formal.",
+                        "blocker",
+                    )
+                )
+            else:
+                exploratory_mode = True
+                warnings.append(
+                    VariographyIssue(
+                        "MISSING_DOMAIN_CONFIRMATION",
+                        "Sin dominio confirmado: cálculo restringido a exploración.",
+                        "warning",
+                    )
+                )
         if request.direction.band_width < 0 or request.direction.band_height < 0:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
         if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
@@ -159,6 +219,21 @@ class VariographyApplicationService:
                 blockers=blockers,
             )
             self.session.mark_computed(response)
+            self.host_service.activity_log.log(
+                "variography_compute",
+                "warning",
+                response.message,
+                {
+                    "target": request.target_col,
+                    "domain_filter": request.context.active_domain_filter,
+                    "domain_bypass_active": bypass_active,
+                    "domain_bypass_reason": bypass_reason,
+                    "support_mode": support_mode,
+                    "exploratory_mode": exploratory_mode,
+                    "warning_count": len(warnings),
+                    "blocker_count": len(blockers),
+                },
+            )
             return response
 
         dataframe = self.host_service._get_filtered_dataframe()  # trusted internal source for active workflow filters
@@ -249,6 +324,17 @@ class VariographyApplicationService:
             blockers.append(VariographyIssue("INSUFFICIENT_LAG_COVERAGE", "Cobertura de pares insuficiente para interpretar el variograma.", "blocker"))
 
         model_payload = self._build_model_payload(params, raw.lag_centers, raw.gamma_values, pair_counts, warnings, blockers)
+        if exploratory_mode:
+            reliability = model_payload.get("reliability", {}) if isinstance(model_payload, dict) else {}
+            if isinstance(reliability, dict):
+                reliability["classification"] = "EXPLORATORY_ONLY"
+                flags = list(reliability.get("flags", []))
+                flags.append("EXPLORATORY_GATE")
+                reliability["flags"] = sorted(set(flags))
+                notes = list(reliability.get("notes", []))
+                notes.append("Uso restringido a exploración por prerequisitos no formales.")
+                reliability["notes"] = notes
+                model_payload["reliability"] = reliability
         model_classification = (
             model_payload.get("reliability", {}).get("classification", "")
             if isinstance(model_payload.get("reliability", {}), dict)
@@ -286,6 +372,7 @@ class VariographyApplicationService:
         )
         dominant_blocker = blockers[0].code if blockers else ""
         dominant_warning = warnings[0].code if warnings else ""
+        exportable = bool((not blockers) and (not exploratory_mode) and model_classification not in {"BLOCKED", "EXPLORATORY_ONLY", "LOW_RELIABILITY"})
         metadata = {
             "computation_hash": self._compute_hash(request),
             "direction_applied": True,
@@ -307,6 +394,13 @@ class VariographyApplicationService:
                 "lag_tolerance": float(request.lag.lag_tolerance),
             },
             "domain_bypass_active": bypass_active,
+            "domain_bypass_reason": bypass_reason,
+            "support_mode": support_mode,
+            "exploratory_mode": exploratory_mode,
+            "exportability": {
+                "status": "exportable" if exportable else ("exploratory_only" if exploratory_mode else "not_exportable"),
+                "reason_codes": sorted({*(item.code for item in warnings), *(item.code for item in blockers)}),
+            },
             "model": model_payload,
             "estimation_contract": {
                 "schema": "variogram_model.v1",
@@ -351,6 +445,10 @@ class VariographyApplicationService:
                 "dip": request.direction.dip,
                 "domain_filter": request.context.active_domain_filter,
                 "domain_bypass_active": bypass_active,
+                "domain_bypass_reason": bypass_reason,
+                "support_mode": support_mode,
+                "exploratory_mode": exploratory_mode,
+                "exportable": exportable,
                 "max_pairs": max(pair_counts, default=0),
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),

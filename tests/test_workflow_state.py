@@ -79,7 +79,7 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertFalse(readiness["stages"]["spatial"]["ready"])
             self.assertIn("missing_spatial_columns", readiness["stages"]["spatial"]["blocking_reasons"])
 
-    def test_workflow_readiness_domains_stage_is_blocked_when_disabled(self) -> None:
+    def test_workflow_readiness_domains_stage_is_blocked_without_support_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = GeostatService(adapter=GeostatSpyAdapter())
             csv_path = Path(tmp_dir) / "workflow_domains_missing.csv"
@@ -89,9 +89,9 @@ class WorkflowStateTests(unittest.TestCase):
 
             readiness = service.get_workflow_readiness()
             self.assertFalse(readiness["stages"]["domains"]["ready"])
-            self.assertIn("domains_module_disabled", readiness["stages"]["domains"]["blocking_reasons"])
+            self.assertIn("missing_support_confirmation", readiness["stages"]["domains"]["blocking_reasons"])
 
-    def test_workflow_readiness_core_stages_ready_except_disabled_domains(self) -> None:
+    def test_workflow_readiness_variography_blocked_without_domain_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = GeostatService(adapter=GeostatSpyAdapter())
             csv_path = Path(tmp_dir) / "workflow_ready.csv"
@@ -105,7 +105,8 @@ class WorkflowStateTests(unittest.TestCase):
             self.assertTrue(readiness["stages"]["cutoffs"]["ready"])
             self.assertTrue(readiness["stages"]["spatial"]["ready"])
             self.assertFalse(readiness["stages"]["domains"]["ready"])
-            self.assertTrue(readiness["stages"]["variography"]["ready"])
+            self.assertFalse(readiness["stages"]["variography"]["ready"])
+            self.assertIn("missing_domain_confirmation", readiness["stages"]["variography"]["blocking_reasons"])
 
     def test_workflow_readiness_exposes_current_step(self) -> None:
         service = GeostatService(adapter=GeostatSpyAdapter())

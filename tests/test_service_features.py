@@ -542,7 +542,7 @@ class ServiceFeatureTests(unittest.TestCase):
 
             context = self.service.get_analysis_context_snapshot()
             self.assertEqual(context["active_domain_filter"], "")
-            self.assertEqual(context["active_domain_column"], "")
+            self.assertEqual(context["active_domain_column"], "dom")
 
     def test_summary_cards_target_matches_context_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -776,7 +776,7 @@ class ServiceFeatureTests(unittest.TestCase):
             self.assertFalse(self.service.configure_domains(["dom", "zone"], ["dom", "zone"]).success)
             result = self.service.set_active_domain("a")
             self.assertTrue(result.success)
-            self.assertEqual(self.service.workflow_state.active_domain_filter, "")
+            self.assertEqual(self.service.workflow_state.active_domain_filter, "a")
 
 
 if __name__ == "__main__":

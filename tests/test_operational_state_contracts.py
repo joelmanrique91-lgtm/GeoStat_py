@@ -46,7 +46,7 @@ class OperationalStateContractsTests(unittest.TestCase):
         self.assertIn("missing_support_confirmation", readiness.stage("domains").blocking_reasons)
 
         domain_state = service.get_domain_state_typed()
-        self.assertTrue(domain_state.domains_ready)
+        self.assertFalse(domain_state.domains_ready)
 
     def test_domain_state_propagates_active_domain_filter(self) -> None:
         service = GeostatService(adapter=GeostatSpyAdapter())
