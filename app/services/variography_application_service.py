@@ -236,7 +236,7 @@ class VariographyApplicationService:
             )
         except Exception as exc:
             message = str(exc)
-            blocker_code = "NO_PAIRS_IN_RANGE" if "No se encontraron pares dentro de max_distance" in message else "COMPUTE_FAILED"
+            blocker_code = "NO_PAIRS_IN_RANGE" if ("No se encontraron pares dentro de max_distance" in message or "No hay pares para el variograma" in message) else "COMPUTE_FAILED"
             response = VariographyComputeResponse(
                 schema_version=SCHEMA_VERSION,
                 ok=False,
@@ -322,6 +322,8 @@ class VariographyApplicationService:
             "estimator": request.estimator,
             "effective_rows": effective_rows,
             "total_pairs": int(sum(pair_counts)),
+            "backend_used": str(getattr(raw, "backend_used", "numpy")),
+            "backend_warnings": list(getattr(raw, "backend_warnings", []) or []),
             "dominant_blocker": dominant_blocker,
             "dominant_warning": dominant_warning,
             "spatial_extent": float(estimated_defaults.get("spatial_extent", 0.0)),
@@ -392,6 +394,10 @@ class VariographyApplicationService:
                 "max_pairs": max(pair_counts, default=0),
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),
+                "backend_used": str(getattr(raw, "backend_used", "numpy")),
+                "backend_warnings": list(getattr(raw, "backend_warnings", []) or []),
+                "warning_codes": sorted({item.code for item in warnings}),
+                "blocker_codes": sorted({item.code for item in blockers}),
             },
         )
         logger.info(

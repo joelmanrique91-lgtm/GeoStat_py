@@ -960,8 +960,8 @@ class GeostatService:
             mode = "fallback_approx"
             details = "Fallback aproximado por orden Z y tamaño de grupo (sin intervalos reales)."
             warning = "No se detectaron columnas de intervalo; el soporte es aproximado."
-        df[out_col] = df[target_column]
-        df.loc[work.index, out_col] = composite_values
+        df[out_col] = _to_numeric(df[target_column]).astype(float)
+        df.loc[work.index, out_col] = [float(value) for value in composite_values]
 
         if out_col not in self.current_dataset.columns:
             self.current_dataset.columns.append(out_col)
