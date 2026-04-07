@@ -12,9 +12,17 @@ class HomePanelDecouplingTests(unittest.TestCase):
         self.assertIn("self.workflow_actions_controller.confirm_domain_assignment", content)
         self.assertIn("self.workflow_actions_controller.apply_domains", content)
         self.assertIn("self.workflow_actions_controller.toggle_variography_bypass", content)
+        self.assertIn("self.workflow_actions_controller.apply_manual_cutoff", content)
+        self.assertIn("self.workflow_actions_controller.apply_dynamic_cutoff", content)
+        self.assertIn("self.workflow_actions_controller.apply_support_composite", content)
+        self.assertIn("self.workflow_actions_controller.build_cutoff_preview_payload", content)
         self.assertNotIn("self.service.set_variable_config(", content)
         self.assertNotIn("self.service.apply_domain_definition(", content)
         self.assertNotIn("self.service.confirm_domain_assignment(", content)
+        self.assertNotIn("self.service.apply_cutoffs(", content)
+        self.assertNotIn("self.service.apply_dynamic_cutoff(", content)
+        self.assertNotIn("self.service.apply_basic_compositing(", content)
+        self.assertNotIn("self.service.prepare_dynamic_cutoff_preview(", content)
 
 
 if __name__ == "__main__":

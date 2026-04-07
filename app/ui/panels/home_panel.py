@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from tkinter import filedialog, messagebox
 import threading
 
@@ -2200,7 +2199,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _on_apply_cutoffs(self) -> None:
         self._trace_ui_action("aplicar_cutoffs_manuales", refresh_type="none")
-        result = self.service.apply_cutoffs(
+        result = self.workflow_actions_controller.apply_manual_cutoff(
             enabled=bool(self.cutoff_enabled_var.get()),
             target_column=self.cutoff_target_var.get(),
             limits_text=self.cutoff_limits_var.get(),
@@ -2221,60 +2220,13 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
         self._schedule_cutoff_preview()
 
-    @staticmethod
-    def _compute_series_p90(values: list[float]) -> float | None:
-        if not values:
-            return None
-        sorted_values = sorted(float(v) for v in values)
-        rank = max(0, min(len(sorted_values) - 1, int(round(0.9 * (len(sorted_values) - 1)))))
-        return float(sorted_values[rank])
-
-    @staticmethod
-    def _compute_series_cv(values: list[float]) -> float | None:
-        if not values:
-            return None
-        mean_val = sum(values) / len(values)
-        if abs(mean_val) < 1e-12:
-            return None
-        variance = sum((v - mean_val) ** 2 for v in values) / len(values)
-        std_dev = math.sqrt(variance)
-        return float(std_dev / abs(mean_val))
-
-    @staticmethod
-    def _format_delta(current: float | None, base: float | None, *, percent: bool = False) -> str:
-        if current is None or base is None:
-            return "-"
-        delta = current - base
-        if percent:
-            return f"{delta * 100:+.2f}%"
-        return f"{delta:+.4g}"
-
-    def _update_cutoff_impact_metrics(self, preview: dict[str, object]) -> None:
-        original = [float(v) for v in preview.get("values", [])]
-        capped = [float(v) for v in preview.get("capped_values", [])]
-        affected_pct = float(preview.get("affected_pct", 0.0))
-        max_original = float(preview.get("max_original", 0.0))
-        max_truncated = float(preview.get("max_truncated", 0.0))
-
-        mean_original = (sum(original) / len(original)) if original else None
-        mean_capped = (sum(capped) / len(capped)) if capped else None
-        p90_original = self._compute_series_p90(original)
-        p90_capped = self._compute_series_p90(capped)
-        cv_original = self._compute_series_cv(original)
-        cv_capped = self._compute_series_cv(capped)
-
-        self.cutoff_metric_affected_var.set(f"% datos afectados: {affected_pct:.2f}%")
-        self.cutoff_metric_delta_cv_var.set(f"Δ CV: {self._format_delta(cv_capped, cv_original, percent=True)}")
-        self.cutoff_metric_delta_mean_var.set(f"Δ media: {self._format_delta(mean_capped, mean_original)}")
-        self.cutoff_metric_delta_p90_var.set(f"Δ P90: {self._format_delta(p90_capped, p90_original)}")
-        self.cutoff_metric_max_var.set(f"Máximo antes/después: {max_original:.6g} → {max_truncated:.6g}")
-
-        if affected_pct > 20.0:
-            self.cutoff_decision_message_var.set("El ajuste afecta una proporción alta de muestras; revisar antes de aplicar.")
-        elif (cv_original is not None and cv_capped is not None and cv_capped < cv_original) and affected_pct <= 20.0:
-            self.cutoff_decision_message_var.set("El ajuste propuesto mejora estabilidad con intervención acotada.")
-        else:
-            self.cutoff_decision_message_var.set("El ajuste reduce la cola extrema con impacto moderado sobre la distribución.")
+    def _apply_cutoff_preview_metrics(self, metrics: dict[str, object]) -> None:
+        self.cutoff_metric_affected_var.set(f"% datos afectados: {metrics.get('affected_pct', '-')}")
+        self.cutoff_metric_delta_cv_var.set(f"Δ CV: {metrics.get('delta_cv', '-')}")
+        self.cutoff_metric_delta_mean_var.set(f"Δ media: {metrics.get('delta_mean', '-')}")
+        self.cutoff_metric_delta_p90_var.set(f"Δ P90: {metrics.get('delta_p90', '-')}")
+        self.cutoff_metric_max_var.set(f"Máximo antes/después: {metrics.get('max_before_after', '-')}")
+        self.cutoff_decision_message_var.set(str(metrics.get("decision_message", "Evalúa el impacto antes de aplicar el ajuste.")))
 
     def _refresh_cutoff_preview(self) -> None:
         self._cutoff_preview_after_id = None
@@ -2310,7 +2262,11 @@ class HomePanel(ctk.CTkFrame):
 
         mode = "absolute" if self.dynamic_mode_var.get() == "Valor absoluto" else "percentile"
         try:
-            preview = self.service.prepare_dynamic_cutoff_preview(target, mode, float(self.dynamic_slider_var.get()))
+            payload = self.workflow_actions_controller.build_cutoff_preview_payload(
+                target_column=target,
+                mode=mode,
+                slider_percent=float(self.dynamic_slider_var.get()),
+            )
         except Exception as exc:
             self.dynamic_cutoff_label_var.set("Umbral actual: -")
             self.dynamic_impact_label_var.set("Impacto: no disponible")
@@ -2321,6 +2277,7 @@ class HomePanel(ctk.CTkFrame):
             self.cutoff_metric_max_var.set("Máximo antes/después: -")
             ctk.CTkLabel(parent, text=f"No se pudo generar preview: {exc}", text_color=TXT_MAIN).pack(anchor="w", padx=8, pady=8)
             return
+        preview = payload["preview"] if isinstance(payload, dict) else {}
 
         cutoff = float(preview["cutoff_value"])
         self.dynamic_percentile_label_var.set(f"Percentil: P{float(self.dynamic_slider_var.get()):.1f}")
@@ -2328,7 +2285,7 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_impact_label_var.set(
             f"{preview['affected_pct']:.2f}% afectado · {preview['affected_count']} truncadas · Máx {preview['max_original']:.6g} → {preview['max_truncated']:.6g}"
         )
-        self._update_cutoff_impact_metrics(preview)
+        self._apply_cutoff_preview_metrics(payload.get("metrics", {}) if isinstance(payload, dict) else {})
 
         try:
             chart = DashboardGrid(parent, 2, 2)
@@ -2406,7 +2363,7 @@ class HomePanel(ctk.CTkFrame):
     def _on_apply_dynamic_cutoff(self) -> None:
         self._trace_ui_action("confirmar_capping", refresh_type="none")
         mode = "absolute" if self.dynamic_mode_var.get() == "Valor absoluto" else "percentile"
-        result = self.service.apply_dynamic_cutoff(
+        result = self.workflow_actions_controller.apply_dynamic_cutoff(
             enabled=bool(self.dynamic_cutoff_enabled_var.get()),
             target_column=self.cutoff_target_var.get() or self.target_var.get(),
             mode=mode,
@@ -2415,7 +2372,8 @@ class HomePanel(ctk.CTkFrame):
             keep_category_column=bool(self.dynamic_keep_class_var.get()),
         )
         self.status_text.set(result.message)
-        self._append_activity(f"{result.message} (cutoff={result.cutoff_value:.6g})" if result.success else result.message)
+        cutoff_value = float(result.payload.get("cutoff_value", 0.0))
+        self._append_activity(f"{result.message} (cutoff={cutoff_value:.6g})" if result.success else result.message)
         if result.success:
             self._invalidate_stage_cache()
             self.eda_use_capping_var.set(bool(self.service.has_confirmed_dynamic_capping()))
@@ -2543,7 +2501,7 @@ class HomePanel(ctk.CTkFrame):
         target = self.cutoff_target_var.get() or self.target_var.get()
         output = self.support_output_var.get().strip() or None
         length = float(self.support_composite_length_var.get())
-        result = self.service.apply_basic_compositing(
+        result = self.workflow_actions_controller.apply_support_composite(
             composite_length=length,
             target_column=target,
             output_column=output,
@@ -2551,7 +2509,7 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
-            support = self.service.get_support_state()
+            support = result.payload.get("support_state", {})
             mode_label = "Real por intervalos" if str(support.get("mode")) == "interval_real" else ("Fallback aproximado" if str(support.get("mode")) == "fallback_approx" else "Sin compositado")
             warning = str(support.get("warning") or "")
             self.support_summary_var.set(
