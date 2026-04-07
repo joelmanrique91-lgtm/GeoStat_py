@@ -48,4 +48,7 @@ class WorkflowStateModel:
     support_pre_count: int = 0
     support_post_count: int = 0
     support_confirmed: bool = False
+    support_mode: str = "none"
+    support_details: str = ""
+    support_warning: str = ""
     allow_variography_without_domain: bool = False

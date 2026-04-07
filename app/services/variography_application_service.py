@@ -126,6 +126,15 @@ class VariographyApplicationService:
         self.session.estimator = request.estimator
         blockers = self._validate_request(request)
         warnings: list[VariographyIssue] = []
+        bypass_active = bool(self.host_service.workflow_state.allow_variography_without_domain) and not bool(request.context.active_domain_filter.strip())
+        if bypass_active:
+            warnings.append(
+                VariographyIssue(
+                    "DOMAIN_BYPASS_ACTIVE",
+                    "Variografía ejecutada sin dominio confirmado (modo excepcional).",
+                    "warning",
+                )
+            )
         if request.direction.band_width < 0 or request.direction.band_height < 0:
             blockers.append(VariographyIssue("INVALID_BANDWIDTH", "Band width/band height no pueden ser negativos.", "blocker"))
         if request.direction.ang_tol_h >= 85 or request.direction.ang_tol_v >= 85:
@@ -297,6 +306,7 @@ class VariographyApplicationService:
                 "max_distance": float(request.lag.max_distance),
                 "lag_tolerance": float(request.lag.lag_tolerance),
             },
+            "domain_bypass_active": bypass_active,
             "model": model_payload,
             "estimation_contract": {
                 "schema": "variogram_model.v1",
@@ -339,6 +349,8 @@ class VariographyApplicationService:
                 "lag_tolerance": request.lag.lag_tolerance,
                 "azimuth": request.direction.azimuth,
                 "dip": request.direction.dip,
+                "domain_filter": request.context.active_domain_filter,
+                "domain_bypass_active": bypass_active,
                 "max_pairs": max(pair_counts, default=0),
                 "warning_count": len(warnings),
                 "blocker_count": len(blockers),

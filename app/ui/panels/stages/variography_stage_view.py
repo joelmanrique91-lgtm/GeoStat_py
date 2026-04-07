@@ -123,6 +123,9 @@ class VariographyStageView:
         self._plot_host = ctk.CTkFrame(results, fg_color=BG_CARD)
         self._plot_host.grid(row=3, column=0, sticky="nsew")
         self._render_empty_plot()
+        bypass_active = bool(self.controller.service.workflow_state.allow_variography_without_domain)
+        if bypass_active:
+            self.usage_warning_var.set("⚠ Excepción técnica activa: variografía sin dominio confirmado.")
         if self._pending_async_error:
             self._render_plot_feedback(
                 title="Error de actualización UI",
@@ -633,7 +636,8 @@ class VariographyStageView:
         metadata = result.get("metadata", {}) if isinstance(result.get("metadata", {}), dict) else {}
         model = metadata.get("model", {}) if isinstance(metadata.get("model", {}), dict) else {}
         direction_applied = bool(metadata.get("direction_applied", False))
-        text, status = self._build_leapfrog_text(model, direction_applied=direction_applied, ok=ok)
+        domain_bypass_active = bool(metadata.get("domain_bypass_active", False))
+        text, status = self._build_leapfrog_text(model, direction_applied=direction_applied, ok=ok, domain_bypass_active=domain_bypass_active)
         self._set_leapfrog_output(text=text, status=status)
         current_status = str(self.status_var.get()).strip()
         if current_status:
@@ -641,7 +645,7 @@ class VariographyStageView:
         else:
             self.status_var.set(status)
 
-    def _build_leapfrog_text(self, model: dict[str, object], *, direction_applied: bool, ok: bool) -> tuple[str, str]:
+    def _build_leapfrog_text(self, model: dict[str, object], *, direction_applied: bool, ok: bool, domain_bypass_active: bool) -> tuple[str, str]:
         nugget_obj = model.get("nugget", {}) if isinstance(model.get("nugget", {}), dict) else {}
         nugget_val = self._as_float_or_none(nugget_obj.get("value"))
         sill_val = self._as_float_or_none(model.get("sill"))
@@ -690,6 +694,8 @@ class VariographyStageView:
             status = "Solo parámetros globales disponibles para Leapfrog (sin estructura activa)."
         else:
             status = "Salida Leapfrog pendiente: faltan nugget/sill del resultado variográfico."
+        if domain_bypass_active:
+            status = f"{status} ⚠ Generada bajo bypass sin dominio confirmado."
         return "\n".join(lines), status
 
     def _set_leapfrog_output(self, *, text: str, status: str) -> None:

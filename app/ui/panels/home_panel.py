@@ -662,10 +662,10 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "Soporte/Compositado + Outliers")
-        ctk.CTkLabel(section, text="A) Compositado básico preliminar", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkLabel(section, text="A) Compositado (real por intervalos o fallback aproximado)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
         ctk.CTkSlider(section, from_=1, to=10, variable=self.support_composite_length_var, number_of_steps=9).pack(fill="x", padx=6, pady=(0, 2))
         ctk.CTkEntry(section, textvariable=self.support_output_var, height=INPUT_HEIGHT, placeholder_text="Salida composite (ej: target_comp)").pack(fill="x", padx=6, pady=(0, 4))
-        ctk.CTkButton(section, text="Aplicar compositado básico", command=self._on_apply_support_composite, **self._button_style("primary")).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar compositado", command=self._on_apply_support_composite, **self._button_style("primary")).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkLabel(section, textvariable=self.support_summary_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=290, justify="left").pack(anchor="w", padx=6, pady=(0, 4))
         ctk.CTkFrame(section, height=1, fg_color=DIVIDER_SOFT).pack(fill="x", padx=6, pady=(2, 4))
         ctk.CTkLabel(section, text="B) Control de outliers/capping", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
@@ -1954,11 +1954,12 @@ class HomePanel(ctk.CTkFrame):
         else:
             capping_text = "Capping inactivo"
         support = self.service.get_support_state()
-        support_text = (
-            f"Soporte comp L{float(support['composite_length']):.1f}"
-            if bool(support.get("confirmed"))
-            else "Soporte no confirmado"
-        )
+        if bool(support.get("confirmed")):
+            mode = str(support.get("mode"))
+            mode_text = "real" if mode == "interval_real" else "fallback"
+            support_text = f"Soporte {mode_text} L{float(support['composite_length']):.1f}"
+        else:
+            support_text = "Soporte no confirmado"
         self.unified_context_var.set(_build_unified_context_text(state, f"{support_text} · {capping_text}"))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, key: str | None = None) -> None:
@@ -2535,8 +2536,11 @@ class HomePanel(ctk.CTkFrame):
         self._append_activity(result.message)
         if result.success:
             support = self.service.get_support_state()
+            mode_label = "Real por intervalos" if str(support.get("mode")) == "interval_real" else ("Fallback aproximado" if str(support.get("mode")) == "fallback_approx" else "Sin compositado")
+            warning = str(support.get("warning") or "")
             self.support_summary_var.set(
-                f"Compositado básico confirmado · L={support['composite_length']:.1f} · n {support['pre_count']}→{support['post_count']} · target={support['output_target']}"
+                f"Soporte: {mode_label} · L={support['composite_length']:.1f} · n {support['pre_count']}→{support['post_count']} · target={support['output_target']}"
+                + (f" · ⚠ {warning}" if warning else "")
             )
             self.cutoff_target_var.set(str(support["output_target"] or target))
             self._invalidate_stage_cache()
@@ -2662,8 +2666,11 @@ class HomePanel(ctk.CTkFrame):
         self._set_cutoff_kpi_visibility(cutoff_actual != "-")
         support = self.service.get_support_state()
         if bool(support.get("confirmed")):
+            mode_label = "real por intervalos" if str(support.get("mode")) == "interval_real" else "fallback aproximado"
+            warning = str(support.get("warning") or "")
             self.support_summary_var.set(
-                f"Compositado básico confirmado · L={float(support['composite_length']):.1f} · n {int(support['pre_count'])}→{int(support['post_count'])} · target={support['output_target']}"
+                f"Soporte {mode_label} · L={float(support['composite_length']):.1f} · n {int(support['pre_count'])}→{int(support['post_count'])} · target={support['output_target']}"
+                + (f" · ⚠ {warning}" if warning else "")
             )
 
     def _on_update_repo(self) -> None:

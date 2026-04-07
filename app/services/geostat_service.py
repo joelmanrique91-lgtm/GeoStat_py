@@ -140,6 +140,23 @@ def _normalize_identifier(value: str) -> str:
     return value.lower().replace("_", "").replace(" ", "")
 
 
+def _pick_interval_columns(columns: list[str]) -> tuple[str, str, str]:
+    normalized = {_normalize_identifier(col): col for col in columns}
+    from_candidates = ["from", "depthfrom", "zfrom", "inicio", "desde"]
+    to_candidates = ["to", "depthto", "zto", "fin", "hasta"]
+    length_candidates = ["length", "interval", "samplelength", "thickness", "espesor"]
+
+    def pick(candidates: list[str]) -> str:
+        for candidate in candidates:
+            c_norm = _normalize_identifier(candidate)
+            for key, original in normalized.items():
+                if key == c_norm or key.startswith(c_norm):
+                    return original
+        return ""
+
+    return pick(from_candidates), pick(to_candidates), pick(length_candidates)
+
+
 def _build_univariate_availability(target: str, valid_count: int, probability_min_samples: int = 3) -> dict[str, dict[str, object]]:
     histogram_available = valid_count > 0
     boxplot_available = valid_count > 0
@@ -388,6 +405,8 @@ class GeostatService:
             "domains": {str(k): list(v) for k, v in domains.items()},
         }
         self.workflow_state.domain_output_column = DOMAIN_ESTIMATION_COLUMN
+        if self.variable_config is not None:
+            self.variable_config.domain_column = DOMAIN_ESTIMATION_COLUMN
         self.workflow_state.active_domain = "Columna: domain_estimation"
         self.workflow_state.support_confirmed = bool(self.workflow_state.support_confirmed)
         self.activity_log.log(
@@ -396,6 +415,7 @@ class GeostatService:
             "Definición de dominios aplicada.",
             {"variable_base": variable_base, "domain_count": len(domains)},
         )
+        self.get_variography_session().mark_dirty()
         return CutoffResult(True, "Dominios aplicados al dataset.")
 
     def set_active_domain(self, domain_name: str | None) -> CutoffResult:
@@ -406,11 +426,12 @@ class GeostatService:
         if not active_domain_column:
             self.workflow_state.active_domain_filter = ""
             self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio ignorado: sin columna de dominio activa.", {})
-            return CutoffResult(True, "Filtro de dominio ignorado (módulo dominios deshabilitado).")
+            return CutoffResult(True, "Filtro de dominio ignorado (sin dominio efectivo configurado).")
         selected = str(domain_name or "").strip()
         if not selected or selected.lower() == "todos":
             self.workflow_state.active_domain_filter = ""
             self.workflow_state.allow_variography_without_domain = True
+            self.get_variography_session().mark_dirty()
             self.activity_log.log("domain_filter_applied", "info", "Filtro de dominio limpiado.", {"column": active_domain_column})
             return CutoffResult(True, "Filtro de dominio limpiado.")
         options = set(self.get_domain_estimation_values())
@@ -418,6 +439,7 @@ class GeostatService:
             return CutoffResult(False, f"Dominio no válido: '{selected}'.")
         self.workflow_state.active_domain_filter = selected
         self.workflow_state.allow_variography_without_domain = False
+        self.get_variography_session().mark_dirty()
         self.activity_log.log(
             "domain_filter_applied",
             "success",
@@ -498,6 +520,7 @@ class GeostatService:
             "Dominio confirmado para continuidad y variografía.",
             {"domain_column": active_domain_column, "domain_value": selected},
         )
+        self.get_variography_session().mark_dirty()
         return CutoffResult(True, f"Dominio confirmado: {selected}")
 
     def prepare_domain_statistics(self) -> dict[str, object]:
@@ -656,6 +679,9 @@ class GeostatService:
         self.workflow_state.support_pre_count = 0
         self.workflow_state.support_post_count = 0
         self.workflow_state.support_confirmed = False
+        self.workflow_state.support_mode = "none"
+        self.workflow_state.support_details = ""
+        self.workflow_state.support_warning = ""
 
     def get_support_state(self) -> dict[str, object]:
         return {
@@ -666,6 +692,9 @@ class GeostatService:
             "pre_count": int(self.workflow_state.support_pre_count),
             "post_count": int(self.workflow_state.support_post_count),
             "confirmed": bool(self.workflow_state.support_confirmed),
+            "mode": str(self.workflow_state.support_mode),
+            "details": str(self.workflow_state.support_details),
+            "warning": str(self.workflow_state.support_warning),
         }
 
     def apply_basic_compositing(self, *, composite_length: float, target_column: str, output_column: str | None = None) -> CutoffResult:
@@ -699,12 +728,62 @@ class GeostatService:
             work["_hole_group"] = work[hole_col].astype(str).fillna("NA")
         else:
             work["_hole_group"] = "__global__"
-        work = work.sort_values(["_hole_group", "_z_num"], kind="mergesort")
-        group_size = max(1, int(round(float(composite_length))))
-        work["_composite_group"] = work.groupby("_hole_group").cumcount() // group_size
-        composite_values = work.groupby(["_hole_group", "_composite_group"])["_target_num"].transform("mean")
+        from_col, to_col, length_col = _pick_interval_columns(list(df.columns))
+        real_support_used = bool(from_col and (to_col or length_col))
+        discarded = 0
+        if real_support_used:
+            from_num = _to_numeric(work[from_col])
+            if to_col:
+                to_num = _to_numeric(work[to_col])
+                sample_len = (to_num - from_num).abs()
+            else:
+                sample_len = _to_numeric(work[length_col]).abs()
+                to_num = from_num + sample_len
+            good = from_num.notna() & to_num.notna() & sample_len.notna() & (sample_len > 0)
+            discarded = int((~good).sum())
+            work = work.loc[good, :].copy()
+            from_num = from_num.loc[good].astype(float)
+            to_num = to_num.loc[good].astype(float)
+            sample_len = sample_len.loc[good].astype(float)
+            work["_depth_from"] = from_num.values
+            work["_depth_to"] = to_num.values
+            work["_sample_len"] = sample_len.values
+            if work.empty:
+                return CutoffResult(False, "No hay intervalos válidos para compositado real.")
+            work = work.sort_values(["_hole_group", "_depth_from", "_depth_to"], kind="mergesort")
+            comp_ids: list[tuple[str, int]] = []
+            weighted_values: list[float] = []
+            for hole, hole_df in work.groupby("_hole_group", sort=False):
+                start_depth = float(hole_df["_depth_from"].min())
+                comp_index = ((hole_df["_depth_from"] - start_depth) / float(composite_length)).astype(int)
+                for idx in comp_index.tolist():
+                    comp_ids.append((str(hole), int(idx)))
+                grouped = hole_df.assign(_comp_idx=comp_index).groupby("_comp_idx", sort=True)
+                weighted_map: dict[int, float] = {}
+                for comp_idx, block in grouped:
+                    w = block["_sample_len"].astype(float)
+                    val = block["_target_num"].astype(float)
+                    weight_sum = float(w.sum())
+                    weighted_map[int(comp_idx)] = float((val * w).sum() / weight_sum) if weight_sum > 0 else float(val.mean())
+                weighted_values.extend([weighted_map[int(idx)] for idx in comp_index.tolist()])
+            work["_composite_group"] = [f"{hole}:{idx}" for hole, idx in comp_ids]
+            composite_values = weighted_values
+            mode = "interval_real"
+            details = (
+                f"Compositado por intervalos ({from_col} + {to_col or length_col}), "
+                f"ponderado por longitud real."
+            )
+            warning = "" if discarded == 0 else f"Se descartaron {discarded} muestras sin longitud válida."
+        else:
+            work = work.sort_values(["_hole_group", "_z_num"], kind="mergesort")
+            group_size = max(1, int(round(float(composite_length))))
+            work["_composite_group"] = work.groupby("_hole_group").cumcount() // group_size
+            composite_values = work.groupby(["_hole_group", "_composite_group"])["_target_num"].transform("mean").tolist()
+            mode = "fallback_approx"
+            details = "Fallback aproximado por orden Z y tamaño de grupo (sin intervalos reales)."
+            warning = "No se detectaron columnas de intervalo; el soporte es aproximado."
         df[out_col] = df[target_column]
-        df.loc[work.index, out_col] = composite_values.values
+        df.loc[work.index, out_col] = composite_values
 
         if out_col not in self.current_dataset.columns:
             self.current_dataset.columns.append(out_col)
@@ -716,6 +795,9 @@ class GeostatService:
         self.workflow_state.support_pre_count = int(len(work))
         self.workflow_state.support_post_count = int(work[["_hole_group", "_composite_group"]].drop_duplicates().shape[0])
         self.workflow_state.support_confirmed = True
+        self.workflow_state.support_mode = mode
+        self.workflow_state.support_details = details
+        self.workflow_state.support_warning = warning
         self.workflow_state.effective_target_column = out_col
         self.activity_log.log(
             "support_composite_applied",
@@ -727,9 +809,14 @@ class GeostatService:
                 "output_target": out_col,
                 "samples_before": self.workflow_state.support_pre_count,
                 "samples_after_groups": self.workflow_state.support_post_count,
+                "support_mode": mode,
+                "support_details": details,
+                "support_warning": warning,
+                "discarded_samples": discarded,
             },
         )
-        return CutoffResult(True, f"Compositado básico aplicado. Target efectivo: {out_col}")
+        label = "Compositado real por intervalos aplicado." if mode == "interval_real" else "Compositado fallback aproximado aplicado."
+        return CutoffResult(True, f"{label} Target efectivo: {out_col}")
 
     def _get_effective_target_column(self) -> str:
         """Resolve effective target with legacy precedence.
