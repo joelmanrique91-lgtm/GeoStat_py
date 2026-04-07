@@ -41,3 +41,14 @@ class WorkflowStateModel:
     domain_filter_columns: dict[str, str] = field(default_factory=lambda: {"lithology": "", "alteration": "", "mine": ""})
     domain_assignment_history: list[dict[str, object]] = field(default_factory=list)
     domain_assignment_sequence: int = 0
+    support_composite_enabled: bool = False
+    support_composite_length: float = 0.0
+    support_source_target_column: str = ""
+    support_output_target_column: str = ""
+    support_pre_count: int = 0
+    support_post_count: int = 0
+    support_confirmed: bool = False
+    support_mode: str = "none"
+    support_details: str = ""
+    support_warning: str = ""
+    allow_variography_without_domain: bool = False

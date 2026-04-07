@@ -9,7 +9,6 @@ import threading
 import customtkinter as ctk
 
 from app.services.geostat_service import GeostatService
-from app.services.workflow_contracts import DOMAINS_MODULE_DISABLED_MESSAGE
 from app.models.operational_state import GeostatOperationalState, WorkflowReadinessState
 from app.ui.controllers import SpatialViewerController, VariographyController
 from app.ui.panels.dashboard_grid import DashboardGrid
@@ -130,7 +129,7 @@ STEP_TO_READINESS_KEY = {
     "Variografía": "variography",
 }
 STEP_DISPLAY_NAMES = {
-    "Cutoffs": "Control de Outliers",
+    "Cutoffs": "Soporte/Compositado",
 }
 
 STAGE_DECISION_NARRATIVE: dict[str, dict[str, str]] = {
@@ -147,10 +146,10 @@ STAGE_DECISION_NARRATIVE: dict[str, dict[str, str]] = {
         "next_action": "Si CV/sesgo son críticos, evaluar capping con trazabilidad de impacto.",
     },
     "Cutoffs": {
-        "title": "Dominios y soporte",
-        "subtitle": "¿El soporte compositado y el capping preservan señal útil sin distorsión excesiva?",
-        "interpretation": "Un soporte inconsistente sesga continuidad y genera decisiones no comparables entre dominios.",
-        "next_action": "Comparar antes/después y confirmar umbral operativo solo con evidencia cuantificada.",
+        "title": "Soporte/Compositado y control de outliers",
+        "subtitle": "¿El compositado preliminar y el capping preservan señal útil sin distorsión excesiva?",
+        "interpretation": "Separar soporte y outliers mejora trazabilidad y evita mezclar decisiones geoestadísticas distintas.",
+        "next_action": "Confirmar compositado preliminar y luego calibrar capping con evidencia cuantificada.",
     },
     "Espacial": {
         "title": "Contexto espacial y continuidad exploratoria",
@@ -159,10 +158,10 @@ STAGE_DECISION_NARRATIVE: dict[str, dict[str, str]] = {
         "next_action": "Usar perfiles y filtros para preparar la etapa hero de continuidad y variografía.",
     },
     "Dominios": {
-        "title": "Estimación (precondiciones)",
-        "subtitle": "¿Qué dominio activo respalda una estimación técnicamente consistente?",
-        "interpretation": "Si dominios no están habilitados, se debe explicitar el bloqueo y su impacto en la decisión.",
-        "next_action": "Resolver configuración de dominios o continuar con filtro global documentado.",
+        "title": "Dominios estacionarios",
+        "subtitle": "¿Qué dominio activo respalda continuidad y variografía defendibles?",
+        "interpretation": "Dominios estacionarios son prerequisito para variografía y decisiones de estimación consistentes.",
+        "next_action": "Aplicar definición, confirmar dominio activo y documentar excepción si se trabaja sin dominio.",
     },
     "Variografía": {
         "title": "Continuidad y variografía",
@@ -176,9 +175,9 @@ def _build_workflow_stage_label(step_name: str, active_step: str, readiness: Wor
     labels = {
         "Datos": "01 Inicio",
         "EDA": "02 QA/QC",
-        "Cutoffs": "03 Soporte",
-        "Espacial": "04 Espacial",
-        "Dominios": "05 Dominios",
+        "Cutoffs": "03 Soporte/Comp",
+        "Dominios": "04 Dominios",
+        "Espacial": "05 Espacial",
         "Variografía": "06 Variografía",
     }
     stage_key = STEP_TO_READINESS_KEY.get(step_name, "")
@@ -213,23 +212,11 @@ def _build_active_step_hint(step_name: str, state: GeostatOperationalState) -> s
 def _build_domains_blocked_payload(state: GeostatOperationalState) -> tuple[str, str, str]:
     readiness_stage = state.readiness.stage("domains")
     blocking = list(readiness_stage.blocking_reasons)
-    if "domains_module_disabled" in blocking:
-        if not state.readiness.has_dataset:
-            return (
-                "Etapa bloqueada",
-                "El módulo de Dominios está deshabilitado en esta versión y no hay dataset activo.",
-                "Cargar datos y confirmar configuración base en la etapa Datos.",
-            )
-        if not state.readiness.has_variable_config:
-            return (
-                "Etapa bloqueada",
-                "El módulo de Dominios está deshabilitado y la configuración de variables no está completa.",
-                "Confirmar X/Y/Z/target en la etapa Datos para mantener trazabilidad del flujo.",
-            )
+    if "missing_support_confirmation" in blocking:
         return (
             "Etapa bloqueada",
-            "El módulo de Dominios está deshabilitado temporalmente en esta versión.",
-            "Continuar con Espacial/Variografía y usar filtro de dominio activo cuando aplique.",
+            "Dominios requiere confirmar soporte/compositado preliminar en la etapa Soporte/Compositado.",
+            "Aplicar compositado básico y volver a Dominios.",
         )
     hint = readiness_stage.hint or "Dominios no disponible con el estado actual."
     return ("Etapa bloqueada", hint, "Revisar datos y configuración para habilitar Dominios.")
@@ -237,13 +224,14 @@ def _build_domains_blocked_payload(state: GeostatOperationalState) -> tuple[str,
 
 def _build_context_chip_texts(state: GeostatOperationalState) -> dict[str, str]:
     resolved_target = str(state.analysis.resolved_target_column or "No definido")
+    base_target = str(state.analysis.base_target_column or "No definido")
     domain_col = str(state.analysis.active_domain_column or "No definido")
     domain_filter = str(state.analysis.active_domain_filter or "Todos")
     blocked = [name for name, stage in state.readiness.stages.items() if not bool(stage.ready)]
     status = "Listo" if not blocked else f"Bloqueos: {len(blocked)}"
     return {
         "dataset": f"Dataset: {state.analysis.dataset_name}",
-        "target": f"Target activo: {resolved_target}",
+        "target": f"Target base/activo: {base_target} → {resolved_target}",
         "domain": f"Dominio/filtro: {domain_col} · {domain_filter}",
         "status": f"Workflow: {status}",
     }
@@ -306,6 +294,9 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_slider_var = ctk.DoubleVar(value=95.0)
         self.dynamic_output_var = ctk.StringVar(value="")
         self.dynamic_keep_class_var = ctk.BooleanVar(value=True)
+        self.support_composite_length_var = ctk.DoubleVar(value=2.0)
+        self.support_output_var = ctk.StringVar(value="")
+        self.support_summary_var = ctk.StringVar(value="Soporte preliminar no confirmado.")
         self.dynamic_percentile_label_var = ctk.StringVar(value="Percentil: P95.0")
         self.dynamic_cutoff_label_var = ctk.StringVar(value="Umbral actual: -")
         self.dynamic_impact_label_var = ctk.StringVar(value="Impacto: -")
@@ -346,6 +337,7 @@ class HomePanel(ctk.CTkFrame):
         self.domain_records_var = ctk.StringVar(value="Selecciona una burbuja para visualizar resumen analítico e índices de registros.")
         self.domain_preview_var = ctk.StringVar(value="Previsualización: sin filtros activos.")
         self.domain_history_var = ctk.StringVar(value="Sin dominios confirmados.")
+        self.allow_variography_without_domain_var = ctk.BooleanVar(value=False)
 
         self.log_visible = False
         self.controls_collapsed = False
@@ -522,12 +514,12 @@ class HomePanel(ctk.CTkFrame):
         labels = {
             "Datos": "01 Inicio",
             "EDA": "02 QA/QC",
-            "Cutoffs": "03 Soporte",
-            "Espacial": "04 Espacial",
-            "Dominios": "05 Dominios",
+            "Cutoffs": "03 Soporte/Comp",
+            "Dominios": "04 Dominios",
+            "Espacial": "05 Espacial",
             "Variografía": "06 Variografía",
         }
-        for step in ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]:
+        for step in ["Datos", "EDA", "Cutoffs", "Dominios", "Espacial", "Variografía"]:
             btn = ctk.CTkButton(
                 frame,
                 text=labels[step],
@@ -670,8 +662,14 @@ class HomePanel(ctk.CTkFrame):
         return section
 
     def _build_cutoff_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
-        section = self._section_shell(parent, "Control de Outliers")
-        ctk.CTkLabel(section, text="Opciones locales de preview/aplicación", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        section = self._section_shell(parent, "Soporte/Compositado + Outliers")
+        ctk.CTkLabel(section, text="A) Compositado (real por intervalos o fallback aproximado)", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
+        ctk.CTkSlider(section, from_=1, to=10, variable=self.support_composite_length_var, number_of_steps=9).pack(fill="x", padx=6, pady=(0, 2))
+        ctk.CTkEntry(section, textvariable=self.support_output_var, height=INPUT_HEIGHT, placeholder_text="Salida composite (ej: target_comp)").pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar compositado", command=self._on_apply_support_composite, **self._button_style("primary")).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, textvariable=self.support_summary_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=290, justify="left").pack(anchor="w", padx=6, pady=(0, 4))
+        ctk.CTkFrame(section, height=1, fg_color=DIVIDER_SOFT).pack(fill="x", padx=6, pady=(2, 4))
+        ctk.CTkLabel(section, text="B) Control de outliers/capping", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).pack(anchor="w", padx=6, pady=(0, 2))
         numeric_columns = self.service.get_numeric_columns()
         ctk.CTkOptionMenu(section, variable=self.cutoff_target_var, values=numeric_columns or [""], state="normal" if numeric_columns else "disabled", command=lambda _v: self._schedule_cutoff_preview(), **self._option_menu_style()).pack(fill="x", padx=6, pady=(0, 4))
         ctk.CTkSwitch(section, text="Activar límites manuales", variable=self.cutoff_enabled_var, text_color=TXT_MAIN).pack(fill="x", padx=6, pady=(0, 4))
@@ -736,7 +734,15 @@ class HomePanel(ctk.CTkFrame):
 
     def _build_domains_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
         section = self._section_shell(parent, "05 Dominios")
-        ctk.CTkLabel(section, text=DOMAINS_MODULE_DISABLED_MESSAGE, text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 6))
+        ctk.CTkLabel(section, text="Define columna/categorías y confirma dominio activo.", text_color=TXT_MUTED, font=ui_font(FONT_BODY)).pack(anchor="w", padx=6, pady=(4, 4))
+        candidates = self.service.get_domain_candidate_columns() or [""]
+        if self.domain_base_var.get() not in candidates:
+            self.domain_base_var.set(candidates[0] if candidates else "")
+        ctk.CTkOptionMenu(section, variable=self.domain_base_var, values=candidates, state="normal" if candidates and candidates[0] else "disabled", command=lambda _v: self._on_domain_base_changed(), **self._option_menu_style()).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkEntry(section, textvariable=self.domain_name_var, placeholder_text="Nombre dominio (ej: Alta ley)", height=INPUT_HEIGHT).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Asignar selección", command=self._on_assign_domain, **self._button_style("secondary")).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkButton(section, text="Aplicar definición", command=self._on_apply_domains, **self._button_style("primary")).pack(fill="x", padx=6, pady=(0, 4))
+        ctk.CTkLabel(section, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=290, justify="left").pack(anchor="w", padx=6, pady=(0, 4))
         return section
 
     def _build_variography_controls(self, parent: ctk.CTkScrollableFrame) -> ctk.CTkFrame:
@@ -890,6 +896,7 @@ class HomePanel(ctk.CTkFrame):
         band.grid(row=1, column=0, sticky="ew")
         for col in range(6):
             band.grid_columnconfigure(col, weight=1)
+        ctk.CTkButton(band, text="Compositar", command=self._on_apply_support_composite, **self._button_style("secondary")).grid(row=0, column=0, padx=4, pady=(4, 2), sticky="ew")
         ctk.CTkOptionMenu(
             band,
             variable=self.cutoff_target_var,
@@ -897,12 +904,11 @@ class HomePanel(ctk.CTkFrame):
             state="normal" if self.service.get_numeric_columns() else "disabled",
             command=lambda _v: self._schedule_cutoff_preview(),
             **self._option_menu_style(),
-        ).grid(row=0, column=0, padx=4, pady=(4, 2), sticky="ew")
-        ctk.CTkSwitch(band, text="Manual", variable=self.cutoff_enabled_var).grid(row=0, column=1, padx=4, pady=(4, 2), sticky="w")
-        ctk.CTkSwitch(band, text="Dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._schedule_cutoff_preview).grid(row=0, column=2, padx=4, pady=(4, 2), sticky="w")
-        ctk.CTkOptionMenu(band, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], command=lambda _v: self._schedule_cutoff_preview(), **self._option_menu_style()).grid(row=0, column=3, padx=4, pady=(4, 2), sticky="ew")
-        ctk.CTkLabel(band, textvariable=self.dynamic_percentile_label_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=0, column=4, padx=4, pady=(4, 2), sticky="e")
-        ctk.CTkButton(band, text="Aplicar", command=self._on_apply_cutoff_primary, **self._button_style("primary")).grid(row=0, column=5, padx=4, pady=(4, 2), sticky="ew")
+        ).grid(row=0, column=1, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkSwitch(band, text="Manual", variable=self.cutoff_enabled_var).grid(row=0, column=2, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkSwitch(band, text="Dinámico", variable=self.dynamic_cutoff_enabled_var, command=self._schedule_cutoff_preview).grid(row=0, column=3, padx=4, pady=(4, 2), sticky="w")
+        ctk.CTkOptionMenu(band, variable=self.dynamic_mode_var, values=["Percentil", "Valor absoluto"], command=lambda _v: self._schedule_cutoff_preview(), **self._option_menu_style()).grid(row=0, column=4, padx=4, pady=(4, 2), sticky="ew")
+        ctk.CTkButton(band, text="Aplicar capping", command=self._on_apply_cutoff_primary, **self._button_style("primary")).grid(row=0, column=5, padx=4, pady=(4, 2), sticky="ew")
         ctk.CTkSlider(
             band,
             from_=0,
@@ -967,12 +973,17 @@ class HomePanel(ctk.CTkFrame):
     def _build_domains_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew")
-        row.grid_columnconfigure(0, weight=1)
-        state = self.service.get_operational_state()
-        status, reason, action = _build_domains_blocked_payload(state)
-        ctk.CTkLabel(row, text=f"Estado: {status}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=4, pady=(2, 1))
-        ctk.CTkLabel(row, text=f"Motivo: {reason}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=1, column=0, sticky="w", padx=4, pady=1)
-        ctk.CTkLabel(row, text=f"Acción requerida: {action}", text_color=SEM_ORANGE, font=ui_font(FONT_SMALL), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=2, column=0, sticky="w", padx=4, pady=(1, 2))
+        row.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        options = self._get_domain_filter_menu_values()
+        ctk.CTkOptionMenu(row, variable=self.domain_filter_var, values=options, state="normal", **self._option_menu_style()).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Aplicar", command=self._on_apply_domain_filter, **self._button_style("secondary")).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        ctk.CTkButton(row, text="Confirmar", command=self._on_confirm_domain_assignment, **self._button_style("primary")).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        ctk.CTkCheckBox(
+            row,
+            text="Permitir variografía sin dominio (excepción)",
+            variable=self.allow_variography_without_domain_var,
+            command=self._on_toggle_variography_without_domain,
+        ).grid(row=0, column=3, padx=3, pady=2, sticky="w")
 
     def _build_variography_actions_inline(self, parent: ctk.CTkFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1107,13 +1118,6 @@ class HomePanel(ctk.CTkFrame):
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.stages.get(stage_key, None)
         if stage != "Datos" and not bool(stage_state.ready) if stage_state is not None else False:
-            if stage == "Dominios":
-                self.workspace_title_var.set("Dominios – estado y próxima acción")
-                self.workspace_subtitle_var.set("Etapa bloqueada con guía accionable.")
-                DashboardGrid.clear(stage_host)
-                self._render_domains_view(stage_host, force_rebuild=True)
-                self._rendered_stage_signatures[stage] = ("domains_blocked",)
-                return
             self.workspace_title_var.set(f"{_display_step_name(stage)} – etapa bloqueada")
             self.workspace_subtitle_var.set("Completa la configuración indicada para habilitar esta vista.")
             DashboardGrid.clear(stage_host)
@@ -1682,28 +1686,47 @@ class HomePanel(ctk.CTkFrame):
         self.status_text.set("Viewer 3D externo abierto (modo secundario).")
 
     def _render_domains_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
-        state = self.service.get_operational_state()
-        status, reason, action = _build_domains_blocked_payload(state)
-        signature = ("blocked_payload", status, reason, action)
+        snapshot = self.service.get_analysis_context_snapshot()
+        signature = (
+            "domains_live",
+            str(snapshot.get("active_domain_column", "")),
+            str(snapshot.get("active_domain_filter", "")),
+            tuple(self.service.get_domain_estimation_values()),
+            bool(self.allow_variography_without_domain_var.get()),
+            bool(self.service.workflow_state.support_confirmed),
+        )
         if not force_rebuild and self._rendered_stage_signatures.get("Dominios") == signature:
             return
         DashboardGrid.clear(parent)
         self._rendered_stage_signatures["Dominios"] = signature
         _wrapper, visual_host = self._build_decision_layout(
             parent,
-            decision_title="Dominios · estado bloqueado",
-            decision_message="¿Por qué no puedo avanzar y qué tengo que hacer ahora?",
-            context_message="Estado, motivo y acción requerida para continuar el flujo.",
+            decision_title="Dominios · definición y confirmación",
+            decision_message="Define un dominio estacionario y confirma el dominio activo antes de variografía.",
+            context_message="Si usas bypass sin dominios queda registrado como excepción técnica visible.",
             interpretation=STAGE_DECISION_NARRATIVE["Dominios"]["interpretation"],
             next_action=STAGE_DECISION_NARRATIVE["Dominios"]["next_action"],
         )
         panel = ctk.CTkFrame(visual_host, fg_color=BG_SOFT, corner_radius=8)
         panel.grid(row=0, column=0, sticky="ew", padx=6, pady=4)
-        panel.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(panel, text=f"Estado: {status}", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 3))
-        ctk.CTkLabel(panel, text=f"Motivo: {reason}", text_color=TXT_MUTED, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
-        ctk.CTkLabel(panel, text=f"Acción requerida: {action}", text_color=SEM_ORANGE, font=ui_font(FONT_BODY), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=2, column=0, sticky="w", padx=10, pady=(0, 6))
-        ctk.CTkButton(panel, text="Ir a Datos", command=lambda: self._on_change_step("Datos"), **self._button_style("secondary")).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 10))
+        panel.grid_columnconfigure((0, 1), weight=1)
+        support_ok = bool(self.service.workflow_state.support_confirmed)
+        ctk.CTkLabel(panel, text=f"Soporte confirmado: {'Sí' if support_ok else 'No'}", text_color=TXT_MAIN, font=ui_font(FONT_SUBTITLE)).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 3))
+        candidates = self.service.get_domain_candidate_columns() or [""]
+        if self.domain_base_var.get() not in candidates:
+            self.domain_base_var.set(candidates[0] if candidates else "")
+        ctk.CTkOptionMenu(panel, variable=self.domain_base_var, values=candidates, state="normal" if support_ok and candidates and candidates[0] else "disabled", command=lambda _v: self._on_domain_base_changed(), **self._option_menu_style()).grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 4))
+        ctk.CTkEntry(panel, textvariable=self.domain_name_var, placeholder_text="Nombre dominio", height=INPUT_HEIGHT).grid(row=1, column=1, sticky="ew", padx=10, pady=(0, 4))
+        counts = self._get_domain_category_counts()
+        categories_text = ", ".join([f"{name}({count})" for name, count in counts[:10]]) if counts else "Sin categorías disponibles."
+        ctk.CTkLabel(panel, text=f"Categorías base: {categories_text}", text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 4))
+        ctk.CTkButton(panel, text="Asignar categorías visibles", command=self._on_assign_domain, **self._button_style("secondary")).grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 4))
+        ctk.CTkButton(panel, text="Aplicar definición", command=self._on_apply_domains, **self._button_style("primary")).grid(row=3, column=1, sticky="ew", padx=10, pady=(0, 4))
+        options = self._get_domain_filter_menu_values()
+        ctk.CTkOptionMenu(panel, variable=self.domain_filter_var, values=options, state="normal", **self._option_menu_style()).grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 4))
+        ctk.CTkButton(panel, text="Confirmar dominio activo", command=self._on_confirm_domain_assignment, **self._button_style("primary")).grid(row=4, column=1, sticky="ew", padx=10, pady=(0, 4))
+        ctk.CTkCheckBox(panel, text="Permitir variografía sin dominio (excepción visible)", variable=self.allow_variography_without_domain_var, command=self._on_toggle_variography_without_domain).grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 4))
+        ctk.CTkLabel(panel, textvariable=self.domain_feedback_var, text_color=TXT_MUTED, font=ui_font(FONT_SMALL), wraplength=WRAP_STAGE_SUMMARY, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
 
     def _render_variography_view(self, parent: ctk.CTkFrame, *, force_rebuild: bool = False) -> None:
         session = self.service.get_variography_session()
@@ -1770,7 +1793,7 @@ class HomePanel(ctk.CTkFrame):
         self._refresh_dashboard(reason="step_render")
 
     def _paint_workflow_state(self, active_step: str) -> None:
-        ordered = ["Datos", "EDA", "Cutoffs", "Espacial", "Dominios", "Variografía"]
+        ordered = ["Datos", "EDA", "Cutoffs", "Dominios", "Espacial", "Variografía"]
         readiness = self.service.get_workflow_readiness_state()
         active_idx = ordered.index(active_step) if active_step in ordered else 0
         for idx, step in enumerate(ordered):
@@ -1805,6 +1828,7 @@ class HomePanel(ctk.CTkFrame):
 
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
         self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
+        self.allow_variography_without_domain_var.set(bool(self.service.workflow_state.allow_variography_without_domain))
         self._refresh_context_chips()
         self._sync_eda_capping_state()
         self._refresh_summary_cards()
@@ -1930,7 +1954,17 @@ class HomePanel(ctk.CTkFrame):
             capping_text = "Cutoff manual activo"
         else:
             capping_text = "Capping inactivo"
-        self.unified_context_var.set(_build_unified_context_text(state, capping_text))
+        support = self.service.get_support_state()
+        effective = self.service.get_effective_workflow_context()
+        if bool(support.get("confirmed")):
+            mode = str(effective.get("support_mode"))
+            mode_text = "real" if mode == "interval_real" else "fallback"
+            support_text = f"Soporte {mode_text} L{float(support['composite_length']):.1f}"
+        else:
+            support_text = "Soporte no confirmado"
+        fallback_warning = f"⚠ {effective.get('support_warning')}" if str(effective.get("support_warning") or "").strip() else ""
+        bypass_text = "Bypass dominio ACTIVO" if bool(effective.get("bypass_domain")) else "Bypass dominio OFF"
+        self.unified_context_var.set(_build_unified_context_text(state, f"{support_text} · {capping_text} · {bypass_text} {fallback_warning}".strip()))
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, key: str | None = None) -> None:
         ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=col, sticky="w", padx=4)
@@ -2133,6 +2167,9 @@ class HomePanel(ctk.CTkFrame):
         self.dynamic_slider_var.set(95.0)
         self.dynamic_output_var.set(f"{self.target_var.get()}_capped" if self.target_var.get() else "")
         self.dynamic_keep_class_var.set(True)
+        self.support_output_var.set(f"{self.target_var.get()}_comp" if self.target_var.get() else "")
+        self.support_composite_length_var.set(2.0)
+        self.support_summary_var.set("Soporte preliminar no confirmado.")
         self.dynamic_percentile_label_var.set("Percentil: P95.0")
         self.dynamic_cutoff_label_var.set("Umbral actual: -")
         self.dynamic_impact_label_var.set("Impacto: Sin preview.")
@@ -2395,6 +2432,8 @@ class HomePanel(ctk.CTkFrame):
     def _on_assign_domain(self) -> None:
         domain_name = self.domain_name_var.get().strip()
         categories = sorted(self.domain_selected_categories)
+        if not categories:
+            categories = [name for name, _count in self._get_domain_category_counts()[:8]]
         if not self.domain_base_var.get().strip() or not domain_name or not categories:
             self.status_text.set("Debes seleccionar categorías y asignar un nombre al dominio")
             self.domain_feedback_var.set("Debes seleccionar categorías y asignar un nombre al dominio")
@@ -2455,13 +2494,15 @@ class HomePanel(ctk.CTkFrame):
         self.domain_history_var.set("Confirmados:\n" + "\n".join(lines))
 
     def _on_confirm_domain_assignment(self) -> None:
-        result = self.service.confirm_domain_assignment(self.domain_confirm_var.get())
+        selected = self.domain_confirm_var.get().strip() or self.domain_filter_var.get().strip()
+        result = self.service.confirm_domain_assignment(selected)
         self.status_text.set(result.message)
         self._append_activity(result.message)
         if result.success:
             self._invalidate_stage_cache()
             self.domain_label.set("Dominio: domain_estimation")
             self.domain_confirm_var.set("")
+            self.allow_variography_without_domain_var.set(False)
             self._refresh_dashboard(reason="domain_assignment_confirmed")
 
     def _on_apply_domains(self) -> None:
@@ -2485,6 +2526,41 @@ class HomePanel(ctk.CTkFrame):
             self.domain_label.set("Dominio: domain_estimation")
             self.domain_records_var.set("Selecciona una burbuja para ver índices y resumen del dominio.")
             self._refresh_dashboard(reason="domains_applied")
+
+    def _on_apply_support_composite(self) -> None:
+        target = self.cutoff_target_var.get() or self.target_var.get()
+        output = self.support_output_var.get().strip() or None
+        length = float(self.support_composite_length_var.get())
+        result = self.service.apply_basic_compositing(
+            composite_length=length,
+            target_column=target,
+            output_column=output,
+        )
+        self.status_text.set(result.message)
+        self._append_activity(result.message)
+        if result.success:
+            support = self.service.get_support_state()
+            mode_label = "Real por intervalos" if str(support.get("mode")) == "interval_real" else ("Fallback aproximado" if str(support.get("mode")) == "fallback_approx" else "Sin compositado")
+            warning = str(support.get("warning") or "")
+            self.support_summary_var.set(
+                f"Soporte: {mode_label} · L={support['composite_length']:.1f} · n {support['pre_count']}→{support['post_count']} · target={support['output_target']}"
+                + (f" · ⚠ {warning}" if warning else "")
+            )
+            self.cutoff_target_var.set(str(support["output_target"] or target))
+            self._invalidate_stage_cache()
+            self._refresh_dashboard(reason="support_composite_applied")
+
+    def _on_toggle_variography_without_domain(self) -> None:
+        enabled = bool(self.allow_variography_without_domain_var.get())
+        self.service.workflow_state.allow_variography_without_domain = enabled
+        self.status_text.set(
+            "Excepción activa: variografía sin dominio confirmado."
+            if enabled
+            else "Excepción desactivada: variografía requiere dominio confirmado."
+        )
+        self._append_activity(self.status_text.get())
+        self._invalidate_stage_cache()
+        self._refresh_dashboard(reason="variography_domain_bypass_toggled")
 
     def _on_toggle_eda_capping(self) -> None:
         if self.service.workflow_state.current_step != "EDA":
@@ -2592,6 +2668,14 @@ class HomePanel(ctk.CTkFrame):
             cutoff_actual = ", ".join(f"{float(v):.4g}" for v in state.limits)
         self.kpi_value_vars["cutoff actual"].set(self._format_kpi_value(cutoff_actual) if cutoff_actual != "-" and "," not in cutoff_actual else cutoff_actual)
         self._set_cutoff_kpi_visibility(cutoff_actual != "-")
+        support = self.service.get_support_state()
+        if bool(support.get("confirmed")):
+            mode_label = "real por intervalos" if str(support.get("mode")) == "interval_real" else "fallback aproximado"
+            warning = str(support.get("warning") or "")
+            self.support_summary_var.set(
+                f"Soporte {mode_label} · L={float(support['composite_length']):.1f} · n {int(support['pre_count'])}→{int(support['post_count'])} · target={support['output_target']}"
+                + (f" · ⚠ {warning}" if warning else "")
+            )
 
     def _on_update_repo(self) -> None:
         if not messagebox.askyesno("Confirmar actualización", "Esto actualizará el repositorio. ¿Continuar?"):

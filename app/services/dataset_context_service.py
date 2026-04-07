@@ -97,6 +97,7 @@ class DatasetContextService:
         self.host._clear_cutoff_state()
         self.host._clear_dynamic_cutoff_state()
         self.host._clear_domain_state()
+        self.host.clear_support_state()
         self.host._domain_filter_context_enabled = True
         self.host.autodetected_columns = self.autodetect_columns(dataset.columns, dataset.dataframe)
         message = f"CSV cargado: {dataset.file_name} ({dataset.row_count} filas, {dataset.column_count} columnas)."
@@ -180,6 +181,7 @@ class DatasetContextService:
         self.host._clear_cutoff_state()
         self.host._clear_dynamic_cutoff_state()
         self.host._clear_domain_state()
+        self.host.clear_support_state()
         self.host.workflow_state.effective_target_column = target_column
         self.host.activity_log.log("variable_config_applied", "success", "Configuración de variables aplicada.", {"target": target_column, "domain": domain_column or ""})
         return True, "Configuración de variables guardada.", self.host.build_eda_summary()

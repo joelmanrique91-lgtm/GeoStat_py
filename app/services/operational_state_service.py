@@ -181,6 +181,12 @@ class OperationalStateService:
 
         domains_reasons: list[str] = []
         domain_warnings: list[str] = []
+        if not has_dataset:
+            domains_reasons.append("missing_dataset")
+        if not has_variable_config:
+            domains_reasons.append("missing_variable_config")
+        if has_dataset and has_variable_config and not bool(self.host.workflow_state.support_confirmed):
+            domains_reasons.append("missing_support_confirmation")
         if not self.host.is_domains_module_enabled():
             domains_reasons.append(DOMAINS_MODULE_DISABLED_REASON)
         variography_reasons: list[str] = []
@@ -199,6 +205,13 @@ class OperationalStateService:
                 variography_reasons.append("missing_spatial_columns")
         if has_dataset and has_variable_config and not resolved_target_exists:
             variography_reasons.append("missing_target")
+        if has_dataset and has_variable_config:
+            if not str(snapshot.active_domain_column).strip():
+                variography_reasons.append("missing_domain_confirmation")
+            elif not str(snapshot.active_domain_filter).strip() and not bool(self.host.workflow_state.allow_variography_without_domain):
+                variography_reasons.append("missing_domain_confirmation")
+            elif not str(snapshot.active_domain_filter).strip() and bool(self.host.workflow_state.allow_variography_without_domain):
+                variography_warnings.append("domain_bypass_active")
         if has_dataset and has_variable_config and resolved_target_exists:
             filtered_for_variography = self.host._get_filtered_dataframe(snapshot.as_dict())
             if filtered_for_variography is None:
@@ -261,18 +274,18 @@ class OperationalStateService:
         return DomainState(
             ordered_layers=(),
             active_layers=(),
-            output_column="",
+            output_column=str(self.host.workflow_state.domain_output_column or ""),
             min_samples=1,
             include_missing=False,
             effective_target_column=str(snapshot_payload["resolved_target_column"]),
             capping_confirmed=bool(self.host.has_confirmed_dynamic_capping()),
-            domain_definition={},
+            domain_definition=dict(self.host.workflow_state.domain_definition or {}),
             active_domain_filter=str(snapshot_payload.get("active_domain_filter") or ""),
-            domain_estimation_values=(),
+            domain_estimation_values=tuple(self.host.get_domain_estimation_values()),
             domains_ready=bool(self.host.is_domains_module_enabled()),
-            ui_filters=default_domain_ui_filters(),
-            filter_columns=default_domain_ui_filters(),
-            assignment_history=(),
+            ui_filters=dict(self.host.get_domain_ui_filters()),
+            filter_columns=dict(self.host.get_domain_filter_candidates()),
+            assignment_history=tuple(self.host.workflow_state.domain_assignment_history),
         )
 
     def build_operational_state(self) -> GeostatOperationalState:

@@ -156,6 +156,12 @@ class CutoffService:
             return False, "Configura X/Y/Z/target antes de aplicar capping.", 0.0
         if not enabled:
             self.clear_dynamic_cutoff_state()
+            self.host.activity_log.log(
+                "dynamic_cutoff_disabled",
+                "info",
+                "Capping dinámico desactivado.",
+                {"target": target_column},
+            )
             return True, "Capping dinámico desactivado.", 0.0
 
         try:
