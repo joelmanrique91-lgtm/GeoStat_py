@@ -9,6 +9,7 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from app.models.spatial import AssayIntervals3D, DrillholeTrajectory, PointCloudGeometry, SceneState
 from app.services.visualization_service import Spatial3DDataBundle
+from app.ui.panels.dashboard_grid import compute_responsive_figure_size
 from app.ui.theme import (
     BG_CARD,
     CHART_FONT_SIZE_TICK,
@@ -49,6 +50,8 @@ class Spatial3DView(ctk.CTkFrame):
         self._scroll_cid: int | None = None
         self._draw_cid: int | None = None
         self._resize_after_id: str | None = None
+        self._last_plot_size: tuple[int, int] | None = None
+        self._last_size_inches: tuple[float, float] | None = None
         self._last_elev = 26.0
         self._last_azim = -54.0
 
@@ -158,6 +161,7 @@ class Spatial3DView(ctk.CTkFrame):
             color_display_label,
             point_size=float(point_layer.style.get("size", 7.0)),
             point_alpha=float(point_layer.opacity),
+            finalize_draw=False,
         )
         if self._axis is None or self._canvas is None:
             return
@@ -220,6 +224,7 @@ class Spatial3DView(ctk.CTkFrame):
         *,
         point_size: float | None = None,
         point_alpha: float | None = None,
+        finalize_draw: bool = True,
     ) -> None:
         self._ensure_plot()
         if self._figure is None:
@@ -283,7 +288,7 @@ class Spatial3DView(ctk.CTkFrame):
 
         apply_dashboard_layout(self._figure, left=0.03, right=0.88, bottom=0.07, top=0.95, wspace=0.10, hspace=0.10)
         self._sync_figure_to_host(force=True)
-        if self._canvas is not None:
+        if finalize_draw and self._canvas is not None:
             self._canvas.draw_idle()
 
         rendered_info = f"{data.point_count_rendered:,}/{data.point_count_original:,} puntos"
@@ -363,5 +368,21 @@ class Spatial3DView(ctk.CTkFrame):
         height = int(self.plot_host.winfo_height())
         if width <= 24 or height <= 24:
             return
+        size = (width, height)
+        if not force and self._last_plot_size == size:
+            return
+        self._last_plot_size = size
         dpi = float(self._figure.get_dpi())
-        self._figure.set_size_inches(max(width / dpi, 2.4), max(height / dpi, 2.0), forward=force)
+        new_w, new_h = compute_responsive_figure_size(
+            container_width=width,
+            container_height=height,
+            dpi=dpi,
+            min_width_inches=2.4,
+            min_height_inches=2.0,
+        )
+        size_inches = (round(new_w, 4), round(new_h, 4))
+        if not force and self._last_size_inches == size_inches:
+            return
+        self._last_size_inches = size_inches
+        self._figure.set_size_inches(new_w, new_h, forward=force)
+        self._canvas.draw_idle()

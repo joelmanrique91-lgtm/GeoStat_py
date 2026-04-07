@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from tkinter import filedialog, messagebox
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 import threading
 import time
 
@@ -365,6 +366,15 @@ class InteractionStateController:
         return max(0.0, time.perf_counter() - self._last_action_at)
 
 
+@dataclass(frozen=True)
+class ViewRefreshPlan:
+    stage: str
+    requires_rebuild: bool
+    requires_data_refresh: bool
+    resize_hint: tuple[int, int] | None
+    cache_key: str
+
+
 class HomePanel(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTk, service: GeostatService) -> None:
         super().__init__(master=parent, fg_color=BG_MAIN)
@@ -483,6 +493,7 @@ class HomePanel(ctk.CTkFrame):
         self._resize_after_id: str | None = None
         self._eda_toggle_after_id: str | None = None
         self._last_view_body_size: tuple[int, int] = (0, 0)
+        self._last_refresh_plan: ViewRefreshPlan | None = None
         self.domain_name_var.trace_add("write", self._on_domain_name_changed)
 
         self._build_layout()
@@ -1237,10 +1248,12 @@ class HomePanel(ctk.CTkFrame):
             return
         self._rendered_stage_signatures[stage] = signature
 
-    def _show_stage_view(self, stage: str, *, force_rebuild: bool = False) -> None:
+    def _show_stage_view(self, stage: str, *, force_rebuild: bool = False, data_refresh: bool = False) -> None:
         stage_host = self._show_only_stage_host(stage)
         stage_host.grid_columnconfigure(0, weight=1)
         stage_host.grid_rowconfigure(0, weight=1)
+        if data_refresh:
+            self._invalidate_stage_cache(stage)
         readiness = self.service.get_workflow_readiness_state()
         stage_key = STEP_TO_READINESS_KEY.get(stage, "")
         stage_state = readiness.stages.get(stage_key, None)
@@ -1403,6 +1416,8 @@ class HomePanel(ctk.CTkFrame):
             return
 
         data, stats_table = payload_cached
+        if parent.winfo_children():
+            DashboardGrid.clear(parent)
         cv_text = str(stats_table.get("cv", "-"))
         skewness_text = str(stats_table.get("skewness", "-"))
         diagnostics = data.get("diagnostics", {})
@@ -2027,6 +2042,34 @@ class HomePanel(ctk.CTkFrame):
             )
         self.workflow_hint_var.set(_build_active_step_hint(active_step, self.service.get_operational_state()))
 
+    def _build_refresh_plan(self, *, stage: str, reason: str, force: bool) -> ViewRefreshPlan:
+        width = int(self.view_body.winfo_width() or 0)
+        height = int(self.view_body.winfo_height() or 0)
+        resize_hint = (width, height) if width > 0 and height > 0 else None
+        reason_norm = str(reason).strip().lower()
+        structure_reasons = {"step_render", "spatial_mode_changed", "config_applied", "csv_loaded"}
+        data_reasons = {
+            "eda_async_ready",
+            "spatial2d_async_ready",
+            "eda_manual_button",
+            "eda_plot_toggle",
+            "eda_secondary_toggle",
+            "spatial_color_changed",
+            "spatial_style_changed",
+            "domain_filter_changed",
+            "domain_ui_filters_changed",
+        }
+        requires_rebuild = bool(force or reason_norm in structure_reasons or self._get_stage_signature(stage) is None)
+        requires_data_refresh = bool(force or reason_norm in data_reasons)
+        cache_key = f"{stage}:{reason_norm}:{int(requires_rebuild)}:{int(requires_data_refresh)}"
+        return ViewRefreshPlan(
+            stage=stage,
+            requires_rebuild=requires_rebuild,
+            requires_data_refresh=requires_data_refresh,
+            resize_hint=resize_hint,
+            cache_key=cache_key,
+        )
+
     def _refresh_dashboard(self, *, reason: str = "general", force: bool = False) -> None:
         self._trace_ui_action("refresh_dashboard", refresh_type="dashboard_full", extra={"reason": reason, "force": force})
         self.allow_variography_without_domain_var.set(bool(self.service.workflow_state.allow_variography_without_domain))
@@ -2036,7 +2079,13 @@ class HomePanel(ctk.CTkFrame):
         current_step = self.service.workflow_state.current_step
         self._apply_kpi_focus(current_step)
         self._render_stage_action_bar(current_step)
-        self._show_stage_view(current_step, force_rebuild=force)
+        plan = self._build_refresh_plan(stage=current_step, reason=reason, force=force)
+        self._last_refresh_plan = plan
+        self._show_stage_view(
+            current_step,
+            force_rebuild=plan.requires_rebuild,
+            data_refresh=plan.requires_data_refresh and not plan.requires_rebuild,
+        )
 
     def _sync_eda_capping_state(self) -> None:
         has_capping = self.service.has_confirmed_dynamic_capping()
