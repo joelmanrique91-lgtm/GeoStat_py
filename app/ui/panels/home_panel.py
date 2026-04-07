@@ -1963,8 +1963,14 @@ class HomePanel(ctk.CTkFrame):
         else:
             support_text = "Soporte no confirmado"
         fallback_warning = f"⚠ {effective.get('support_warning')}" if str(effective.get("support_warning") or "").strip() else ""
-        bypass_text = "Bypass dominio ACTIVO" if bool(effective.get("bypass_domain")) else "Bypass dominio OFF"
-        self.unified_context_var.set(_build_unified_context_text(state, f"{support_text} · {capping_text} · {bypass_text} {fallback_warning}".strip()))
+        domain_status = "Dominio confirmado" if bool(effective.get("domain_confirmed")) else "Dominio no confirmado"
+        bypass_text = "Bypass dominio ACTIVO" if bool(effective.get("domain_bypass_active")) else "Bypass dominio OFF"
+        self.unified_context_var.set(
+            _build_unified_context_text(
+                state,
+                f"{support_text} · {capping_text} · {domain_status} · {bypass_text} {fallback_warning}".strip(),
+            )
+        )
 
     def _selector(self, parent: ctk.CTkFrame, label: str, variable: ctk.StringVar, values: list[str], row: int, col: int, key: str | None = None) -> None:
         ctk.CTkLabel(parent, text=label, text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(row=row, column=col, sticky="w", padx=4)

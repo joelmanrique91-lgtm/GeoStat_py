@@ -97,6 +97,34 @@ class WorkflowHardeningTests(unittest.TestCase):
         warning_codes = [item.code for item in response.warnings]
         self.assertIn("DOMAIN_BYPASS_ACTIVE", warning_codes)
 
+    def test_variography_warning_removed_when_bypass_is_disabled(self) -> None:
+        service = self._load_service(_build_dataset(with_intervals=True))
+        self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
+        self.assertTrue(service.apply_domain_definition({"variable_base": "dom", "domains": {"DomA": ["A"], "DomB": ["B"]}}).success)
+        service.workflow_state.allow_variography_without_domain = True
+        params = {
+            "target_col": "target",
+            "x_col": "x",
+            "y_col": "y",
+            "z_col": "z",
+            "lag_distance": 5.0,
+            "n_lags": 8,
+            "lag_tolerance": 2.5,
+            "max_distance": 40.0,
+            "azimuth": 0.0,
+            "dip": 0.0,
+            "ang_tol_h": 90.0,
+            "ang_tol_v": 90.0,
+            "band_width": 0.0,
+            "band_height": 0.0,
+            "estimator": "classical",
+        }
+        with_bypass = service.compute_experimental_variography(params)
+        self.assertIn("DOMAIN_BYPASS_ACTIVE", [item.code for item in with_bypass.warnings])
+        service.workflow_state.allow_variography_without_domain = False
+        without_bypass = service.compute_experimental_variography(params)
+        self.assertNotIn("DOMAIN_BYPASS_ACTIVE", [item.code for item in without_bypass.warnings])
+
     def test_dataset_reconfiguration_clears_support_and_domain_state(self) -> None:
         service = self._load_service(_build_dataset(with_intervals=True))
         self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
@@ -105,6 +133,16 @@ class WorkflowHardeningTests(unittest.TestCase):
         self.assertTrue(service.set_variable_config("x", "y", "z", "target", "hole_id", "dom").success)
         self.assertFalse(service.get_support_state()["confirmed"])
         self.assertEqual("", service.workflow_state.active_domain_filter)
+
+    def test_effective_context_aligns_with_eda_and_spatial_targets(self) -> None:
+        service = self._load_service(_build_dataset(with_intervals=True))
+        self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target", output_column="target_comp").success)
+        ctx = service.get_effective_workflow_context()
+        self.assertEqual("target_comp", ctx["target_effective"])
+        payload = service.prepare_univariate_data(use_effective_target=True)
+        self.assertEqual("target_comp", payload["diagnostics"]["target"])
+        spatial = service.prepare_visual_data(color_by=None)
+        self.assertTrue(spatial.success)
 
     def test_domain_change_marks_variography_session_dirty(self) -> None:
         service = self._load_service(_build_dataset(with_intervals=True))
@@ -121,12 +159,18 @@ class WorkflowHardeningTests(unittest.TestCase):
         self.assertTrue(service.apply_basic_compositing(composite_length=2.0, target_column="target").success)
         effective = service.get_effective_workflow_context()
         self.assertEqual("fallback_approx", effective["support_mode"])
+        self.assertIn("target_base", effective)
+        self.assertIn("target_effective", effective)
+        self.assertIn("domain_effective_column", effective)
+        self.assertIn("active_domain", effective)
         self.assertTrue(service.apply_domain_definition({"variable_base": "dom", "domains": {"DomA": ["A"], "DomB": ["B"]}}).success)
         self.assertTrue(service.confirm_domain_assignment("DomA").success)
+        effective_domain = service.get_effective_workflow_context()
+        self.assertTrue(effective_domain["domain_confirmed"])
         self.assertTrue(service.set_active_domain("Todos").success)
         service.workflow_state.allow_variography_without_domain = True
         effective_after_bypass = service.get_effective_workflow_context()
-        self.assertTrue(effective_after_bypass["bypass_domain"])
+        self.assertTrue(effective_after_bypass["domain_bypass_active"])
         _ = service.compute_experimental_variography(
             {
                 "target_col": "target",
