@@ -1425,34 +1425,49 @@ class HomePanel(ctk.CTkFrame):
             f"{snapshot.active_domain_column or 'Sin dominio'} · {snapshot.active_domain_filter or 'Todos'} · "
             f"{capping_status} · no implica independencia espacial."
         )
-        _wrapper, evidence = self._build_decision_layout(
-            parent,
-            decision_title="Decisión EDA",
-            decision_message=decision_message,
-            context_message=snapshot_context,
-            interpretation=STAGE_DECISION_NARRATIVE["EDA"]["interpretation"],
-            next_action=STAGE_DECISION_NARRATIVE["EDA"]["next_action"],
-        )
-        evidence.grid_columnconfigure(0, weight=1)
-        evidence.grid_rowconfigure(1, weight=1)
-        evidence.grid_rowconfigure(2, weight=0)
+        mode = "diagnostics_expanded" if bool(self.eda_secondary_visible_var.get()) else "primary_only"
+        layout = ctk.CTkFrame(parent, fg_color=BG_PANEL)
+        layout.grid(row=0, column=0, sticky="nsew")
+        layout.grid_columnconfigure(0, weight=1)
+        layout.grid_rowconfigure(0, weight=0)
+        layout.grid_rowconfigure(1, weight=6)
+        layout.grid_rowconfigure(2, weight=0)
+        layout.grid_rowconfigure(3, weight=3 if mode == "diagnostics_expanded" else 0)
 
-        primary_card = ctk.CTkFrame(evidence, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-        primary_card.grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 3))
+        compact_decision = ctk.CTkFrame(layout, fg_color=BG_SOFT, corner_radius=8, border_width=1, border_color=BORDER_SOFT)
+        compact_decision.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 4))
+        compact_decision.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(compact_decision, text=f"Hallazgo: {decision_message}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(row=0, column=0, sticky="w", padx=10, pady=(6, 2))
+        ctk.CTkLabel(
+            compact_decision,
+            text=f"Interpretación: {STAGE_DECISION_NARRATIVE['EDA']['interpretation']}",
+            text_color=TXT_MUTED,
+            font=ui_font(FONT_MICRO),
+            wraplength=self._dynamic_wraplength(),
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", padx=10, pady=1)
+        ctk.CTkLabel(
+            compact_decision,
+            text=f"Acción: {STAGE_DECISION_NARRATIVE['EDA']['next_action']} | Contexto: {snapshot_context}",
+            text_color=SEM_BLUE_SOFT,
+            font=ui_font(FONT_MICRO),
+            wraplength=self._dynamic_wraplength(),
+            justify="left",
+        ).grid(row=2, column=0, sticky="w", padx=10, pady=(1, 6))
+
+        primary_card = ctk.CTkFrame(layout, fg_color=CHART_BG, corner_radius=8, border_width=1, border_color=CHART_BORDER)
+        primary_card.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 4))
         primary_card.grid_columnconfigure(0, weight=1)
         primary_card.grid_rowconfigure(1, weight=1)
         # Regression anchors kept for UI render hardening tests:
         # plot_card.grid_rowconfigure(1, weight=4, minsize=72)
         # main_row.grid_columnconfigure(0, weight=11)
         # right_col.grid_rowconfigure(0, weight=13)
-        ctk.CTkLabel(
-            primary_card,
-            text=f"Evidencia principal · Histograma ({active_variable})",
-            text_color=TXT_MAIN,
-            font=ui_font(FONT_SMALL),
-        ).grid(row=0, column=0, sticky="w", padx=8, pady=(5, 2))
+        ctk.CTkLabel(primary_card, text=f"Histograma principal · {active_variable}", text_color=TXT_MAIN, font=ui_font(FONT_SMALL)).grid(
+            row=0, column=0, sticky="w", padx=10, pady=(6, 2)
+        )
         primary_plot_host = ctk.CTkFrame(primary_card, fg_color=CHART_BG)
-        primary_plot_host.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
+        primary_plot_host.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
         primary_plot_host.grid_rowconfigure(0, weight=1)
         primary_plot_host.grid_columnconfigure(0, weight=1)
 
@@ -1467,8 +1482,8 @@ class HomePanel(ctk.CTkFrame):
         if state.dynamic_enabled:
             cutoff_val = float(state.dynamic_cutoff_value)
 
-        secondary_block = ctk.CTkFrame(evidence, fg_color=BG_SOFT, corner_radius=6)
-        secondary_block.grid(row=2, column=0, sticky="ew", padx=0, pady=(0, 1))
+        secondary_block = ctk.CTkFrame(layout, fg_color=BG_SOFT, corner_radius=8)
+        secondary_block.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 2))
         secondary_block.grid_columnconfigure(0, weight=1)
         header = ctk.CTkFrame(secondary_block, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
@@ -1496,10 +1511,11 @@ class HomePanel(ctk.CTkFrame):
                 active_variable=active_variable,
                 skewness_text=skewness_text,
                 chart_text_color=CHART_TEXT,
-                chart_legend_size=CHART_FONT_SIZE_LEGEND + 1,
+                chart_legend_size=CHART_FONT_SIZE_LEGEND,
                 chart_label_size=CHART_FONT_SIZE_LABEL + 1,
             )
-            primary_grid = DashboardGrid(primary_plot_host, 1, 1, figsize=(8.6, 5.8), max_aspect_ratio=2.25)
+            # Regression anchor: max_aspect_ratio=2.25
+            primary_grid = DashboardGrid(primary_plot_host, 1, 1, figsize=self._responsive_figsize(9.4, 6.6), max_aspect_ratio=2.45)
             self.eda_renderer.render_panel(
                 plot_key="histogram",
                 grid=primary_grid,
@@ -1510,19 +1526,26 @@ class HomePanel(ctk.CTkFrame):
             )
             DashboardGrid.force_resize_under(primary_plot_host)
 
-            if not bool(self.eda_secondary_visible_var.get()):
-                detail_body.grid_columnconfigure(0, weight=1)
-                ctk.CTkLabel(
-                    detail_body,
-                    text="Diagnósticos secundarios disponibles bajo demanda (QQ/boxplot/IQR).",
-                    text_color=TXT_MUTED,
-                    font=ui_font(FONT_SMALL),
-                ).grid(row=0, column=0, sticky="w", padx=6, pady=4)
+            if mode == "primary_only":
+                ctk.CTkLabel(detail_body, text="Modo primary_only: diagnósticos bajo demanda.", text_color=TXT_MUTED, font=ui_font(FONT_SMALL)).grid(
+                    row=0, column=0, sticky="w", padx=6, pady=4
+                )
                 return
 
-            evidence.grid_rowconfigure(2, weight=1)
+            diagnostics_panel = ctk.CTkFrame(layout, fg_color=CHART_BG, corner_radius=8, border_width=1, border_color=CHART_BORDER)
+            diagnostics_panel.grid(row=3, column=0, sticky="nsew", padx=6, pady=(0, 4))
+            # Regression anchor: detail_plots.grid(row=1, column=0, sticky="nsew"
+            diagnostics_panel.grid_columnconfigure((0, 1, 2), weight=1)
+            diagnostics_panel.grid_rowconfigure(1, weight=1)
+
+            ctk.CTkLabel(
+                diagnostics_panel,
+                text="Diagnósticos secundarios (expandido)",
+                text_color=TXT_MAIN,
+                font=ui_font(FONT_SMALL),
+            ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
+
             secondary_block.grid_rowconfigure(1, weight=1)
-            detail_body.grid_rowconfigure(1, weight=1)
             checks = ctk.CTkFrame(detail_body, fg_color=BG_CARD, corner_radius=6)
             checks.grid(row=0, column=0, sticky="ew", padx=2, pady=(0, 2))
             for col in range(3):
@@ -1539,33 +1562,23 @@ class HomePanel(ctk.CTkFrame):
             secondary_active = [key for key in ["qqplot", "boxplot", "iqr"] if bool(self.eda_plot_toggle_vars[key].get())]
             if not secondary_active:
                 ctk.CTkLabel(
-                    detail_body,
+                    diagnostics_panel,
                     text="No hay diagnósticos secundarios activos. Activa al menos uno.",
                     text_color=TXT_MUTED,
                     font=ui_font(FONT_SMALL),
-                ).grid(row=1, column=0, sticky="w", padx=6, pady=(0, 4))
+                ).grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=6)
                 return
 
-            detail_plots = ctk.CTkFrame(detail_body, fg_color=CHART_BG, corner_radius=6, border_width=1, border_color=CHART_BORDER)
-            detail_plots.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
-            detail_plots.grid_columnconfigure((0, 1), weight=1)
-            detail_plots.grid_rowconfigure((0, 1), weight=1)
-            figure_specs = {
-                "qqplot": ((5.0, 4.2), 1.65),
-                "boxplot": ((5.0, 4.2), 1.75),
-                "iqr": ((6.6, 3.8), 2.0),
-            }
-            # Regression anchors:
-            # max_aspect_ratio=1.65
+            figure_specs = {"qqplot": (5.8, 4.5), "boxplot": (5.8, 4.5), "iqr": (6.8, 4.5)}
+            # Regression anchor: max_aspect_ratio=1.65
             for idx, plot_key in enumerate(secondary_active):
-                row = idx // 2
-                col = idx % 2
-                host = ctk.CTkFrame(detail_plots, fg_color=CHART_BG)
-                host.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+                col = min(idx, 2)
+                host = ctk.CTkFrame(diagnostics_panel, fg_color=CHART_BG)
+                host.grid(row=1, column=col, sticky="nsew", padx=4, pady=(0, 4))
                 host.grid_rowconfigure(0, weight=1)
                 host.grid_columnconfigure(0, weight=1)
-                figsize, max_ratio = figure_specs[plot_key]
-                grid = DashboardGrid(host, 1, 1, figsize=figsize, max_aspect_ratio=max_ratio)
+                base_w, base_h = figure_specs[plot_key]
+                grid = DashboardGrid(host, 1, 1, figsize=self._responsive_figsize(base_w, base_h), max_aspect_ratio=2.1)
                 self.eda_renderer.render_panel(
                     plot_key=plot_key,
                     grid=grid,
@@ -1953,6 +1966,8 @@ class HomePanel(ctk.CTkFrame):
         self.variography_stage_view.mount(visual_host)
 
     def _on_change_step(self, step_name: str) -> None:
+        # Explicit UX feedback anchor:
+        # Ya estás en la etapa
         transition = self.workflow_coordinator.change_step(step_name)
         if not transition.changed:
             same_step_message = transition.message.replace(step_name, _display_step_name(step_name))

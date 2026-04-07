@@ -134,16 +134,25 @@ class MatplotlibEDARenderer(EDARenderer):
         add_reference_line(ax, p90, label="P90", color=SEM_ORANGE, y_pos=0.81)
         if cutoff_value is not None:
             add_reference_line(ax, cutoff_value, label=f"Cutoff {cutoff_value:.3g}", color=SEM_RED, y_pos=0.74)
-        ax.set_title(f"Evidencia principal · Histograma ({context.active_variable})", color=context.chart_text_color, pad=8)
+        ax.set_title(f"Histograma ({context.active_variable})", color=context.chart_text_color, pad=8)
         ax.set_xlabel("Ley Cu (%)")
         ax.set_ylabel("Frecuencia (n)")
         ax.tick_params(axis="both", labelsize=context.chart_label_size + 1)
-        ax.legend(loc="upper right", fontsize=context.chart_legend_size, frameon=False, borderaxespad=0.35, handlelength=1.4)
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.03),
+            ncol=4,
+            fontsize=context.chart_legend_size - 1,
+            frameon=False,
+            borderaxespad=0.2,
+            handlelength=1.2,
+            columnspacing=0.8,
+        )
         ax.margins(x=0.02)
         tail_hint = "cola dominante alta" if mean_val >= p50 else "cola dominante baja"
         ax.text(
             0.015,
-            0.965,
+            0.93,
             f"Skew={context.skewness_text} · {tail_hint}",
             transform=ax.transAxes,
             ha="left",
