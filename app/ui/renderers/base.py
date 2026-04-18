@@ -31,6 +31,15 @@ class Spatial2DRenderContext:
     label_size: int
 
 
+@dataclass(frozen=True)
+class Spatial3DRendererCapabilities:
+    backend: str
+    supports_points: bool
+    supports_mesh: bool
+    supports_drillholes: bool
+    expected_performance: str
+
+
 class EDARenderer(ABC):
     @abstractmethod
     def render(self, grid: Any, data: dict[str, object], context: EDARenderContext, *, original_values: list[float], cutoff_value: float | None) -> None:
@@ -43,7 +52,11 @@ class Spatial2DRenderer(ABC):
         """Render 2D spatial charts inside a dashboard grid."""
 
 
-class Spatial3DRenderer(ABC):
+class Spatial3DRendererBase(ABC):
+    @abstractmethod
+    def capabilities(self) -> Spatial3DRendererCapabilities:
+        """Return backend feature contract and expected performance profile."""
+
     @abstractmethod
     def is_available(self) -> tuple[bool, str]:
         """Return backend availability tuple."""
@@ -59,6 +72,10 @@ class Spatial3DRenderer(ABC):
     @abstractmethod
     def show_unavailable(self, widget: Any, reason: str) -> None:
         """Display backend unavailability message in widget."""
+
+
+class Spatial3DRenderer(Spatial3DRendererBase):
+    """Backward-compatible alias for existing renderer integrations."""
 
 
 @dataclass

@@ -8,8 +8,13 @@
 El launcher hace este flujo:
 1. Intenta `git pull --ff-only` (no destructivo).
 2. Si `git pull` falla, avisa y continúa con la versión local.
-3. Ejecuta la app con `python -m app.main`.
+3. Construye `PYTHONPATH` runtime incluyendo:
+   - raíz del repo
+   - `repo\\src`
+4. Ejecuta la app con `python -m app.main` usando ese `env` explícito.
 4. Guarda logs en `logs/launcher.log`.
+
+> Esto evita depender de `pip install -e .` o de exportar `PYTHONPATH` manualmente en consola.
 
 ## Crear acceso directo en el escritorio
 1. Abre `C:\ruta\a\GeoStat_py\scripts`.
@@ -40,3 +45,7 @@ El launcher hace este flujo:
 ## Logs
 - Archivo: `logs/launcher.log`
 - Incluye comandos ejecutados, resultados de actualización y estado de arranque de app.
+- Si la app falla al iniciar, el launcher registra:
+  - stdout/stderr completos del proceso `python -m app.main`
+  - traceback completo
+  - diagnóstico rápido (dependencia faltante requerida/opcional, error de inicialización UI Tk).

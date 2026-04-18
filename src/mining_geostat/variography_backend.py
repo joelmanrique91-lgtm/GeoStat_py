@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 try:
     from numba import njit
@@ -58,6 +59,9 @@ def compute_experimental_backend(
     ang_tol_v: float = 90.0,
     band_width: float = 0.0,
     band_height: float = 0.0,
+    lag_tolerance: float | None = None,
+    small_dataset_threshold: int = 1200,
+    pair_chunk_size: int = 200_000,
 ) -> VariographyBackendResult:
     warnings: list[str] = []
     omnidirectional = (
@@ -78,7 +82,20 @@ def compute_experimental_backend(
         warnings.append("scikit-gstat_unavailable_fallback_numpy")
 
     n_points = len(coords)
-    i_idx, j_idx = np.triu_indices(n_points, k=1)
+    use_dense_pairs = n_points <= int(small_dataset_threshold)
+    if use_dense_pairs:
+        i_idx, j_idx = np.triu_indices(n_points, k=1)
+    else:
+        tree = cKDTree(coords)
+        pair_set = tree.query_pairs(r=float(max_distance), output_type="set")
+        if not pair_set:
+            raise ValueError("No hay pares para el variograma con la configuración dada")
+        # Deterministic ordering for reproducibility.
+        ordered_pairs = np.array(sorted(pair_set), dtype=np.int64)
+        i_idx = ordered_pairs[:, 0]
+        j_idx = ordered_pairs[:, 1]
+        warnings.append("pair_selection_kdtree")
+
     deltas = coords[j_idx] - coords[i_idx]
     dx = deltas[:, 0]
     dy = deltas[:, 1]
@@ -105,13 +122,28 @@ def compute_experimental_backend(
     if not np.any(valid):
         raise ValueError("No hay pares para el variograma con la configuración dada")
     d_valid = d[valid]
-    semivar_all = _accumulate_semivariance_numba(values.astype(np.float64), i_idx.astype(np.int64), j_idx.astype(np.int64))
-    semivar = semivar_all[valid]
-    bins = np.rint((d_valid / float(lag)) - 1.0).astype(int)
-    in_range = (bins >= 0) & (bins < int(n_lags))
-    gamma_sum = np.bincount(bins[in_range], weights=semivar[in_range], minlength=int(n_lags))
-    npairs_arr = np.bincount(bins[in_range], minlength=int(n_lags))
+    i_valid = i_idx[valid].astype(np.int64)
+    j_valid = j_idx[valid].astype(np.int64)
+    semivar = np.empty_like(d_valid, dtype=np.float64)
+    values64 = values.astype(np.float64)
+    chunk = max(10_000, int(pair_chunk_size))
+    for start in range(0, d_valid.shape[0], chunk):
+        end = min(start + chunk, d_valid.shape[0])
+        semivar[start:end] = _accumulate_semivariance_numba(values64, i_valid[start:end], j_valid[start:end])
+
+    lag_tol = float(lag_tolerance) if lag_tolerance is not None else float(lag) * 0.5
+    lag_tol = max(1e-12, lag_tol)
+    nearest_lag_index = np.rint((d_valid / float(lag)) - 1.0).astype(int)
+    lag_center_for_pair = (nearest_lag_index + 1).astype(float) * float(lag)
+    in_range = (
+        (nearest_lag_index >= 0)
+        & (nearest_lag_index < int(n_lags))
+        & (np.abs(d_valid - lag_center_for_pair) <= lag_tol)
+    )
+    gamma_sum = np.bincount(nearest_lag_index[in_range], weights=semivar[in_range], minlength=int(n_lags))
+    npairs_arr = np.bincount(nearest_lag_index[in_range], minlength=int(n_lags))
     lag_centers = [float((k + 1) * lag) for k in range(int(n_lags))]
     npairs = npairs_arr.astype(int).tolist()
     gamma = [float(gamma_sum[k] / npairs_arr[k]) if npairs_arr[k] > 0 else math.nan for k in range(int(n_lags))]
-    return VariographyBackendResult(lag_centers=lag_centers, gamma=gamma, npairs=npairs, backend_used="numpy", warnings=warnings)
+    backend_used = "numpy" if use_dense_pairs else "numpy+kdtree"
+    return VariographyBackendResult(lag_centers=lag_centers, gamma=gamma, npairs=npairs, backend_used=backend_used, warnings=warnings)

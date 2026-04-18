@@ -58,6 +58,14 @@ class PyVistaRendererContractTests(unittest.TestCase):
         self.assertTrue(available)
         self.assertEqual(reason, "plotly")
 
+    def test_capabilities_reflect_backend(self) -> None:
+        renderer = PyVistaSpatial3DRenderer()
+        renderer._last_state = types.SimpleNamespace(backend="plotly", reason="ok")  # type: ignore[attr-defined]
+        capabilities = renderer.capabilities()
+        self.assertEqual(capabilities.backend, "plotly")
+        self.assertTrue(capabilities.supports_points)
+        self.assertFalse(capabilities.supports_mesh)
+
 
 if __name__ == "__main__":
     unittest.main()
