@@ -4,9 +4,9 @@ pandas
 scipy
 matplotlib
 plotly
-scikit-learn
-jupyter
-numba
-scikit-gstat
-gstools
-pykrige
+# Optional extras:
+# numba
+# pykrige
+# scikit-gstat
+# pyvista
+# vtk
