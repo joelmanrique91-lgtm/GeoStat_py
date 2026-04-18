@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -45,6 +46,24 @@ def run_command(command: list[str], logger: logging.Logger, *, timeout: int = 18
     return code, output
 
 
+def _build_runtime_env() -> dict[str, str]:
+    """Build subprocess environment so `python -m app.main` can import src packages.
+
+    Contract:
+    - Keep current process env untouched.
+    - Prepend `<repo_root>` and `<repo_root>/src` to PYTHONPATH for the app process.
+    """
+    env = os.environ.copy()
+    repo_root = str(PROJECT_ROOT)
+    repo_src = str(PROJECT_ROOT / "src")
+    current = env.get("PYTHONPATH", "")
+    parts = [repo_root, repo_src]
+    if current:
+        parts.append(current)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return env
+
+
 def update_repository(logger: logging.Logger) -> None:
     detected_git = git_path()
     if detected_git is None:
@@ -73,11 +92,13 @@ def update_repository(logger: logging.Logger) -> None:
 
 def run_app(logger: logging.Logger) -> int:
     command = [sys.executable, "-m", "app.main"]
+    runtime_env = _build_runtime_env()
     logger.info("Iniciando aplicación con intérprete activo: %s", sys.executable)
+    logger.info("PYTHONPATH runtime: %s", runtime_env.get("PYTHONPATH", ""))
     logger.info("$ %s", " ".join(command))
 
     try:
-        process = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
+        process = subprocess.run(command, cwd=PROJECT_ROOT, env=runtime_env, check=False)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error al iniciar la app: %s", exc)
         return 1
