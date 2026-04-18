@@ -11,6 +11,7 @@ from pathlib import Path
 from app.adapters.geostatspy_adapter import GeostatSpyAdapter
 from app.services.activity_log_service import ActivityLogService
 from app.services.geostat_service import GeostatService
+from scripts.update_and_run import _build_runtime_env
 
 
 class VariographyBackendUnificationTests(unittest.TestCase):
@@ -30,9 +31,7 @@ class VariographyBackendUnificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir) / "trace.json"
             cmd = [sys.executable, "-m", "cli.geostat_cli", "variogram", "--seed", "7", "--out", str(out)]
-            env = os.environ.copy()
-            env["PYTHONPATH"] = f"src{os.pathsep}" + env.get("PYTHONPATH", "")
-            run = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+            run = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1], env=_build_runtime_env(), check=True, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0)
             payload = json.loads(out.read_text(encoding="utf-8"))
         cli_backend = str(payload["experimental_variogram"]["metadata"].get("backend", ""))
