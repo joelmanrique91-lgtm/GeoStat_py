@@ -14,7 +14,7 @@ from typing import Any
 import customtkinter as ctk
 
 from app.models.spatial import AssayIntervals3D, DrillholeTrajectory, PointCloudGeometry, SceneState
-from app.ui.renderers.base import Spatial3DRenderer
+from app.ui.renderers.base import Spatial3DRenderer, Spatial3DRendererCapabilities
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,32 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
         except Exception as exc:
             return _BackendState("", f"No hay backend 3D dedicado disponible (pyvista/plotly): {exc}")
 
+    def capabilities(self) -> Spatial3DRendererCapabilities:
+        backend = self._last_state.backend or self._resolve_backend().backend
+        if backend == "pyvista":
+            return Spatial3DRendererCapabilities(
+                backend="pyvista",
+                supports_points=True,
+                supports_mesh=True,
+                supports_drillholes=True,
+                expected_performance="high",
+            )
+        if backend == "plotly":
+            return Spatial3DRendererCapabilities(
+                backend="plotly",
+                supports_points=True,
+                supports_mesh=False,
+                supports_drillholes=True,
+                expected_performance="medium",
+            )
+        return Spatial3DRendererCapabilities(
+            backend="none",
+            supports_points=False,
+            supports_mesh=False,
+            supports_drillholes=False,
+            expected_performance="unavailable",
+        )
+
     def is_available(self) -> tuple[bool, str]:
         self._last_state = self._resolve_backend()
         if not self._last_state.backend:
@@ -64,11 +90,15 @@ class PyVistaSpatial3DRenderer(Spatial3DRenderer):
         backend = self._last_state.backend or self._resolve_backend().backend
         info = ctk.CTkFrame(widget, fg_color="transparent")
         info.grid(row=0, column=0, sticky="ew")
+        capabilities = self.capabilities()
         ctk.CTkLabel(
             info,
             text=(
                 f"Viewer 3D dedicado ({backend.upper()}) · {color_display_label}\n"
-                "Se abre en ventana/navegador externo para evitar bloqueos de Tk y mejorar fluidez."
+                "Se abre en ventana/navegador externo para evitar bloqueos de Tk y mejorar fluidez.\n"
+                f"Capacidades: puntos={'sí' if capabilities.supports_points else 'no'}, "
+                f"malla={'sí' if capabilities.supports_mesh else 'no'}, "
+                f"rendimiento={capabilities.expected_performance}."
             ),
             justify="left",
         ).pack(anchor="w", padx=4, pady=(2, 6))

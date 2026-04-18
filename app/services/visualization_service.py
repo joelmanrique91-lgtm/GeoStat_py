@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import sys
 
 from app.services.variography_geometry import DirectionalConfig
-from app.utils.paths import PROJECT_ROOT
+from mining_geostat.variography_backend import compute_experimental_backend
 
 try:
     from numba import njit
@@ -274,17 +273,13 @@ def compute_experimental_variogram(
     if errors:
         raise ValueError("Configuración direccional inválida: " + "; ".join(errors))
 
-    src_path = PROJECT_ROOT / "src"
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
-    from mining_geostat.variography_backend import compute_experimental_backend
-
     backend = compute_experimental_backend(
         coords=coords,
         values=values,
         lag=float(lag),
         n_lags=int(n_lags),
         max_distance=float(max_distance),
+        lag_tolerance=lag_window,
         azimuth=float(azimuth),
         dip=float(dip),
         ang_tol_h=float(ang_tol_h),

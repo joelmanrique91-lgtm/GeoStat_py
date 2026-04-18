@@ -8,7 +8,22 @@ version = "0.1.0"
 description = "Pipeline geoestadístico reproducible para estimación de recursos"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24", "pandas>=2.0"]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "customtkinter>=5.2",
+    "plotly>=5.0",
+]
+
+[project.optional-dependencies]
+geostat = ["pykrige>=1.7", "scikit-gstat>=1.0"]
+acceleration = ["numba>=0.57"]
+viewer3d = ["pyvista>=0.43", "vtk>=9.2"]
+
+[project.scripts]
+geostat-cli = "cli.geostat_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

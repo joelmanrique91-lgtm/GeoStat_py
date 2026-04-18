@@ -8,8 +8,14 @@ dependencies:
   - pandas
   - scipy
   - matplotlib
-  - scikit-learn
-  - jupyter
   - pip
+  - customtkinter
+  # Optional 3D backend components (recommended for desktop builds):
+  - plotly
+  # PyVista/VTK can be heavy in some Windows setups; install if needed:
+  # - pyvista
+  # - vtk
+  # Optional acceleration:
+  # - numba
   - pip:
-      - customtkinter
+      - -e .
