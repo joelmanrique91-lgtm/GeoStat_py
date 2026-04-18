@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -64,6 +65,22 @@ def _build_runtime_env() -> dict[str, str]:
     return env
 
 
+def _diagnose_startup_failure(output: str) -> list[str]:
+    """Return human-readable diagnostics extracted from app startup output."""
+    hints: list[str] = []
+    missing_mod = re.findall(r"ModuleNotFoundError: No module named ['\"]([^'\"]+)['\"]", output)
+    for module_name in missing_mod:
+        if module_name in {"pyvista", "vtk", "plotly", "pykrige", "skgstat", "numba"}:
+            hints.append(f"Dependencia opcional ausente detectada: {module_name}.")
+        else:
+            hints.append(f"Dependencia requerida ausente detectada: {module_name}.")
+    if "_tkinter.TclError" in output:
+        hints.append("Fallo durante inicialización UI (Tk/CustomTkinter). Revisar backend gráfico/display.")
+    if "Traceback (most recent call last):" in output:
+        hints.append("Traceback completo capturado en launcher.log.")
+    return hints
+
+
 def update_repository(logger: logging.Logger) -> None:
     detected_git = git_path()
     if detected_git is None:
@@ -98,13 +115,21 @@ def run_app(logger: logging.Logger) -> int:
     logger.info("$ %s", " ".join(command))
 
     try:
-        process = subprocess.run(command, cwd=PROJECT_ROOT, env=runtime_env, check=False)
+        process = subprocess.run(command, cwd=PROJECT_ROOT, env=runtime_env, check=False, capture_output=True, text=True)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error al iniciar la app: %s", exc)
         return 1
 
+    if process.stdout:
+        logger.info("Salida app (stdout):\n%s", process.stdout.rstrip())
+    if process.stderr:
+        logger.error("Salida app (stderr):\n%s", process.stderr.rstrip())
+
     if process.returncode != 0:
         logger.error("La app finalizó con código de error: %s", process.returncode)
+        details = _diagnose_startup_failure((process.stdout or "") + "\n" + (process.stderr or ""))
+        for detail in details:
+            logger.error("Diagnóstico arranque: %s", detail)
     else:
         logger.info("La app finalizó correctamente.")
     return int(process.returncode)

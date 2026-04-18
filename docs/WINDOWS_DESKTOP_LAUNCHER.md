@@ -45,3 +45,7 @@ El launcher hace este flujo:
 ## Logs
 - Archivo: `logs/launcher.log`
 - Incluye comandos ejecutados, resultados de actualización y estado de arranque de app.
+- Si la app falla al iniciar, el launcher registra:
+  - stdout/stderr completos del proceso `python -m app.main`
+  - traceback completo
+  - diagnóstico rápido (dependencia faltante requerida/opcional, error de inicialización UI Tk).
