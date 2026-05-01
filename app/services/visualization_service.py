@@ -229,8 +229,9 @@ def compute_experimental_variogram(
     lag_tolerance: float | None = None,
     azimuth: float = 0.0,
     dip: float = 0.0,
-    ang_tol_h: float = 90.0,
-    ang_tol_v: float = 90.0,
+    angular_tolerance: float | None = None,
+    ang_tol_h: float | None = None,
+    ang_tol_v: float | None = None,
     band_width: float = 0.0,
     band_height: float = 0.0,
     max_points: int = 2500,
@@ -260,12 +261,14 @@ def compute_experimental_variogram(
     n_records = len(coords)
 
     lag_window = float(lag_tolerance) if lag_tolerance is not None else float(lag) * 0.5
+    if angular_tolerance is None:
+        angular_tolerance = float(ang_tol_h if ang_tol_h is not None else 90.0)
     lag_window = max(1e-9, lag_window)
     direction = DirectionalConfig(
         azimuth_deg=float(azimuth),
         dip_deg=float(dip),
-        azimuth_tolerance_deg=float(ang_tol_h),
-        dip_tolerance_deg=float(ang_tol_v),
+        azimuth_tolerance_deg=float(angular_tolerance),
+        dip_tolerance_deg=float(angular_tolerance),
         band_width=float(band_width),
         band_height=float(band_height),
     )
@@ -282,8 +285,7 @@ def compute_experimental_variogram(
         lag_tolerance=lag_window,
         azimuth=float(azimuth),
         dip=float(dip),
-        ang_tol_h=float(ang_tol_h),
-        ang_tol_v=float(ang_tol_v),
+        angular_tolerance=float(angular_tolerance),
         band_width=float(band_width),
         band_height=float(band_height),
     )

@@ -110,12 +110,16 @@ def experimental_variogram_3d(
     lag_tolerance: float | None = None,
     azimuth: float = 0.0,
     dip: float = 0.0,
-    ang_tol_h: float = 90.0,
-    ang_tol_v: float = 90.0,
+    angular_tolerance: float | None = None,
+    ang_tol_h: float | None = None,
+    ang_tol_v: float | None = None,
     bandwidth: float = 0.0,
     seed: int = 42,
     max_points: int = 2000,
 ) -> ExperimentalVariogram:
+    if angular_tolerance is None:
+        angular_tolerance = float(ang_tol_h if ang_tol_h is not None else 90.0)
+
     clean = df[[x, y, z, value]].copy()
     clean[[x, y, z, value]] = clean[[x, y, z, value]].apply(pd.to_numeric, errors="coerce")
     clean = clean.dropna()
@@ -130,7 +134,7 @@ def experimental_variogram_3d(
     coords = clean[[x, y, z]].to_numpy(dtype=float)
     vals = clean[value].to_numpy(dtype=float)
 
-    direction = DirectionalConfig(float(azimuth), float(dip), float(ang_tol_h), float(ang_tol_v), float(bandwidth), float(bandwidth))
+    direction = DirectionalConfig(float(azimuth), float(dip), float(angular_tolerance), float(angular_tolerance), float(bandwidth), float(bandwidth))
     errs = direction.validate()
     if errs:
         raise ValueError("; ".join(errs))
@@ -144,8 +148,7 @@ def experimental_variogram_3d(
         lag_tolerance=None if lag_tolerance is None else float(lag_tolerance),
         azimuth=float(azimuth),
         dip=float(dip),
-        ang_tol_h=float(ang_tol_h),
-        ang_tol_v=float(ang_tol_v),
+        angular_tolerance=float(angular_tolerance),
         band_width=float(bandwidth),
         band_height=float(bandwidth),
     )

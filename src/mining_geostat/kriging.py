@@ -17,6 +17,7 @@ class NeighborhoodConfig:
     min_samples: int = 4
     max_samples: int = 16
     search_radius: float | None = None
+    numerical_nugget: float = 1e-6
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,24 @@ def _select_neighbors(samples_xyz: np.ndarray, target_xyz: np.ndarray, cfg: Neig
 def _cov(model: VariogramModel, h: float) -> float:
     return float(model.sill - model.semivariance(h))
 
+
+
+
+def _solve_linear_system(k: np.ndarray, rhs: np.ndarray, numerical_nugget: float) -> np.ndarray:
+    try:
+        l = np.linalg.cholesky(k)
+        y = np.linalg.solve(l, rhs)
+        return np.linalg.solve(l.T, y)
+    except np.linalg.LinAlgError:
+        pass
+    try:
+        k2 = k.copy()
+        k2[np.diag_indices_from(k2)] += float(numerical_nugget)
+        l = np.linalg.cholesky(k2)
+        y = np.linalg.solve(l, rhs)
+        return np.linalg.solve(l.T, y)
+    except np.linalg.LinAlgError:
+        return np.linalg.pinv(k) @ rhs
 
 def ordinary_kriging(
     samples_xyz: np.ndarray,
@@ -76,19 +95,19 @@ def ordinary_kriging(
             backend_used="pykrige",
         )
 
+    dist_nn = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=2)
+    cov_nn = np.vectorize(lambda h: _cov(model, float(h)))(dist_nn)
     k = np.zeros((n + 1, n + 1), dtype=float)
-    for i in range(n):
-        for j in range(n):
-            k[i, j] = _cov(model, float(np.linalg.norm(xyz[i] - xyz[j])))
+    k[:n,:n]=cov_nn
     k[:n, n] = 1.0
     k[n, :n] = 1.0
 
     rhs = np.zeros(n + 1, dtype=float)
-    for i in range(n):
-        rhs[i] = _cov(model, float(np.linalg.norm(xyz[i] - target_xyz)))
+    dist_nt = np.linalg.norm(xyz - target_xyz[None, :], axis=1)
+    rhs[:n] = np.vectorize(lambda h: _cov(model, float(h)))(dist_nt)
     rhs[n] = 1.0
 
-    sol = np.linalg.solve(k, rhs)
+    sol = _solve_linear_system(k, rhs, cfg.numerical_nugget)
     w = sol[:n]
     mu = sol[n]
     estimate = float(np.dot(w, val))
@@ -109,14 +128,12 @@ def simple_kriging(
     val = samples_val[idx]
     n = len(idx)
 
-    k = np.zeros((n, n), dtype=float)
-    rhs = np.zeros(n, dtype=float)
-    for i in range(n):
-        rhs[i] = _cov(model, float(np.linalg.norm(xyz[i] - target_xyz)))
-        for j in range(n):
-            k[i, j] = _cov(model, float(np.linalg.norm(xyz[i] - xyz[j])))
+    dist_nn = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=2)
+    k = np.vectorize(lambda h: _cov(model, float(h)))(dist_nn)
+    dist_nt = np.linalg.norm(xyz - target_xyz[None, :], axis=1)
+    rhs = np.vectorize(lambda h: _cov(model, float(h)))(dist_nt)
 
-    w = np.linalg.solve(k, rhs)
+    w = _solve_linear_system(k, rhs, cfg.numerical_nugget)
     estimate = float(mean + np.dot(w, (val - mean)))
     variance = float(model.sill - np.dot(w, rhs))
     return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist(), backend_used="numpy")
@@ -139,13 +156,37 @@ def block_kriging(
 
     points = np.array([[block_centroid_xyz[0] + i, block_centroid_xyz[1] + j, block_centroid_xyz[2] + k] for i in xs for j in ys for k in zs], dtype=float)
 
-    per_point = [ordinary_kriging(samples_xyz, samples_val, p, model, cfg) for p in points]
-    estimate = float(np.mean([r.estimate for r in per_point]))
-    variance = float(np.mean([r.variance for r in per_point]))
+    idx = _select_neighbors(samples_xyz, block_centroid_xyz, cfg)
+    xyz = samples_xyz[idx]
+    val = samples_val[idx]
+    n = len(idx)
+    dist_nn = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=2)
+    cov_nn = np.vectorize(lambda h: _cov(model, float(h)))(dist_nn)
+    k = np.zeros((n + 1, n + 1), dtype=float)
+    k[:n, :n] = cov_nn
+    k[:n, n] = 1.0
+    k[n, :n] = 1.0
+
+    estimates = []
+    variances = []
+    weights = None
+    for p in points:
+        rhs = np.zeros(n + 1, dtype=float)
+        dist_nt = np.linalg.norm(xyz - p[None, :], axis=1)
+        rhs[:n] = np.vectorize(lambda h: _cov(model, float(h)))(dist_nt)
+        rhs[n] = 1.0
+        sol = _solve_linear_system(k, rhs, cfg.numerical_nugget)
+        w = sol[:n]
+        mu = sol[n]
+        estimates.append(float(np.dot(w, val)))
+        variances.append(float(model.sill - np.dot(w, rhs[:n]) - mu))
+        if weights is None:
+            weights = w.tolist()
+
     return KrigingResult(
-        estimate=estimate,
-        variance=variance,
-        n_used=per_point[0].n_used,
-        weights=per_point[0].weights,
-        backend_used=per_point[0].backend_used,
+        estimate=float(np.mean(estimates)),
+        variance=max(0.0, float(np.mean(variances))),
+        n_used=n,
+        weights=weights or [],
+        backend_used="numpy",
     )
