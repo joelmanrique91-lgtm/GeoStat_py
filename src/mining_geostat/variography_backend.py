@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 
 import numpy as np
+import os
 from scipy.spatial import cKDTree
 
 try:
@@ -46,6 +47,44 @@ def _unit_direction(azimuth_deg: float, dip_deg: float) -> tuple[float, float, f
     return c * math.cos(az), c * math.sin(az), math.sin(dip)
 
 
+
+
+def _adaptive_small_dataset_threshold(n_points: int) -> int:
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        avail_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+        available = page_size * avail_pages
+    except Exception:  # pragma: no cover
+        return 400
+    dense_bytes = n_points * n_points * 16
+    if dense_bytes <= max(64_000_000, available // 20):
+        return max(200, n_points)
+    return 400
+
+
+def _voxel_stratified_indices(coords: np.ndarray, target_size: int) -> np.ndarray:
+    if coords.shape[0] <= target_size:
+        return np.arange(coords.shape[0], dtype=np.int64)
+    mins = coords.min(axis=0)
+    spans = np.maximum(coords.ptp(axis=0), 1e-9)
+    grid = int(np.ceil(target_size ** (1.0 / 3.0)))
+    scaled = (coords - mins[None, :]) / spans[None, :]
+    vox = np.floor(np.clip(scaled * grid, 0, grid - 1e-9)).astype(np.int64)
+    voxel_id = vox[:, 0] + grid * vox[:, 1] + (grid * grid) * vox[:, 2]
+    selected = []
+    for vid in np.unique(voxel_id):
+        local = np.where(voxel_id == vid)[0]
+        if local.size:
+            selected.append(int(local[0]))
+    if len(selected) >= target_size:
+        return np.asarray(selected[:target_size], dtype=np.int64)
+    remaining = np.setdiff1d(np.arange(coords.shape[0]), np.asarray(selected, dtype=np.int64), assume_unique=False)
+    need = min(target_size - len(selected), remaining.size)
+    if need > 0:
+        selected.extend(remaining[:need].tolist())
+    return np.asarray(selected, dtype=np.int64)
+
+
 def compute_experimental_backend(
     *,
     coords: np.ndarray,
@@ -67,6 +106,8 @@ def compute_experimental_backend(
     warnings: list[str] = []
     if angular_tolerance is None:
         angular_tolerance = float(ang_tol_h if ang_tol_h is not None else 90.0)
+    if ang_tol_h is not None or ang_tol_v is not None:
+        warnings.append("deprecated_directional_tolerances_use_angular_tolerance")
     omnidirectional = (
         abs(float(azimuth)) < 1e-9
         and abs(float(dip)) < 1e-9
@@ -84,6 +125,13 @@ def compute_experimental_backend(
         warnings.append("scikit-gstat_unavailable_fallback_numpy")
 
     n_points = len(coords)
+    small_dataset_threshold = min(int(small_dataset_threshold), _adaptive_small_dataset_threshold(n_points))
+    if n_points > 20_000:
+        sampled_idx = _voxel_stratified_indices(coords, target_size=20_000)
+        coords = coords[sampled_idx]
+        values = values[sampled_idx]
+        n_points = len(coords)
+        warnings.append("stratified_voxel_sampling_applied")
     use_dense_pairs = n_points <= int(small_dataset_threshold)
     if use_dense_pairs:
         i_idx, j_idx = np.triu_indices(n_points, k=1)
