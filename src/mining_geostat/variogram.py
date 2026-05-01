@@ -6,61 +6,10 @@ import math
 import numpy as np
 import pandas as pd
 
+from .errors import VariographyError
 from .variography_backend import compute_experimental_backend
 
 
-@dataclass(frozen=True)
-class DirectionalConfig:
-    azimuth_deg: float
-    dip_deg: float
-    azimuth_tolerance_deg: float
-    dip_tolerance_deg: float
-    band_width: float
-    band_height: float
-
-    def validate(self) -> list[str]:
-        errs: list[str] = []
-        if not (-360.0 <= self.azimuth_deg <= 360.0):
-            errs.append("azimuth fuera de rango")
-        if not (-90.0 <= self.dip_deg <= 90.0):
-            errs.append("dip fuera de rango")
-        if not (0.0 < self.azimuth_tolerance_deg <= 90.0):
-            errs.append("ang_tol_h fuera de rango")
-        if not (0.0 < self.dip_tolerance_deg <= 90.0):
-            errs.append("ang_tol_v fuera de rango")
-        if self.band_width < 0 or self.band_height < 0:
-            errs.append("bandwidth/bandheight no pueden ser negativos")
-        return errs
-
-
-def _unit_direction(azimuth_deg: float, dip_deg: float) -> tuple[float, float, float]:
-    az = math.radians(float(azimuth_deg))
-    dip = math.radians(float(dip_deg))
-    c = math.cos(dip)
-    return c * math.cos(az), c * math.sin(az), math.sin(dip)
-
-
-def _matches_direction(dx: float, dy: float, dz: float, cfg: DirectionalConfig) -> bool:
-    ux, uy, uz = _unit_direction(cfg.azimuth_deg, cfg.dip_deg)
-    vnorm = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if vnorm < 1e-12:
-        return False
-    dot = abs((dx * ux + dy * uy + dz * uz) / vnorm)
-    dot = max(-1.0, min(1.0, dot))
-    ang = math.degrees(math.acos(dot))
-    if ang > cfg.azimuth_tolerance_deg:
-        return False
-    horizontal = math.sqrt(dx * dx + dy * dy)
-    pair_dip = math.degrees(math.atan2(dz, horizontal))
-    if min(abs(pair_dip - cfg.dip_deg), abs(-pair_dip - cfg.dip_deg)) > cfg.dip_tolerance_deg:
-        return False
-    proj = dx * ux + dy * uy + dz * uz
-    perp = math.sqrt(max(0.0, dx * dx + dy * dy + dz * dz - proj * proj))
-    if cfg.band_width > 0.0 and perp > cfg.band_width * 0.5:
-        return False
-    if cfg.band_height > 0.0 and abs(dz) > cfg.band_height * 0.5:
-        return False
-    return True
 
 
 @dataclass(frozen=True)
@@ -93,9 +42,6 @@ class VariogramModel:
         raise ValueError(f"Modelo no soportado: {self.model_type}")
 
 
-def _distance(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.linalg.norm(a - b))
-
 
 def experimental_variogram_3d(
     df: pd.DataFrame,
@@ -124,20 +70,22 @@ def experimental_variogram_3d(
     clean[[x, y, z, value]] = clean[[x, y, z, value]].apply(pd.to_numeric, errors="coerce")
     clean = clean.dropna()
     if len(clean) < 3:
-        raise ValueError("Insuficientes datos válidos para variograma")
+        raise VariographyError("Insuficientes datos válidos para variograma")
 
     downsampled = False
     if len(clean) > max_points:
-        clean = clean.sample(n=max_points, random_state=seed)
+        clean = clean.sort_values([x,y,z]).iloc[::max(1, int(len(clean)/max_points))].head(max_points)
         downsampled = True
 
     coords = clean[[x, y, z]].to_numpy(dtype=float)
     vals = clean[value].to_numpy(dtype=float)
 
-    direction = DirectionalConfig(float(azimuth), float(dip), float(angular_tolerance), float(angular_tolerance), float(bandwidth), float(bandwidth))
-    errs = direction.validate()
-    if errs:
-        raise ValueError("; ".join(errs))
+    if not (-360.0 <= float(azimuth) <= 360.0 and -90.0 <= float(dip) <= 90.0):
+        raise VariographyError("Dirección inválida (azimuth/dip).")
+    if not (0.0 < float(angular_tolerance) <= 90.0):
+        raise VariographyError("Tolerancia angular fuera de rango (0, 90].")
+    if float(bandwidth) < 0.0:
+        raise VariographyError("Band width no puede ser negativo.")
 
     backend_result = compute_experimental_backend(
         coords=coords,
@@ -156,7 +104,7 @@ def experimental_variogram_3d(
     npairs = list(backend_result.npairs)
     gamma = list(backend_result.gamma)
     if max(npairs) == 0:
-        raise ValueError("No hay pares para el variograma con la configuración dada")
+        raise VariographyError("No hay pares para el variograma con la configuración dada")
 
     return ExperimentalVariogram(
         lag_centers=lag_centers,
@@ -165,7 +113,7 @@ def experimental_variogram_3d(
         metadata={
             "n_points": int(len(clean)),
             "downsampled": downsampled,
-            "direction": asdict(direction),
+            "direction": {"azimuth_deg": float(azimuth), "dip_deg": float(dip), "angular_tolerance_deg": float(angular_tolerance), "band_width": float(bandwidth), "band_height": float(bandwidth)},
             "backend": backend_result.backend_used,
             "backend_warnings": list(backend_result.warnings),
         },
@@ -174,11 +122,11 @@ def experimental_variogram_3d(
 
 def fit_variogram_model(exp: ExperimentalVariogram, model_type: str = "spherical", min_pairs: int = 5) -> VariogramModel:
     if model_type not in {"spherical", "exponential", "gaussian"}:
-        raise ValueError("Modelo no soportado")
+        raise VariographyError("Modelo no soportado")
 
     mask = [i for i, (g, p) in enumerate(zip(exp.gamma, exp.npairs)) if p >= min_pairs and math.isfinite(g)]
     if len(mask) < 2:
-        raise ValueError("No hay lags suficientes para ajustar")
+        raise VariographyError("No hay lags suficientes para ajustar")
 
     h = np.array([exp.lag_centers[i] for i in mask], dtype=float)
     g = np.array([exp.gamma[i] for i in mask], dtype=float)
@@ -201,5 +149,5 @@ def fit_variogram_model(exp: ExperimentalVariogram, model_type: str = "spherical
                     best = (err, model)
 
     if best is None:
-        raise ValueError("Fallo el ajuste del variograma")
+        raise VariographyError("Fallo el ajuste del variograma")
     return best[1]
