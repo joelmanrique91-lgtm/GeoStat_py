@@ -55,8 +55,9 @@ def compute_experimental_backend(
     max_distance: float,
     azimuth: float = 0.0,
     dip: float = 0.0,
-    ang_tol_h: float = 90.0,
-    ang_tol_v: float = 90.0,
+    angular_tolerance: float | None = None,
+    ang_tol_h: float | None = None,
+    ang_tol_v: float | None = None,
     band_width: float = 0.0,
     band_height: float = 0.0,
     lag_tolerance: float | None = None,
@@ -64,11 +65,12 @@ def compute_experimental_backend(
     pair_chunk_size: int = 200_000,
 ) -> VariographyBackendResult:
     warnings: list[str] = []
+    if angular_tolerance is None:
+        angular_tolerance = float(ang_tol_h if ang_tol_h is not None else 90.0)
     omnidirectional = (
         abs(float(azimuth)) < 1e-9
         and abs(float(dip)) < 1e-9
-        and float(ang_tol_h) >= 89.9
-        and float(ang_tol_v) >= 89.9
+        and float(angular_tolerance) >= 89.9
         and float(band_width) <= 1e-9
         and float(band_height) <= 1e-9
     )
@@ -107,11 +109,7 @@ def compute_experimental_backend(
     dot = np.abs((dx * ux + dy * uy + dz * uz) / np.maximum(d, 1e-12))
     dot = np.clip(dot, -1.0, 1.0)
     ang = np.degrees(np.arccos(dot))
-    valid &= ang <= float(ang_tol_h)
-    horizontal = np.sqrt(dx * dx + dy * dy)
-    pair_dip = np.degrees(np.arctan2(dz, horizontal))
-    dip_diff = np.minimum(np.abs(pair_dip - float(dip)), np.abs(-pair_dip - float(dip)))
-    valid &= dip_diff <= float(ang_tol_v)
+    valid &= ang <= float(angular_tolerance)
     if float(band_width) > 0.0:
         proj = dx * ux + dy * uy + dz * uz
         perp = np.sqrt(np.maximum(0.0, d * d - proj * proj))
