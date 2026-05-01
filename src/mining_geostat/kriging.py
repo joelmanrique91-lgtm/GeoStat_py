@@ -147,6 +147,18 @@ def simple_kriging(
     return KrigingResult(estimate=estimate, variance=max(0.0, variance), n_used=n, weights=w.tolist(), backend_used="numpy", solver_path=solver_path, jitter_used=jitter_used, condition_number=condition_number)
 
 
+def _adaptive_discretization(block_size_xyz: tuple[float, float, float], discretization: tuple[int, int, int]) -> tuple[int, int, int]:
+    sx, sy, sz = block_size_xyz
+    nx, ny, nz = discretization
+    vol = max(sx * sy * sz, 1.0)
+    max_nodes = 64 if vol > 5_000 else 125
+    cur = max(1, nx) * max(1, ny) * max(1, nz)
+    if cur <= max_nodes:
+        return max(1, nx), max(1, ny), max(1, nz)
+    scale = (max_nodes / cur) ** (1.0 / 3.0)
+    return max(1, int(nx * scale)), max(1, int(ny * scale)), max(1, int(nz * scale))
+
+
 def block_kriging(
     samples_xyz: np.ndarray,
     samples_val: np.ndarray,
@@ -156,7 +168,7 @@ def block_kriging(
     block_size_xyz: tuple[float, float, float] = (10.0, 10.0, 5.0),
     discretization: tuple[int, int, int] = (2, 2, 2),
 ) -> KrigingResult:
-    nx, ny, nz = discretization
+    nx, ny, nz = _adaptive_discretization(block_size_xyz, discretization)
     sx, sy, sz = block_size_xyz
     xs = np.linspace(-sx / 2, sx / 2, nx)
     ys = np.linspace(-sy / 2, sy / 2, ny)
